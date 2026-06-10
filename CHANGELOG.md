@@ -1,4 +1,14 @@
-﻿## v0.3.20 — винесення ZIP export у модуль
+﻿## v0.3.21 — винесення Email export у модуль
+
+- Винесено Email export у `src\54-Export-Email.ps1`.
+- Додано функцію `Send-BravoEmailReport`.
+- Передано `EmailTo`, `EmailFrom` і `SmtpServer` як явні параметри export-функції.
+- Збережено формування SMTP-сервера за замовчуванням через `USERDNSDOMAIN`.
+- Збережено формування тіла листа з основними параметрами звіту.
+- Збережено вкладення з `Report.GeneratedFiles`, окрім ZIP-архіву.
+- Оновлено `src\90-Main.ps1`: inline-блок `# Email` замінено на виклик `Send-BravoEmailReport`.
+- Перевірено build, parser check для `dist`, Quick no Email, Deep CSV ZIP no Email, `Export.Email errors=0`, `CollectionErrors=0` та `git diff --check`.
+## v0.3.20 — винесення ZIP export у модуль
 
 - Винесено ZIP export у `src\53-Export-Zip.ps1`.
 - Додано функцію `Export-BravoZipReport`.
