@@ -1,3 +1,13 @@
+﻿## 0.3.0 - Unreleased
+
+### Додано
+- Додано перший модуль Deep Inventory: Storage Deep Audit.
+- Додано розширений збір даних про логічні диски, томи, фізичні диски, розділи, BitLocker, shadow copies, storage pools, storage subsystems, reliability counters та SMART PredictFailure.
+- Додано JSON-секцію Hardware.Disks.Deep для профілів Deep та Forensic.
+
+### Змінено
+- Оновлено ScriptVersion та SchemaVersion до 0.3.0.
+
 # Журнал змін
 
 ## 0.2.0 — 2026-06-10

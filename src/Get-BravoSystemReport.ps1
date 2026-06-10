@@ -40,9 +40,278 @@ param(
     [string]$SmtpServer = ''
 )
 
+
+# --- BRAVO v0.3.0 Storage Deep Audit ---
+function Convert-BravoBytesToGB {
+    param([Parameter(Mandatory = $false)]$Bytes)
+
+    if ($null -eq $Bytes -or $Bytes -eq '') {
+        return $null
+    }
+
+    try {
+        return [Math]::Round(([double]$Bytes / 1GB), 2)
+    } catch {
+        return $null
+    }
+}
+
+function Get-BravoStorageDeepAudit {
+    $storage = [ordered]@{
+        CollectedAt          = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        LogicalDisks         = @()
+        Volumes              = @()
+        Disks                = @()
+        Partitions           = @()
+        PhysicalDisks        = @()
+        BitLocker            = @()
+        ShadowCopies         = @()
+        StoragePools         = @()
+        StorageSubsystems    = @()
+        ReliabilityCounters  = @()
+        SmartPredictFailures = @()
+    }
+
+    try {
+        $logicalDisks = Get-AuditObject -ClassName 'Win32_LogicalDisk' -Filter 'DriveType=3'
+        foreach ($disk in $logicalDisks) {
+            $freePercent = if ($disk.Size -gt 0) { [Math]::Round(($disk.FreeSpace / $disk.Size) * 100, 2) } else { $null }
+
+            $storage.LogicalDisks += [PSCustomObject]@{
+                DeviceID     = $disk.DeviceID
+                VolumeName   = $disk.VolumeName
+                FileSystem   = $disk.FileSystem
+                TotalGB      = Convert-BravoBytesToGB $disk.Size
+                FreeGB       = Convert-BravoBytesToGB $disk.FreeSpace
+                FreePercent  = $freePercent
+                Compressed   = $disk.Compressed
+                ProviderName = $disk.ProviderName
+            }
+        }
+    } catch {
+        Add-AuditError -Section 'StorageDeep.LogicalDisks' -Message $_.Exception.Message
+    }
+
+    if (Get-Command Get-Volume -ErrorAction SilentlyContinue) {
+        try {
+            foreach ($volume in (Get-Volume -ErrorAction Stop)) {
+                $freePercent = if ($volume.Size -gt 0) { [Math]::Round(($volume.SizeRemaining / $volume.Size) * 100, 2) } else { $null }
+
+                $storage.Volumes += [PSCustomObject]@{
+                    DriveLetter       = $volume.DriveLetter
+                    FileSystemLabel   = $volume.FileSystemLabel
+                    FileSystem        = $volume.FileSystem
+                    DriveType         = [string]$volume.DriveType
+                    HealthStatus      = [string]$volume.HealthStatus
+                    OperationalStatus = ($volume.OperationalStatus -join ', ')
+                    SizeGB            = Convert-BravoBytesToGB $volume.Size
+                    FreeGB            = Convert-BravoBytesToGB $volume.SizeRemaining
+                    FreePercent       = $freePercent
+                }
+
+                if ($volume.HealthStatus -and [string]$volume.HealthStatus -notin @('Healthy','Unknown')) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "Том $($volume.DriveLetter): HealthStatus=$($volume.HealthStatus)" -Recommendation 'Перевірте стан тому через Get-Volume, Event Viewer та інструменти виробника диска.'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.GetVolume' -Message $_.Exception.Message
+        }
+    }
+
+    if (Get-Command Get-Disk -ErrorAction SilentlyContinue) {
+        try {
+            foreach ($disk in (Get-Disk -ErrorAction Stop)) {
+                $storage.Disks += [PSCustomObject]@{
+                    Number            = $disk.Number
+                    FriendlyName      = $disk.FriendlyName
+                    SerialNumber      = $disk.SerialNumber
+                    BusType           = [string]$disk.BusType
+                    MediaType         = [string]$disk.MediaType
+                    PartitionStyle    = [string]$disk.PartitionStyle
+                    OperationalStatus = ($disk.OperationalStatus -join ', ')
+                    HealthStatus      = [string]$disk.HealthStatus
+                    IsBoot            = $disk.IsBoot
+                    IsSystem          = $disk.IsSystem
+                    IsOffline         = $disk.IsOffline
+                    IsReadOnly        = $disk.IsReadOnly
+                    SizeGB            = Convert-BravoBytesToGB $disk.Size
+                }
+
+                if ($disk.IsOffline -or $disk.IsReadOnly) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "Disk $($disk.Number): IsOffline=$($disk.IsOffline), IsReadOnly=$($disk.IsReadOnly)" -Recommendation 'Перевірте Get-Disk, diskpart, SAN policy, стан носія та контролер.'
+                }
+
+                if ($disk.HealthStatus -and [string]$disk.HealthStatus -notin @('Healthy','Unknown')) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "Disk $($disk.Number): HealthStatus=$($disk.HealthStatus)" -Recommendation 'Негайно перевірте SMART, журнали та резервні копії.'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.GetDisk' -Message $_.Exception.Message
+        }
+    }
+
+    if (Get-Command Get-Partition -ErrorAction SilentlyContinue) {
+        try {
+            foreach ($partition in (Get-Partition -ErrorAction Stop)) {
+                $storage.Partitions += [PSCustomObject]@{
+                    DiskNumber      = $partition.DiskNumber
+                    PartitionNumber = $partition.PartitionNumber
+                    DriveLetter     = $partition.DriveLetter
+                    Type            = [string]$partition.Type
+                    GptType         = $partition.GptType
+                    MbrType         = $partition.MbrType
+                    SizeGB          = Convert-BravoBytesToGB $partition.Size
+                    OffsetGB        = Convert-BravoBytesToGB $partition.Offset
+                    IsActive        = $partition.IsActive
+                    IsBoot          = $partition.IsBoot
+                    IsSystem        = $partition.IsSystem
+                    IsReadOnly      = $partition.IsReadOnly
+                    IsOffline       = $partition.IsOffline
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.GetPartition' -Message $_.Exception.Message
+        }
+    }
+
+    if (Get-Command Get-PhysicalDisk -ErrorAction SilentlyContinue) {
+        try {
+            foreach ($physicalDisk in (Get-PhysicalDisk -ErrorAction Stop)) {
+                $storage.PhysicalDisks += [PSCustomObject]@{
+                    FriendlyName      = $physicalDisk.FriendlyName
+                    SerialNumber      = $physicalDisk.SerialNumber
+                    MediaType         = [string]$physicalDisk.MediaType
+                    BusType           = [string]$physicalDisk.BusType
+                    HealthStatus      = [string]$physicalDisk.HealthStatus
+                    OperationalStatus = ($physicalDisk.OperationalStatus -join ', ')
+                    Usage             = [string]$physicalDisk.Usage
+                    SizeGB            = Convert-BravoBytesToGB $physicalDisk.Size
+                    CannotPool        = $physicalDisk.CannotPool
+                }
+
+                if ($physicalDisk.HealthStatus -and [string]$physicalDisk.HealthStatus -notin @('Healthy','Unknown')) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "PhysicalDisk $($physicalDisk.FriendlyName): HealthStatus=$($physicalDisk.HealthStatus)" -Recommendation 'Перевірте SMART, резервні копії та заміну носія.'
+                }
+
+                if (Get-Command Get-StorageReliabilityCounter -ErrorAction SilentlyContinue) {
+                    try {
+                        $counter = Get-StorageReliabilityCounter -PhysicalDisk $physicalDisk -ErrorAction Stop
+                        $readErrors = [int64]($counter.ReadErrorsTotal)
+                        $writeErrors = [int64]($counter.WriteErrorsTotal)
+
+                        $storage.ReliabilityCounters += [PSCustomObject]@{
+                            FriendlyName     = $physicalDisk.FriendlyName
+                            Temperature      = $counter.Temperature
+                            Wear             = $counter.Wear
+                            PowerOnHours     = $counter.PowerOnHours
+                            ReadErrorsTotal  = $readErrors
+                            WriteErrorsTotal = $writeErrors
+                        }
+
+                        if (($readErrors + $writeErrors) -gt 0) {
+                            Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "PhysicalDisk $($physicalDisk.FriendlyName): Read/Write errors $readErrors/$writeErrors" -Recommendation 'Перевірте диск, кабелі, контролер і резервні копії.'
+                        }
+                    } catch {
+                        Add-AuditError -Section 'StorageDeep.ReliabilityCounter' -Message $_.Exception.Message
+                    }
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.PhysicalDisk' -Message $_.Exception.Message
+        }
+    }
+
+    if (Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue) {
+        try {
+            foreach ($bitLockerVolume in (Get-BitLockerVolume -ErrorAction Stop)) {
+                $storage.BitLocker += [PSCustomObject]@{
+                    MountPoint           = $bitLockerVolume.MountPoint
+                    VolumeStatus         = [string]$bitLockerVolume.VolumeStatus
+                    ProtectionStatus     = [string]$bitLockerVolume.ProtectionStatus
+                    EncryptionMethod     = [string]$bitLockerVolume.EncryptionMethod
+                    EncryptionPercentage = $bitLockerVolume.EncryptionPercentage
+                    LockStatus           = [string]$bitLockerVolume.LockStatus
+                    KeyProtectorCount    = @($bitLockerVolume.KeyProtector).Count
+                }
+
+                if ($bitLockerVolume.MountPoint -eq 'C:' -and [string]$bitLockerVolume.ProtectionStatus -ne 'On') {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Security.Storage' -Message 'BitLocker protection для C: не увімкнено або не активний.' -Recommendation 'Оцініть потребу в BitLocker для системного диска.'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.BitLocker' -Message $_.Exception.Message
+        }
+    }
+
+    try {
+        foreach ($shadowCopy in (Get-AuditObject -ClassName 'Win32_ShadowCopy')) {
+            $storage.ShadowCopies += [PSCustomObject]@{
+                ID           = $shadowCopy.ID
+                VolumeName   = $shadowCopy.VolumeName
+                DeviceObject = $shadowCopy.DeviceObject
+                State        = $shadowCopy.State
+            }
+        }
+    } catch {
+        Add-AuditError -Section 'StorageDeep.ShadowCopies' -Message $_.Exception.Message
+    }
+
+    if (Get-Command Get-StoragePool -ErrorAction SilentlyContinue) {
+        try {
+            foreach ($pool in (Get-StoragePool -ErrorAction Stop)) {
+                $storage.StoragePools += [PSCustomObject]@{
+                    FriendlyName      = $pool.FriendlyName
+                    HealthStatus      = [string]$pool.HealthStatus
+                    OperationalStatus = ($pool.OperationalStatus -join ', ')
+                    SizeGB            = Convert-BravoBytesToGB $pool.Size
+                    AllocatedSizeGB   = Convert-BravoBytesToGB $pool.AllocatedSize
+                    IsPrimordial      = $pool.IsPrimordial
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.StoragePools' -Message $_.Exception.Message
+        }
+    }
+
+    if (Get-Command Get-StorageSubSystem -ErrorAction SilentlyContinue) {
+        try {
+            foreach ($subsystem in (Get-StorageSubSystem -ErrorAction Stop)) {
+                $storage.StorageSubsystems += [PSCustomObject]@{
+                    FriendlyName      = $subsystem.FriendlyName
+                    HealthStatus      = [string]$subsystem.HealthStatus
+                    OperationalStatus = ($subsystem.OperationalStatus -join ', ')
+                    Manufacturer      = $subsystem.Manufacturer
+                    Model             = $subsystem.Model
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.StorageSubsystems' -Message $_.Exception.Message
+        }
+    }
+
+    try {
+        $smartPredict = Get-CimInstance -Namespace 'root\wmi' -ClassName 'MSStorageDriver_FailurePredictStatus' -ErrorAction Stop
+        foreach ($smart in $smartPredict) {
+            $storage.SmartPredictFailures += [PSCustomObject]@{
+                InstanceName   = $smart.InstanceName
+                PredictFailure = $smart.PredictFailure
+                Reason         = $smart.Reason
+            }
+
+            if ($smart.PredictFailure -eq $true) {
+                Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage.SMART' -Message "SMART PredictFailure=True для $($smart.InstanceName)" -Recommendation 'Негайно перевірте диск і резервні копії.'
+            }
+        }
+    } catch {
+        Add-AuditError -Section 'StorageDeep.SMARTPredict' -Message $_.Exception.Message
+    }
+
+    return $storage
+}
+
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = '0.2.1'
+$ScriptVersion = '0.3.0'
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
@@ -280,7 +549,7 @@ Write-Host ''
 Set-Location $ScriptDirectory -ErrorAction SilentlyContinue
 
 $script:Report = [ordered]@{
-    SchemaVersion = '0.2.1'
+    SchemaVersion = '0.3.0'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -489,6 +758,25 @@ try {
     Write-Host "  $IconError Помилка збору дисків: $($_.Exception.Message)" -ForegroundColor Red
 }
 
+
+# --- BRAVO v0.3.0 Storage Deep Audit ---
+if ($Profile -in @('Deep','Forensic')) {
+    try {
+        Write-Host "  [INFO] Storage Deep Audit: збір розширених даних..."
+
+        if ($script:Report.Hardware.Disks -is [System.Collections.IDictionary]) {
+            $script:Report.Hardware.Disks['Deep'] = Get-BravoStorageDeepAudit
+        } else {
+            $script:Report.Hardware.Disks | Add-Member -MemberType NoteProperty -Name 'Deep' -Value (Get-BravoStorageDeepAudit) -Force
+        }
+
+        $deepStorage = $script:Report.Hardware.Disks.Deep
+        Write-Host ("  [OK] Storage Deep Audit: disks={0}, volumes={1}, partitions={2}, bitlocker={3}, smart={4}" -f @($deepStorage.Disks).Count, @($deepStorage.Volumes).Count, @($deepStorage.Partitions).Count, @($deepStorage.BitLocker).Count, @($deepStorage.SmartPredictFailures).Count)
+    } catch {
+        Add-AuditError -Section 'StorageDeep' -Message $_.Exception.Message
+        Write-Host "  [ERROR] Storage Deep Audit: $($_.Exception.Message)"
+    }
+}
 # --- Мережа ---
 try {
     $script:Report.Network.General.Hostname = $env:COMPUTERNAME
