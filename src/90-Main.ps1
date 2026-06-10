@@ -1,4 +1,9 @@
-﻿<#
+﻿# MODULE: 90-Main.ps1
+# Основний execution flow BRAVO SYSTEM REPORT.
+# Param-блок винесено у src\05-Params.ps1.
+# Helper-функції винесено у src\10-Core.ps1.
+
+<#
 .SYNOPSIS
     BRAVO SYSTEM REPORT — детальний аудит Windows-машини.
 .DESCRIPTION
@@ -16,31 +21,6 @@
     Рекомендована версія: Windows PowerShell 5.1+.
     Для частини даних потрібні права адміністратора.
 #>
-
-[CmdletBinding()]
-param(
-    [ValidateSet('Quick','Full','Deep','Forensic')]
-    [string]$Profile = 'Full',
-
-    [string]$OutputPath = '',
-
-    [switch]$JSONOnly,
-    [switch]$CSV,
-    [switch]$Zip,
-    [switch]$NoEmoji,
-    [switch]$NoElevate,
-    [switch]$NoPause,
-    [switch]$NoOpenFolder,
-    [switch]$SkipElevation,
-
-    [int]$EventLogDays = 0,
-
-    [string]$EmailTo,
-    [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
-    [string]$SmtpServer = ''
-)
-
-
 # --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
 function Convert-BravoBytesToGB {
     param([Parameter(Mandatory = $false)]$Bytes)
