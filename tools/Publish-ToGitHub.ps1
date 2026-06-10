@@ -1,8 +1,10 @@
-<#
+﻿<#
 .SYNOPSIS
-    Створює приватний GitHub-репозиторій BRAVO_SYSTEM_REPORT і пушить поточний проект.
+    Publishes the current project to GitHub.
+
 .DESCRIPTION
-    Потребує встановлений GitHub CLI (`gh`) та авторизацію `gh auth login`.
+    Requires Git, GitHub CLI and active gh authentication.
+    This helper intentionally uses ASCII-only console output to avoid encoding issues on legacy Windows consoles.
 #>
 
 [CmdletBinding()]
@@ -19,7 +21,7 @@ function Write-Info {
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
 }
 
-function Write-ErrorAndExit {
+function Write-Fail {
     param([string]$Message)
     Write-Host "[ERROR] $Message" -ForegroundColor Red
     exit 1
@@ -28,36 +30,45 @@ function Write-ErrorAndExit {
 try { Clear-Host } catch {}
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Write-ErrorAndExit 'Git не знайдено в PATH.'
+    Write-Fail 'Git was not found in PATH.'
 }
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-    Write-ErrorAndExit 'GitHub CLI не знайдено в PATH. Встановіть gh або створіть репозиторій вручну на GitHub.'
+    Write-Fail 'GitHub CLI was not found in PATH.'
 }
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 if (-not (Test-Path '.git')) {
-    Write-Info 'Ініціалізація локального Git-репозиторію...'
+    Write-Info 'Initializing local Git repository...'
     git init
 }
 
 git branch -M main
 git add .
 
-$hasChanges = git status --porcelain
-if ($hasChanges) {
-    Write-Info 'Створення першого коміту...'
+$Changes = git status --porcelain
+
+if ($Changes) {
+    Write-Info 'Creating initial commit...'
     git commit -m 'Ініціалізовано проект BRAVO SYSTEM REPORT'
 } else {
-    Write-Info 'Немає нових змін для коміту.'
+    Write-Info 'No changes to commit.'
 }
 
-$visibility = if ($Public) { '--public' } else { '--private' }
-$fullName = "$Owner/$RepoName"
+$Visibility = if ($Public) { '--public' } else { '--private' }
+$FullName = "$Owner/$RepoName"
 
-Write-Info "Створення GitHub-репозиторію $fullName..."
-gh repo create $fullName $visibility --source . --remote origin --push
+$ExistingRemote = git remote get-url origin 2>$null
 
-Write-Info 'Готово.'
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($ExistingRemote)) {
+    Write-Info "Creating GitHub repository $FullName..."
+    gh repo create $FullName $Visibility --source . --remote origin --push
+} else {
+    Write-Info "Remote origin already exists: $ExistingRemote"
+    Write-Info 'Pushing current branch...'
+    git push -u origin HEAD
+}
+
+Write-Info 'Done.'
