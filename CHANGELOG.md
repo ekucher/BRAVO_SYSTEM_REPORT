@@ -1,4 +1,13 @@
-﻿## v0.3.17 — винесення JSON export у модуль
+﻿## v0.3.18 — винесення HTML export у модуль
+
+- Винесено HTML export у `src\51-Export-Html.ps1`.
+- Додано функцію `Export-BravoHtmlReport`.
+- Передано `OutputDir`, `BaseFileName`, `JSONOnly`, `EventLogDays`, `Profile` і `ScriptVersion` як явні параметри export-функції.
+- Збережено формування HTML-звіту, `Storage Critical Findings`, `Storage Deep`, `Findings`, `CollectionErrors`, стилі та footer.
+- Збережено поведінку `JSONOnly`: HTML-звіт не створюється.
+- Оновлено `src\90-Main.ps1`: великий inline-блок `# HTML` замінено на виклик `Export-BravoHtmlReport`.
+- Перевірено build, parser check для `dist`, Quick `JSONOnly`, Quick HTML, Deep HTML, створення JSON/HTML, відсутність HTML у `JSONOnly`, `CollectionErrors=0` та `git diff --check`.
+## v0.3.17 — винесення JSON export у модуль
 
 - Винесено експорт JSON-звіту у `src\50-Export-Json.ps1`.
 - Додано функцію `Export-BravoJsonReport`.
