@@ -1,4 +1,15 @@
-﻿## v0.3.12 — винесення Users collector-а у модуль
+﻿## v0.3.13 — винесення collector-а процесів і служб у модуль
+
+- Винесено збір інформації про процеси та служби у `src\36-Collectors-ProcessesServices.ps1`.
+- Додано функцію `Get-BravoProcessesServicesAudit`.
+- Перенесено збір процесів через `Get-Process` з `src\90-Main.ps1`.
+- Збережено логіку `TopMemory` для профілів `Full`, `Deep` та `Forensic`.
+- Перенесено збір служб через `Get-Service`.
+- Збережено логіку пошуку автоматичних служб, які не запущені, через `Win32_Service`.
+- Збережено finding для автоматичних служб, які мають бути запущені, але зупинені.
+- Оновлено `src\90-Main.ps1`: inline-блоки процесів і служб замінено на виклик `Get-BravoProcessesServicesAudit`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, Processes, TopMemory, Services, AutomaticStopped та `CollectionErrors=0`.
+## v0.3.12 — винесення Users collector-а у модуль
 
 - Винесено збір інформації про локальних адміністраторів у `src\35-Collectors-Users.ps1`.
 - Перенесено helper `Get-LocalAdministratorsSafe` з `src\90-Main.ps1` у Users collector.
