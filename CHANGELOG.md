@@ -1,4 +1,12 @@
-﻿## v0.3.11 — винесення Security collector-а у модуль
+﻿## v0.3.12 — винесення Users collector-а у модуль
+
+- Винесено збір інформації про локальних адміністраторів у `src\35-Collectors-Users.ps1`.
+- Перенесено helper `Get-LocalAdministratorsSafe` з `src\90-Main.ps1` у Users collector.
+- Додано функцію `Get-BravoUsersAudit`.
+- Оновлено `src\90-Main.ps1`: inline-блок користувачів замінено на виклик `Get-BravoUsersAudit`.
+- Збережено логіку отримання локальних адміністраторів через `Get-LocalGroupMember` з fallback на `net localgroup`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, LocalAdmins та `CollectionErrors=0`.
+## v0.3.11 — винесення Security collector-а у модуль
 
 - Винесено збір інформації про безпеку у `src\34-Collectors-Security.ps1`.
 - Додано функцію `Get-BravoSecurityAudit`.
