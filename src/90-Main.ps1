@@ -825,6 +825,31 @@ if ($Report.Network) {
 
 Write-Host "  [OK] IP: $bravoIPv4Text" -ForegroundColor Green
 # BRAVO IP ORDER OUTPUT END
+
+
+# BRAVO PUBLIC IP OUTPUT START
+$bravoPublicIPv4Info = Get-BravoPublicIPv4Address
+
+if ($Report.Network) {
+    if ($Report.Network -is [System.Collections.IDictionary]) {
+        $Report.Network["PublicIPv4"] = $bravoPublicIPv4Info.IPv4
+        $Report.Network["PublicIPv4Provider"] = $bravoPublicIPv4Info.Provider
+        $Report.Network["PublicIPv4CheckedAt"] = $bravoPublicIPv4Info.CheckedAt
+        $Report.Network["PublicIPv4Status"] = $bravoPublicIPv4Info.Status
+    } else {
+        $Report.Network | Add-Member -NotePropertyName "PublicIPv4" -NotePropertyValue $bravoPublicIPv4Info.IPv4 -Force
+        $Report.Network | Add-Member -NotePropertyName "PublicIPv4Provider" -NotePropertyValue $bravoPublicIPv4Info.Provider -Force
+        $Report.Network | Add-Member -NotePropertyName "PublicIPv4CheckedAt" -NotePropertyValue $bravoPublicIPv4Info.CheckedAt -Force
+        $Report.Network | Add-Member -NotePropertyName "PublicIPv4Status" -NotePropertyValue $bravoPublicIPv4Info.Status -Force
+    }
+}
+
+if ($bravoPublicIPv4Info.Status -eq "Detected") {
+    Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+} else {
+    Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
+}
+# BRAVO PUBLIC IP OUTPUT END
 } catch {
     Add-AuditError -Section 'Network' -Message $_.Exception.Message
     Write-Host "  $IconError Помилка мережевих даних: $($_.Exception.Message)" -ForegroundColor Red

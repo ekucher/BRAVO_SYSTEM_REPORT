@@ -236,3 +236,54 @@ function Get-BravoAllUsableIPv4AddressList {
 
     return @($result)
 }
+
+function Get-BravoPublicIPv4Address {
+    [CmdletBinding()]
+    param(
+        [int]$TimeoutSec = 5
+    )
+
+    $providers = @(
+        [pscustomobject]@{
+            Name = "ipify"
+            Uri  = "https://api.ipify.org"
+        },
+        [pscustomobject]@{
+            Name = "AmazonCheckIp"
+            Uri  = "https://checkip.amazonaws.com"
+        },
+        [pscustomobject]@{
+            Name = "ifconfig.me"
+            Uri  = "https://ifconfig.me/ip"
+        }
+    )
+
+    foreach ($provider in $providers) {
+        try {
+            $response = Invoke-RestMethod -Uri $provider.Uri -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+            $address = ([string]$response).Trim()
+
+            if (Test-BravoUsableIPv4Address -Address $address) {
+                return [pscustomobject]@{
+                    IPv4        = $address
+                    Provider    = $provider.Name
+                    Uri         = $provider.Uri
+                    CheckedAt   = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                    Status      = "Detected"
+                    Error       = ""
+                }
+            }
+        } catch {
+            continue
+        }
+    }
+
+    return [pscustomobject]@{
+        IPv4        = $null
+        Provider    = ""
+        Uri         = ""
+        CheckedAt   = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        Status      = "Unavailable"
+        Error       = "Public IPv4 не визначено через доступні HTTPS endpoints."
+    }
+}
