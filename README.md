@@ -112,3 +112,14 @@ $ErrorActionPreference = "Stop"
 - Disks.
 
 HTML-таблиці та додаткові storage-підсекції додаються окремими PR після стабілізації JSON-структури.
+## BAT-запускачі
+
+У корені проекту доступні BAT-файли для запуску BRAVO SYSTEM REPORT без ручного введення PowerShell-команд:
+
+- BRAVO-SystemReport-Quick.bat — швидкий аудит;
+- BRAVO-SystemReport-Full.bat — повний базовий аудит;
+- BRAVO-SystemReport-Deep.bat — глибокий аудит;
+- BRAVO-SystemReport-Forensic.bat — максимально детальний аудит;
+- BRAVO-SystemReport-Launcher.bat — інтерактивне меню вибору режиму.
+
+Усі BAT-файли запускають Get-BravoSystemReport.ps1, зберігають звіти у папку eports поруч із проектом і залишають консоль відкритою після завершення.
