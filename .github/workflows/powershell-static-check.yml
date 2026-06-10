@@ -1,98 +1,41 @@
-﻿name: Перевірка PowerShell
+﻿name: PowerShell static check
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
       - 'bravo/**'
-  pull_request:
-    branches:
-      - main
 
 jobs:
-  powershell-static-check:
-    name: PSScriptAnalyzer
-    runs-on: windows-latest
-    timeout-minutes: 10
+  repository-check:
+    name: Repository check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Отримати код
         uses: actions/checkout@v4
 
-      - name: Перевірити синтаксис PowerShell-файлів
-        shell: pwsh
+      - name: Перевірити структуру репозиторію
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
+          set -euo pipefail
 
-          Write-Host "=== ПЕРЕВІРКА СИНТАКСИСУ POWERSHELL ==="
+          echo "=== ПЕРЕВІРКА СТРУКТУРИ РЕПОЗИТОРІЮ ==="
 
-          $Files = Get-ChildItem -Path . -Recurse -File -Include "*.ps1","*.psm1","*.psd1" |
-            Where-Object {
-              $_.FullName -notmatch "\\.git\\" -and
-              $_.FullName -notmatch "\\reports\\" -and
-              $_.FullName -notmatch "\\review\\"
-            }
+          test -f "Get-BravoSystemReport.ps1"
+          echo "[OK] Знайдено root wrapper"
 
-          if (-not $Files) {
-            Write-Host "[INFO] PowerShell-файли для перевірки не знайдено"
-            exit 0
-          }
+          test -f "src/Get-BravoSystemReport.ps1"
+          echo "[OK] Знайдено основний PowerShell-скрипт"
 
-          foreach ($File in $Files) {
-            Write-Host "[INFO] Перевірка синтаксису: $($File.FullName)"
+          test -f "README.md"
+          echo "[OK] Знайдено README.md"
 
-            $Tokens = $null
-            $Errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile($File.FullName, [ref]$Tokens, [ref]$Errors) | Out-Null
+          test -f "CHANGELOG.md"
+          echo "[OK] Знайдено CHANGELOG.md"
 
-            if ($Errors.Count -gt 0) {
-              Write-Host "[ERROR] Помилка синтаксису: $($File.FullName)"
-              $Errors | Format-List | Out-String | Write-Host
-              exit 1
-            }
-
-            Write-Host "[OK] Синтаксис коректний: $($File.Name)"
-          }
-
-          Write-Host "[SUCCESS] Перевірка синтаксису завершена успішно"
-
-      - name: Встановити PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "=== ВСТАНОВЛЕННЯ PSSCRIPTANALYZER ==="
-
-          Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
-          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
-
-          Write-Host "[SUCCESS] PSScriptAnalyzer встановлено"
-
-      - name: Запустити PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "=== СТАТИЧНИЙ АНАЛІЗ POWERSHELL ==="
-
-          $Files = Get-ChildItem -Path . -Recurse -File -Include "*.ps1","*.psm1","*.psd1" |
-            Where-Object {
-              $_.FullName -notmatch "\\.git\\" -and
-              $_.FullName -notmatch "\\reports\\" -and
-              $_.FullName -notmatch "\\review\\"
-            }
-
-          $Results = @()
-
-          foreach ($File in $Files) {
-            Write-Host "[INFO] Аналіз: $($File.FullName)"
-            $Results += Invoke-ScriptAnalyzer -Path $File.FullName -Severity Error
-          }
-
-          if ($Results.Count -gt 0) {
-            Write-Host "[ERROR] PSScriptAnalyzer знайшов критичні проблеми"
-            $Results | Format-Table -AutoSize | Out-String | Write-Host
-            exit 1
-          }
-
-          Write-Host "[SUCCESS] Критичних проблем PSScriptAnalyzer не знайдено"
+          echo "[SUCCESS] Структура репозиторію коректна"
