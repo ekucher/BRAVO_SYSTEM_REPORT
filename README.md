@@ -1,99 +1,256 @@
-﻿# BRAVO SYSTEM REPORT
+# BRAVO SYSTEM REPORT
 
-**BRAVO SYSTEM REPORT** — PowerShell-проект для збору детального технічного звіту про Windows-машину або сервер.
+BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого, повного, глибокого та forensic-аудиту Windows-машини.
 
-Початковою основою проекту є скрипт `Get-SystemAudit.ps1`, перенесений у `src/Get-BravoSystemReport.ps1`. Далі проект буде розширюватися до повноцінного адміністративного діагностичного пакета з профілями аудиту, HTML/JSON/CSV/Markdown-звітами, health score, security findings та рекомендаціями.
+Проєкт орієнтований на локальну діагностику Windows-серверів і робочих станцій з формуванням JSON/HTML/CSV/ZIP-звітів.
 
 ## Призначення
 
-Проект має збирати структурований звіт про:
+Скрипт збирає структуровану інформацію про:
 
-- операційну систему, версію, build, uptime, PowerShell, .NET;
-- апаратне забезпечення: CPU, RAM, BIOS/UEFI, TPM, Secure Boot, GPU;
-- диски, томи, SMART/health, BitLocker, pagefile, VSS;
-- мережеві адаптери, IP, DNS, шлюзи, маршрути, listening ports;
-- локальних користувачів, адміністраторів, UAC, RDP, WinRM, SMB, TLS;
-- процеси, служби, автозапуск, scheduled tasks;
-- оновлення Windows, pending reboot, помилки Windows Update;
-- журнали подій System/Application/Security/Setup та профільні журнали Windows;
-- встановлене програмне забезпечення;
-- підсумкові Critical/Warning/Info findings.
-
-## Швидкий запуск
-
-Запуск із кореня репозиторію:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Get-BravoSystemReport.ps1 -Profile Full -Zip -CSV
-```
-
-Або напряму:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Get-BravoSystemReport.ps1 -Profile Full -Zip -CSV
-```
-
-Для запуску без паузи в кінці:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Get-BravoSystemReport.ps1 -Profile Full -Zip -CSV -NoPause
-```
+- операційну систему;
+- PowerShell і .NET;
+- hardware: CPU, RAM, диски;
+- Storage Deep Audit;
+- Storage Critical Findings;
+- мережу;
+- локальних адміністраторів;
+- безпеку: UAC, RDP, антивірус, firewall;
+- процеси та служби;
+- події Windows Event Log;
+- встановлене ПЗ;
+- health score, findings і collection errors.
 
 ## Поточний статус
 
-Поточна версія — **0.2.0 Stabilization**. Базовий скрипт уже підготовлено до подальшого розширення:
+Поточна стабільна версія: **v0.3.4**.
 
-- додано профілі `Quick`, `Full`, `Deep`, `Forensic`;
-- додано `-OutputPath`, `-NoOpenFolder`, `-EventLogDays`;
-- виправлено конфлікти змінних `$cpu` / `$disk`;
-- додано `Health.Score`, `Health.Status`, `Health.Findings`;
-- додано `CollectionErrors` для контрольованої фіксації помилок збору даних;
-- уточнено базову сумісність: Windows PowerShell 5.1+;
-- виправлено helper `tools/Publish-ToGitHub.ps1` для уникнення проблем із кодуванням.
+Стабільні етапи:
 
-Наступний етап — **v0.3.0 Deep Inventory**: розширення hardware/storage/network/security-блоків.
+- **v0.3.0** — Storage Deep Audit skeleton;
+- **v0.3.1** — BAT-запускачі режимів аудиту;
+- **v0.3.2** — Storage Critical Findings;
+- **v0.3.3** — HTML-таблиці Storage Deep / Storage Critical Findings;
+- **v0.3.4** — виправлено BAT `--nopause`;
+- **v0.3.5** — актуалізація README / документації.
+
+## Швидкий запуск
+
+### PowerShell
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Get-BravoSystemReport.ps1 -Profile Quick -NoPause -NoOpenFolder
+```
+
+Повний запуск з CSV і ZIP:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Get-BravoSystemReport.ps1 -Profile Full -CSV -Zip -NoPause -NoOpenFolder
+```
+
+Окрема директорія для звітів:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Get-BravoSystemReport.ps1 -Profile Quick -NoPause -NoOpenFolder -OutputPath .\reports\quick-test
+```
+
+### BAT-запускачі
+
+```cmd
+BRAVO-SystemReport-Quick.bat --nopause
+BRAVO-SystemReport-Full.bat --nopause
+BRAVO-SystemReport-Deep.bat --nopause
+BRAVO-SystemReport-Forensic.bat --nopause
+```
+
+Підтримувані варіанти аргументу:
+
+```text
+--nopause
+-nopause
+/nopause
+```
+
+Якщо `--nopause` не передано, BAT-запускач після завершення залишає стандартну паузу для ручного запуску подвійним кліком.
+
+## Профілі аудиту
+
+| Профіль | Призначення |
+|---|---|
+| `Quick` | швидкий аудит основних параметрів Windows-машини |
+| `Full` | повний базовий аудит із розширеним збором |
+| `Deep` | глибокий аудит, включно зі Storage Deep Audit |
+| `Forensic` | максимально детальний режим збору для розслідування проблем |
+
+## Генеровані файли
+
+За замовчуванням звіти зберігаються у директорію:
+
+```text
+.\reports
+```
+
+Типові файли:
+
+```text
+BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.json
+BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.html
+BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.csv
+BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.zip
+```
+
+CSV і ZIP створюються при використанні відповідних параметрів `-CSV` і `-Zip`.
+
+## Storage Deep Audit
+
+Storage Deep Audit активний для профілів `Deep` і `Forensic`.
+
+JSON-секція:
+
+```text
+Hardware.Disks.Deep
+```
+
+Містить базові дані:
+
+- `LogicalDisks`;
+- `Volumes`;
+- `Disks`.
+
+HTML-звіт містить секцію **Storage Deep** з таблицею томів:
+
+- том;
+- мітка;
+- файлова система;
+- тип;
+- health status;
+- operational status;
+- size GB;
+- free GB;
+- free percent;
+- risk;
+- причина.
+
+## Storage Critical Findings
+
+Storage Critical Findings формує підсумок ризиків для томів.
+
+JSON-секція:
+
+```text
+Hardware.Disks.StorageRisk
+```
+
+Пороги:
+
+| Рівень | Умова |
+|---|---|
+| `CRITICAL` | том має менше 5% вільного місця |
+| `WARNING` | том має менше 10% вільного місця |
+| `WARNING` | системний том має менше 15% вільного місця |
+
+HTML-звіт містить секцію **Storage Critical Findings** з підсумком:
+
+- critical volumes;
+- warning volumes;
+- system warnings;
+- healthy volumes.
+
+Для візуального відображення ризиків використовуються CSS-класи:
+
+```text
+risk-critical
+risk-warning
+risk-ok
+risk-unknown
+```
+
+## BAT-запускачі
+
+Доступні BAT-файли:
+
+- `BRAVO-SystemReport-Quick.bat` — швидкий аудит;
+- `BRAVO-SystemReport-Full.bat` — повний базовий аудит;
+- `BRAVO-SystemReport-Deep.bat` — глибокий аудит;
+- `BRAVO-SystemReport-Forensic.bat` — максимально детальний аудит;
+- `BRAVO-SystemReport-Launcher.bat` — інтерактивне меню вибору режиму.
+
+BAT-запускачі `Quick`, `Full`, `Deep`, `Forensic`:
+
+- передають `-NoPause` у PowerShell-скрипт;
+- підтримують `--nopause`, `-nopause`, `/nopause` на рівні BAT;
+- повертають exit code основного PowerShell-скрипта;
+- не показують `Press any key to continue`, якщо передано `--nopause`.
+
+## GitHub Actions / Local Windows Validation
+
+У репозиторії налаштовано workflow:
+
+```text
+.github/workflows/local-windows-validation.yml
+```
+
+Workflow запускається на локальному Windows self-hosted runner:
+
+```text
+BRAVO-SYSTEM-REPORT-WIN
+```
+
+Перевірки:
+
+- `git diff --check`;
+- PowerShell parser check;
+- Quick runtime test;
+- Quick BAT test;
+- JSON validation;
+- перевірка `Profile=Quick`;
+- перевірка `CollectionErrors=0`.
+
+## Вимоги
+
+- Windows PowerShell 5.1;
+- запуск від адміністратора для повного збору даних;
+- Windows 10 / Windows 11 / Windows Server;
+- локальний доступ до WMI/CIM;
+- для частини security/network/storage-даних потрібні підвищені права.
+
+## Структура проєкту
+
+```text
+BRAVO_SYSTEM_REPORT
+├── .github/workflows/
+│   └── local-windows-validation.yml
+├── examples/
+├── patch/
+├── review/
+├── src/
+│   └── Get-BravoSystemReport.ps1
+├── tools/
+├── BRAVO-SystemReport-Quick.bat
+├── BRAVO-SystemReport-Full.bat
+├── BRAVO-SystemReport-Deep.bat
+├── BRAVO-SystemReport-Forensic.bat
+├── BRAVO-SystemReport-Launcher.bat
+├── Get-BravoSystemReport.ps1
+├── README.md
+├── CHANGELOG.md
+└── LICENSE.md
+```
 
 ## Безпека
 
-Звіти можуть містити чутливу інформацію: імена користувачів, домени, IP-адреси, MAC-адреси, серійні номери, список ПЗ, відкриті порти та локальних адміністраторів.
+Скрипт не змінює системні налаштування Windows. Він виконує аудит і формує локальні звіти.
 
-Рекомендація: тримати репозиторій приватним, а самі сформовані звіти не комітити в Git.
+Звіти можуть містити службову інформацію про машину, мережу, локальних користувачів, служби, диски та події. Перед передачею звітів третім особам потрібно перевіряти вміст JSON/HTML/CSV.
 
-## Структура проекту
+## Правила проєкту
 
-```text
-BRAVO_SYSTEM_REPORT/
-├── src/
-│   └── Get-BravoSystemReport.ps1
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── ROADMAP.md
-│   └── SECURITY.md
-├── examples/
-│   └── README.md
-├── tools/
-│   └── Publish-ToGitHub.ps1
-├── .github/workflows/
-│   └── powershell-static-check.yml
-├── .gitignore
-├── CHANGELOG.md
-├── Get-BravoSystemReport.ps1
-└── README.md
-```
-
-## Плани розвитку
-
-Детальний план розширення описано у [`docs/ROADMAP.md`](docs/ROADMAP.md).
-Архітектурний підхід — у [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-Правила безпеки — у [`docs/SECURITY.md`](docs/SECURITY.md).
-
-## Правила проекту
-
-- Усі відповіді, документація, логи, консольні повідомлення, Git commit messages, PR/merge-описи та описи змін ведуться українською мовою.
-- У PowerShell-скриптах не використовуються emoji.
-- Консольний вивід має бути простим і production-friendly: секції `=== ... ===`, маркери `[INFO]`, `[OK]`, `[SUCCESS]`, `[ERROR]`.
-- Кольори в PowerShell дозволені, але текстовий contract output не повинен залежати від кольорів.
-- PowerShell-скрипти з українським текстом зберігаються у UTF-8 з BOM для сумісності з Windows PowerShell 5.1.
+- Усі commit messages українською мовою.
+- Документація українською мовою.
+- Консольні повідомлення без emoji.
+- HTML-звіт може використовувати emoji як візуальні маркери.
+- Після кожного етапу виконуються parser/runtime checks.
+- Зміни проходять через PR і Local Windows Validation.
 
 ## Обов'язковий формат локальних команд
 
@@ -103,34 +260,13 @@ Set-Location "E:\GitHub\BRAVO_SYSTEM_REPORT"
 $ErrorActionPreference = "Stop"
 ```
 
-## Storage Deep Audit
+## Плани розвитку
 
-Починаючи з 0.3.0, профілі Deep та Forensic збирають базовий розширений аудит сховища у JSON-секцію Hardware.Disks.Deep:
+Можливі наступні етапи:
 
-- LogicalDisks;
-- Volumes;
-- Disks.
-
-HTML-таблиці та додаткові storage-підсекції додаються окремими PR після стабілізації JSON-структури.
-## BAT-запускачі
-
-У корені проекту доступні BAT-файли для запуску BRAVO SYSTEM REPORT без ручного введення PowerShell-команд:
-
-- BRAVO-SystemReport-Quick.bat — швидкий аудит;
-- BRAVO-SystemReport-Full.bat — повний базовий аудит;
-- BRAVO-SystemReport-Deep.bat — глибокий аудит;
-- BRAVO-SystemReport-Forensic.bat — максимально детальний аудит;
-- BRAVO-SystemReport-Launcher.bat — інтерактивне меню вибору режиму.
-
-Усі BAT-файли запускають Get-BravoSystemReport.ps1, зберігають звіти у папку eports поруч із проектом і залишають консоль відкритою після завершення.
-## Storage Critical Findings
-
-Починаючи з 0.3.2, профілі Deep та Forensic автоматично формують findings для ризиків вільного місця на томах.
-
-Правила:
-
-- CRITICAL — том має менше 5% вільного місця;
-- WARNING — том має менше 10% вільного місця;
-- WARNING — системний том має менше 15% вільного місця.
-
-Підсумок ризиків записується у JSON-секцію Hardware.Disks.StorageRisk.
+- покращення README examples;
+- додавання HTML-фільтрів або компактних секцій;
+- розширення Storage Deep Audit;
+- network/security deep audit;
+- release artifacts;
+- автоматизована публікація release notes.
