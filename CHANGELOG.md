@@ -1,3 +1,16 @@
+## v0.3.5 - 2026-06-10
+
+### Змінено
+- Актуалізовано README.md після змін v0.3.2-v0.3.4.
+- Додано опис Storage Deep HTML.
+- Додано опис Storage Critical Findings HTML.
+- Додано опис BAT `--nopause`.
+- Додано опис GitHub Actions Local Windows Validation.
+- Виправлено markdown-форматування CSS-класів `risk-critical`, `risk-warning`, `risk-ok`, `risk-unknown` у CHANGELOG.md.
+
+### Перевірено
+- README.md відповідає поточному стану v0.3.4.
+- CHANGELOG.md не містить пошкоджених `isk-*` записів.
 ## v0.3.4 - 2026-06-10
 
 ### Змінено
@@ -17,13 +30,13 @@
 ### Додано
 - Додано HTML-секцію Storage Critical Findings з підсумком критичних, попереджувальних, системних і здорових томів.
 - Додано HTML-секцію Storage Deep з таблицею томів, файлових систем, health/operational status, розміру, вільного місця, free percent і risk.
-- Додано CSS-класи для відображення storage-ризиків: isk-critical, isk-warning, isk-ok, isk-unknown.
+- Додано CSS-класи для відображення storage-ризиків: `risk-critical`, `risk-warning`, `risk-ok`, `risk-unknown`.
 - Додано HTML-екранування значень storage-таблиць перед вставкою у звіт.
 
 ### Перевірено
 - PowerShell parser check проходить.
 - Quick runtime test створює JSON і HTML.
-- HTML містить маркери Storage Critical Findings, Storage Deep, storage-table, isk-critical, isk-warning, isk-ok.
+- HTML містить маркери Storage Critical Findings, Storage Deep, storage-table, `risk-critical`, `risk-warning`, `risk-ok`.
 - JSON validation проходить з Profile=Quick і CollectionErrors=0.
 ## 0.3.2 - Unreleased
 
