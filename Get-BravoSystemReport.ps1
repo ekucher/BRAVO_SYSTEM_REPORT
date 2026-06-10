@@ -3,10 +3,11 @@
     Точка запуску BRAVO SYSTEM REPORT.
 .DESCRIPTION
     Запускає основний скрипт із каталогу src.
-    Параметри явно приймаються root wrapper-ом і передаються в основний скрипт через splatting.
+    Відносний OutputPath рахується від кореня репозиторію, а не від src.
 .NOTES
     Консольний вивід і документація проекту ведуться українською мовою.
-    У скриптах не використовуються emoji.
+    У службовому PowerShell-виводі не використовуються emoji.
+    HTML-звіт є окремим візуальним артефактом і може містити emoji.
 #>
 
 [CmdletBinding()]
@@ -34,18 +35,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptPath = Join-Path $PSScriptRoot 'src\Get-BravoSystemReport.ps1'
+$RepoRoot = $PSScriptRoot
+$ScriptPath = Join-Path $RepoRoot 'src\Get-BravoSystemReport.ps1'
 
 if (-not (Test-Path -LiteralPath $ScriptPath)) {
     throw "Не знайдено основний скрипт: $ScriptPath"
 }
 
-$ForwardParameters = @{
-    Profile = $Profile
+if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    $ResolvedOutputPath = Join-Path $RepoRoot 'reports'
+} elseif ([System.IO.Path]::IsPathRooted($OutputPath)) {
+    $ResolvedOutputPath = $OutputPath
+} else {
+    $ResolvedOutputPath = Join-Path $RepoRoot $OutputPath
 }
 
-if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-    $ForwardParameters.OutputPath = $OutputPath
+$ForwardParameters = @{
+    Profile    = $Profile
+    OutputPath = $ResolvedOutputPath
 }
 
 if ($JSONOnly)      { $ForwardParameters.JSONOnly = $true }
