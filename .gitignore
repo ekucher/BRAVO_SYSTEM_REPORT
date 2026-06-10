@@ -1,0 +1,39 @@
+# BRAVO SYSTEM REPORT generated reports
+ServerAudit_*.json
+ServerAudit_*.html
+ServerAudit_*.csv
+ServerAudit_*.zip
+BravoSystemReport_*.json
+BravoSystemReport_*.html
+BravoSystemReport_*.csv
+BravoSystemReport_*.zip
+reports/
+output/
+artifacts/
+*.evtx
+*.etl
+*.log
+*.tmp
+
+# PowerShell
+*.ps1xml
+*.pssc
+*.psrc
+*.psd1.bak
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Secrets / local config
+*.secret.*
+*.secrets.*
+.env
+.env.*
+local.settings.json
