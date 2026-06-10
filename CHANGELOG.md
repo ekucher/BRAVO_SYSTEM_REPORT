@@ -1,4 +1,13 @@
-﻿## v0.3.15 — винесення Software collector-а у модуль
+﻿## v0.3.16 — винесення розрахунку оцінки стану у модуль
+
+- Винесено розрахунок підсумкової оцінки стану машини у `src\40-Health.ps1`.
+- Додано функцію `Update-BravoHealthScore`.
+- Перенесено розрахунок кількості критичних знахідок, попереджень і помилок збору з `src\90-Main.ps1`.
+- Збережено формулу оцінки стану в межах `0..100`.
+- Збережено визначення статусу `OK`, `WARNING` або `CRITICAL`.
+- Оновлено `src\90-Main.ps1`: inline-блок оцінки стану замінено на виклик `Update-BravoHealthScore`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, Health.Score, Health.Status та `CollectionErrors=0`.
+## v0.3.15 — винесення Software collector-а у модуль
 
 - Винесено збір інформації про встановлене програмне забезпечення у `src\38-Collectors-Software.ps1`.
 - Додано функцію `Get-BravoSoftwareAudit`.
