@@ -1,21 +1,11 @@
-﻿## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
+﻿## v0.3.7 — винесення ReportModel у модуль
 
-- Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
-- Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
-- Додано runtime-визначення публічної IPv4-адреси.
-- Додано `Network.PublicIPv4`, `Network.PublicIPv4Provider`, `Network.PublicIPv4CheckedAt` та `Network.PublicIPv4Status`.
-- У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
-- Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
-- Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
-## v0.3.6 — модульне ядро та визначення основного IPv4
-
-- Винесено параметри запуску у `src\05-Params.ps1`.
-- Винесено базові helper-функції у `src\10-Core.ps1`.
-- Оновлено `src\90-Main.ps1`: залишено основний execution flow.
-- Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
-- Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
-- У консольному виводі IP основна IPv4-адреса показується першою.
-- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -25,6 +15,48 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
+## v0.3.6 — модульне ядро та визначення основного IPv4
+
+- Винесено параметри запуску у `src\05-Params.ps1`.
+- Винесено базові helper-функції у `src\10-Core.ps1`.
+- Оновлено `src\90-Main.ps1`: залишено основний execution flow.
+- Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
+- Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
+- У консольному виводі IP основна IPv4-адреса показується першою.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
+## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
+
+- Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
+- Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
+- Додано runtime-визначення публічної IPv4-адреси.
+- Додано `Network.PublicIPv4`, `Network.PublicIPv4Provider`, `Network.PublicIPv4CheckedAt` та `Network.PublicIPv4Status`.
+- У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
+- Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
+- Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.5 - 2026-06-10
 
 ### Змінено
@@ -38,6 +70,14 @@
 ### Перевірено
 - README.md відповідає поточному стану v0.3.4.
 - CHANGELOG.md не містить пошкоджених `isk-*` записів.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -47,6 +87,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро та визначення основного IPv4
 
 - Винесено параметри запуску у `src\05-Params.ps1`.
@@ -56,6 +104,14 @@
 - Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
 - У консольному виводі IP основна IPv4-адреса показується першою.
 - Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -65,6 +121,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.4 - 2026-06-10
 
 ### Змінено
@@ -79,6 +143,14 @@
 - ExitCode=0.
 - PowerShell parser check проходить.
 - git diff --check проходить без whitespace error.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -88,6 +160,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро та визначення основного IPv4
 
 - Винесено параметри запуску у `src\05-Params.ps1`.
@@ -97,6 +177,14 @@
 - Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
 - У консольному виводі IP основна IPv4-адреса показується першою.
 - Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -106,6 +194,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.3 - 2026-06-10
 
 ### Додано
@@ -119,6 +215,14 @@
 - Quick runtime test створює JSON і HTML.
 - HTML містить маркери Storage Critical Findings, Storage Deep, storage-table, `risk-critical`, `risk-warning`, `risk-ok`.
 - JSON validation проходить з Profile=Quick і CollectionErrors=0.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -128,6 +232,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро та визначення основного IPv4
 
 - Винесено параметри запуску у `src\05-Params.ps1`.
@@ -137,6 +249,14 @@
 - Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
 - У консольному виводі IP основна IPv4-адреса показується першою.
 - Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -146,6 +266,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## 0.3.2 - Unreleased
 
 ### Додано
@@ -158,6 +286,14 @@
 - WARNING: том має менше 10% вільного місця.
 - WARNING: системний том має менше 15% вільного місця.
 
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -167,6 +303,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро та визначення основного IPv4
 
 - Винесено параметри запуску у `src\05-Params.ps1`.
@@ -176,6 +320,14 @@
 - Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
 - У консольному виводі IP основна IPv4-адреса показується першою.
 - Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -185,6 +337,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## 0.3.0 - Unreleased
 
 ### Додано
@@ -196,6 +356,14 @@
 
 # Журнал змін
 
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -205,6 +373,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро та визначення основного IPv4
 
 - Винесено параметри запуску у `src\05-Params.ps1`.
@@ -214,6 +390,14 @@
 - Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
 - У консольному виводі IP основна IPv4-адреса показується першою.
 - Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -223,6 +407,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## 0.2.0 — 2026-06-10
 
 ### Додано
@@ -240,6 +432,14 @@
 - Прибрано порожні `catch {}` у ключових секціях.
 - Виправлено helper `tools/Publish-ToGitHub.ps1`, щоб уникнути проблем із кодуванням у Windows PowerShell.
 
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -249,6 +449,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро та визначення основного IPv4
 
 - Винесено параметри запуску у `src\05-Params.ps1`.
@@ -258,6 +466,14 @@
 - Додано `Network.PrimaryIPv4` та `Network.PrimaryInterface` у JSON-звіт.
 - У консольному виводі IP основна IPv4-адреса показується першою.
 - Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1` та Quick runtime.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## v0.3.6 — модульне ядро, основний IPv4 та Public IPv4
 
 - Додано визначення основного мережевого інтерфейсу через default route `0.0.0.0/0`.
@@ -267,6 +483,14 @@
 - У консольному виводі реальна Public IPv4 не друкується, щоб випадково не вставити її в чат або Git.
 - Додано правила `.gitignore` для generated reports із потенційно чутливими даними.
 - Перевірено, що публічні IPv4 literal не потрапляють у tracked-зміни.
+## v0.3.7 — винесення ReportModel у модуль
+
+- Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
+- Додано функцію `New-BravoReportModel`.
+- Оновлено `src\90-Main.ps1`: ініціалізація `$script:Report` виконується через `New-BravoReportModel`.
+- Перевірено збірку моноліту `dist\Get-BravoSystemReport.ps1`.
+- Перевірено Quick runtime, JSON/HTML export, `SchemaVersion`, `ScriptVersion`, `Profile`, `PrimaryIPv4` та `PublicIPv4Status`.
+- Значення Public IPv4 не виводиться в консоль.
 ## 0.1.0 — 2026-06-10
 
 ### Додано
