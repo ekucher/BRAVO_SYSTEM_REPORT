@@ -1,4 +1,14 @@
-﻿## v0.3.19 — винесення CSV export у модуль
+﻿## v0.3.20 — винесення ZIP export у модуль
+
+- Винесено ZIP export у `src\53-Export-Zip.ps1`.
+- Додано функцію `Export-BravoZipReport`.
+- Передано `OutputDir`, `BaseFileName` і `Zip` як явні параметри export-функції.
+- Збережено створення ZIP через `System.IO.Compression.FileSystem`.
+- Збережено додавання згенерованих файлів із `Report.GeneratedFiles` у ZIP-архів.
+- Збережено запис ZIP-файлу у `Report.GeneratedFiles`.
+- Оновлено `src\90-Main.ps1`: inline-блок `# ZIP` замінено на виклик `Export-BravoZipReport`.
+- Перевірено build, parser check для `dist`, Quick без ZIP, Quick ZIP, Deep CSV ZIP, вміст ZIP-архіву, відсутність ZIP без параметра `-Zip`, `CollectionErrors=0` та `git diff --check`.
+## v0.3.19 — винесення CSV export у модуль
 
 - Винесено CSV export у `src\52-Export-Csv.ps1`.
 - Додано функцію `Export-BravoCsvReport`.
