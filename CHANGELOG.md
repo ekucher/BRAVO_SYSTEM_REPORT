@@ -1,4 +1,17 @@
-﻿## 0.3.2 - Unreleased
+## v0.3.3 - 2026-06-10
+
+### Додано
+- Додано HTML-секцію Storage Critical Findings з підсумком критичних, попереджувальних, системних і здорових томів.
+- Додано HTML-секцію Storage Deep з таблицею томів, файлових систем, health/operational status, розміру, вільного місця, free percent і risk.
+- Додано CSS-класи для відображення storage-ризиків: isk-critical, isk-warning, isk-ok, isk-unknown.
+- Додано HTML-екранування значень storage-таблиць перед вставкою у звіт.
+
+### Перевірено
+- PowerShell parser check проходить.
+- Quick runtime test створює JSON і HTML.
+- HTML містить маркери Storage Critical Findings, Storage Deep, storage-table, isk-critical, isk-warning, isk-ok.
+- JSON validation проходить з Profile=Quick і CollectionErrors=0.
+## 0.3.2 - Unreleased
 
 ### Додано
 - Додано Storage Critical Findings для профілів Deep та Forensic.

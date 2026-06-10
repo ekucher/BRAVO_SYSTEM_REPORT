@@ -279,7 +279,7 @@ function Get-BravoStorageRiskSummary {
 
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = '0.3.2'
+$ScriptVersion = "0.3.3"
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
@@ -1024,6 +1024,218 @@ if (-not $JSONOnly) {
             '<tr><td colspan="3">Помилок збору даних не зафіксовано.</td></tr>'
         }
 
+        function ConvertTo-BravoHtmlText {
+            param(
+                [AllowNull()]
+                [object]$Value
+            )
+
+            if ($null -eq $Value) {
+                return ''
+            }
+
+            return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+        }
+
+        function Get-BravoStorageRiskClass {
+            param(
+                [AllowNull()]
+                [object]$Risk
+            )
+
+            switch (([string]$Risk).ToUpperInvariant()) {
+                'CRITICAL' { return 'risk-critical' }
+                'WARNING'  { return 'risk-warning' }
+                'OK'       { return 'risk-ok' }
+                default    { return 'risk-unknown' }
+            }
+        }
+
+        function Get-BravoStorageDisplayText {
+            param(
+                [AllowNull()]
+                [object]$Volume
+            )
+
+            if ($null -eq $Volume) {
+                return ''
+            }
+
+            if ($Volume.DriveLetter) {
+                return ("{0}:" -f ([string]$Volume.DriveLetter).TrimEnd(':'))
+            }
+
+            if ($Volume.Drive) {
+                return [string]$Volume.Drive
+            }
+
+            if ($Volume.DeviceID) {
+                return [string]$Volume.DeviceID
+            }
+
+            if ($Volume.VolumeKey) {
+                return [string]$Volume.VolumeKey
+            }
+
+            return 'Volume без літери'
+        }
+
+        function Get-BravoStoragePropertyText {
+            param(
+                [AllowNull()]
+                [object]$Value
+            )
+
+            if ($null -eq $Value -or [string]$Value -eq '') {
+                return '—'
+            }
+
+            return [string]$Value
+        }
+
+        $disksContainer = $script:Report.Hardware.Disks
+
+        if ($disksContainer -is [System.Collections.IDictionary]) {
+            $storageDeep = $disksContainer['Deep']
+            $storageRisk = $disksContainer['StorageRisk']
+        } else {
+            $storageDeep = $disksContainer.Deep
+            $storageRisk = $disksContainer.StorageRisk
+        }
+
+        $criticalThreshold = if ($storageRisk -and $storageRisk.CriticalFreePercent) { [double]$storageRisk.CriticalFreePercent } else { 5 }
+        $warningThreshold = if ($storageRisk -and $storageRisk.WarningFreePercent) { [double]$storageRisk.WarningFreePercent } else { 10 }
+
+        $criticalCount = if ($storageRisk -and $storageRisk.Summary) { [int]$storageRisk.Summary.CriticalCount } else { 0 }
+        $warningCount = if ($storageRisk -and $storageRisk.Summary) { [int]$storageRisk.Summary.WarningCount } else { 0 }
+        $systemWarningCount = if ($storageRisk -and $storageRisk.Summary) { [int]$storageRisk.Summary.SystemWarningCount } else { 0 }
+        $healthyCount = if ($storageRisk -and $storageRisk.Summary) { [int]$storageRisk.Summary.HealthyCount } else { 0 }
+
+        $storageFindingItems = @()
+
+        foreach ($item in @($storageRisk.CriticalVolumes)) {
+            if ($item) {
+                $storageFindingItems += [PSCustomObject]@{ Group = 'CRITICAL'; Volume = $item }
+            }
+        }
+
+        foreach ($item in @($storageRisk.WarningVolumes)) {
+            if ($item) {
+                $storageFindingItems += [PSCustomObject]@{ Group = 'WARNING'; Volume = $item }
+            }
+        }
+
+        foreach ($item in @($storageRisk.SystemVolumeWarnings)) {
+            if ($item) {
+                $storageFindingItems += [PSCustomObject]@{ Group = 'WARNING'; Volume = $item }
+            }
+        }
+
+        $storageCriticalRows = if (@($storageFindingItems).Count -gt 0) {
+            ($storageFindingItems | ForEach-Object {
+                $volume = $_.Volume
+                $riskText = if ($volume.Risk) { [string]$volume.Risk } else { [string]$_.Group }
+                $riskClass = Get-BravoStorageRiskClass $riskText
+                $reason = if ($volume.Reason) { $volume.Reason } elseif ($volume.Message) { $volume.Message } else { 'Потребує перевірки storage thresholds.' }
+
+                "<tr><td>$(ConvertTo-BravoHtmlText (Get-BravoStorageDisplayText $volume))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.Label))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FileSystem))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.SizeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreePercent))%</td><td><span class=""risk $riskClass"">$(ConvertTo-BravoHtmlText $riskText)</span></td><td>$(ConvertTo-BravoHtmlText $reason)</td></tr>"
+            }) -join "`n"
+        } else {
+            '<tr><td colspan="8" class="muted">Критичних або попереджувальних storage-знахідок немає.</td></tr>'
+        }
+
+        $storageVolumes = @($storageDeep.Volumes)
+
+        $storageDeepRows = if ($storageVolumes.Count -gt 0) {
+            ($storageVolumes | ForEach-Object {
+                $volume = $_
+                $freePercent = $null
+
+                if ($null -ne $volume.FreePercent -and [string]$volume.FreePercent -ne '') {
+                    $freePercent = [double]$volume.FreePercent
+                }
+
+                $riskText = if ($null -eq $freePercent) {
+                    'UNKNOWN'
+                } elseif ($freePercent -lt $criticalThreshold) {
+                    'CRITICAL'
+                } elseif ($freePercent -lt $warningThreshold) {
+                    'WARNING'
+                } else {
+                    'OK'
+                }
+
+                $riskClass = Get-BravoStorageRiskClass $riskText
+
+                $reason = if ($riskText -eq 'CRITICAL') {
+                    "Вільного місця менше $criticalThreshold%."
+                } elseif ($riskText -eq 'WARNING') {
+                    "Вільного місця менше $warningThreshold%."
+                } elseif ($riskText -eq 'UNKNOWN') {
+                    'Не вдалося визначити free percent.'
+                } else {
+                    'Показники в межах порогів.'
+                }
+
+                "<tr><td>$(ConvertTo-BravoHtmlText (Get-BravoStorageDisplayText $volume))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FileSystemLabel))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FileSystem))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.DriveType))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.HealthStatus))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.OperationalStatus))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.SizeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreePercent))%</td><td><span class=""risk $riskClass"">$(ConvertTo-BravoHtmlText $riskText)</span></td><td>$(ConvertTo-BravoHtmlText $reason)</td></tr>"
+            }) -join "`n"
+        } else {
+            '<tr><td colspan="11" class="muted">Storage Deep дані відсутні для поточного профілю або збір завершився з помилкою.</td></tr>'
+        }
+
+        $storageHtmlSection = @"
+<div class="section storage-critical-section">
+  <h2>💽 Storage Critical Findings</h2>
+  <div class="storage-summary-grid">
+    <div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div>
+    <div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div>
+    <div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div>
+    <div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div>
+  </div>
+
+  <table class="storage-table">
+    <thead>
+      <tr>
+        <th>Том</th>
+        <th>Мітка</th>
+        <th>FS</th>
+        <th>Size GB</th>
+        <th>Free GB</th>
+        <th>Free %</th>
+        <th>Risk</th>
+        <th>Причина</th>
+      </tr>
+    </thead>
+    <tbody>
+      $storageCriticalRows
+    </tbody>
+  </table>
+</div>
+
+<div class="section storage-deep-section">
+  <h2>🧱 Storage Deep</h2>
+  <table class="storage-table">
+    <thead>
+      <tr>
+        <th>Том</th>
+        <th>Мітка</th>
+        <th>FS</th>
+        <th>Тип</th>
+        <th>Health</th>
+        <th>Operational</th>
+        <th>Size GB</th>
+        <th>Free GB</th>
+        <th>Free %</th>
+        <th>Risk</th>
+        <th>Причина</th>
+      </tr>
+    </thead>
+    <tbody>
+      $storageDeepRows
+    </tbody>
+  </table>
+</div>
+"@
         $htmlContent = @"
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>BRAVO SYSTEM REPORT - $($script:Report.ComputerName)</title>
@@ -1262,6 +1474,55 @@ tr:last-child td{border-bottom:none}
   .container{box-shadow:none;margin:0;border-radius:0}
   .header{background:#1e40af !important}
 }
+
+  .storage-summary-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+    gap:12px;
+    margin:12px 0 16px 0;
+  }
+  .storage-summary-item{
+    background:#f8fafc;
+    border:1px solid var(--border,#e5e7eb);
+    border-radius:10px;
+    padding:10px 12px;
+  }
+  .storage-summary-label{
+    color:#64748b;
+    font-size:12px;
+    margin-bottom:4px;
+  }
+  .storage-summary-value{
+    font-size:20px;
+    font-weight:700;
+  }
+  .storage-table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:12px;
+    font-size:13px;
+  }
+  .storage-table th,
+  .storage-table td{
+    text-align:left;
+    padding:8px 10px;
+    border-bottom:1px solid var(--border,#e5e7eb);
+    vertical-align:top;
+  }
+  .storage-table th{
+    background:#f1f5f9;
+    color:#334155;
+    font-weight:700;
+  }
+  .risk{
+    font-weight:700;
+    white-space:nowrap;
+  }
+  .risk-critical{color:var(--critical,#dc2626);}
+  .risk-warning{color:var(--warning,#f59e0b);}
+  .risk-ok{color:var(--success,#16a34a);}
+  .risk-unknown{color:#64748b;}
+  .muted{color:#64748b;}
 </style></head>
 <body><div class="container"><div class="header">
 <div class="brand">
@@ -1302,6 +1563,7 @@ tr:last-child td{border-bottom:none}
 <div class="info-row"><span class="info-label">Всього місця:</span><span class="info-value">$(Format-Size $script:Report.Hardware.Disks.TotalGB)</span></div>
 <div class="info-row"><span class="info-label">Вільно місця:</span><span class="info-value">$(Format-Size $script:Report.Hardware.Disks.FreeGB)</span></div>
 <div class="info-row"><span class="info-label">Вільно %:</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.Disks.FreePercent)%">$($script:Report.Hardware.Disks.FreePercent)%</div></div></span></div>
+$storageHtmlSection
 </div>
 <div class="card"><h3>🌐 Мережа</h3>
 <div class="info-row"><span class="info-label">Хостнейм:</span><span class="info-value">$($script:Report.Network.General.Hostname)</span></div>
