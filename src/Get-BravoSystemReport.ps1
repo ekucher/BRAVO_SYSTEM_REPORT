@@ -279,7 +279,7 @@ function Get-BravoStorageRiskSummary {
 
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = "0.3.3"
+$ScriptVersion = "0.3.4"
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
