@@ -1,4 +1,16 @@
-﻿## 0.3.0 - Unreleased
+﻿## 0.3.2 - Unreleased
+
+### Додано
+- Додано Storage Critical Findings для профілів Deep та Forensic.
+- Додано JSON-секцію Hardware.Disks.StorageRisk.
+- Додано автоматичні findings для томів з критично малим вільним місцем.
+
+### Правила оцінки
+- CRITICAL: том має менше 5% вільного місця.
+- WARNING: том має менше 10% вільного місця.
+- WARNING: системний том має менше 15% вільного місця.
+
+## 0.3.0 - Unreleased
 
 ### Додано
 - Додано перший безпечний skeleton Storage Deep Audit для профілів Deep та Forensic.
