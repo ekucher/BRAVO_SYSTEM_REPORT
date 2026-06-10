@@ -1,4 +1,13 @@
-﻿## v0.3.18 — винесення HTML export у модуль
+﻿## v0.3.19 — винесення CSV export у модуль
+
+- Винесено CSV export у `src\52-Export-Csv.ps1`.
+- Додано функцію `Export-BravoCsvReport`.
+- Передано `OutputDir`, `BaseFileName` і `CSV` як явні параметри export-функції.
+- Збережено формування CSV-даних: `ComputerName`, `Profile`, `HealthScore`, `HealthStatus`, `IPv4`, `Installed_Software`, `CollectionErrors` та інші ключові параметри.
+- Збережено запис CSV-файлу у `Report.GeneratedFiles`.
+- Оновлено `src\90-Main.ps1`: inline-блок `# CSV` замінено на виклик `Export-BravoCsvReport`.
+- Перевірено build, parser check для `dist`, Quick без CSV, Quick CSV, Deep CSV, створення JSON/HTML/CSV, відсутність CSV без параметра `-CSV`, `CollectionErrors=0` та `git diff --check`.
+## v0.3.18 — винесення HTML export у модуль
 
 - Винесено HTML export у `src\51-Export-Html.ps1`.
 - Додано функцію `Export-BravoHtmlReport`.
