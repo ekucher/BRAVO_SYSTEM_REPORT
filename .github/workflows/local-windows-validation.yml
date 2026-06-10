@@ -58,10 +58,10 @@ jobs:
 
           Set-Location $env:GITHUB_WORKSPACE
 
-          .\Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512
+                    & .\Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "Build failed with code $LASTEXITCODE"
+          if (-not $?) {
+            throw "Build failed."
           }
 
           if (-not (Test-Path -LiteralPath ".\dist\Get-BravoSystemReport.ps1")) {
