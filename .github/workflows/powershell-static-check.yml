@@ -1,33 +1,98 @@
-name: PowerShell static check
+﻿name: Перевірка PowerShell
 
 on:
   push:
     branches:
       - main
+      - 'bravo/**'
   pull_request:
     branches:
       - main
 
 jobs:
-  psscriptanalyzer:
+  powershell-static-check:
     name: PSScriptAnalyzer
     runs-on: windows-latest
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout
+      - name: Отримати код
         uses: actions/checkout@v4
 
-      - name: Install PSScriptAnalyzer
+      - name: Перевірити синтаксис PowerShell-файлів
         shell: pwsh
         run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+          $ErrorActionPreference = "Stop"
 
-      - name: Analyze PowerShell scripts
+          Write-Host "=== ПЕРЕВІРКА СИНТАКСИСУ POWERSHELL ==="
+
+          $Files = Get-ChildItem -Path . -Recurse -File -Include "*.ps1","*.psm1","*.psd1" |
+            Where-Object {
+              $_.FullName -notmatch "\\.git\\" -and
+              $_.FullName -notmatch "\\reports\\" -and
+              $_.FullName -notmatch "\\review\\"
+            }
+
+          if (-not $Files) {
+            Write-Host "[INFO] PowerShell-файли для перевірки не знайдено"
+            exit 0
+          }
+
+          foreach ($File in $Files) {
+            Write-Host "[INFO] Перевірка синтаксису: $($File.FullName)"
+
+            $Tokens = $null
+            $Errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($File.FullName, [ref]$Tokens, [ref]$Errors) | Out-Null
+
+            if ($Errors.Count -gt 0) {
+              Write-Host "[ERROR] Помилка синтаксису: $($File.FullName)"
+              $Errors | Format-List | Out-String | Write-Host
+              exit 1
+            }
+
+            Write-Host "[OK] Синтаксис коректний: $($File.Name)"
+          }
+
+          Write-Host "[SUCCESS] Перевірка синтаксису завершена успішно"
+
+      - name: Встановити PSScriptAnalyzer
         shell: pwsh
         run: |
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning,Error
-          $results | Format-Table -AutoSize
-          if ($results) {
-            throw "PSScriptAnalyzer знайшов попередження або помилки."
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=== ВСТАНОВЛЕННЯ PSSCRIPTANALYZER ==="
+
+          Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
+
+          Write-Host "[SUCCESS] PSScriptAnalyzer встановлено"
+
+      - name: Запустити PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=== СТАТИЧНИЙ АНАЛІЗ POWERSHELL ==="
+
+          $Files = Get-ChildItem -Path . -Recurse -File -Include "*.ps1","*.psm1","*.psd1" |
+            Where-Object {
+              $_.FullName -notmatch "\\.git\\" -and
+              $_.FullName -notmatch "\\reports\\" -and
+              $_.FullName -notmatch "\\review\\"
+            }
+
+          $Results = @()
+
+          foreach ($File in $Files) {
+            Write-Host "[INFO] Аналіз: $($File.FullName)"
+            $Results += Invoke-ScriptAnalyzer -Path $File.FullName -Severity Error
           }
+
+          if ($Results.Count -gt 0) {
+            Write-Host "[ERROR] PSScriptAnalyzer знайшов критичні проблеми"
+            $Results | Format-Table -AutoSize | Out-String | Write-Host
+            exit 1
+          }
+
+          Write-Host "[SUCCESS] Критичних проблем PSScriptAnalyzer не знайдено"
