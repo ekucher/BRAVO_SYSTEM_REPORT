@@ -1,4 +1,4 @@
-# BRAVO SYSTEM REPORT generated reports
+﻿# BRAVO SYSTEM REPORT generated reports
 ServerAudit_*.json
 ServerAudit_*.html
 ServerAudit_*.csv
@@ -45,3 +45,12 @@ BravoSystemReport_*.json
 BravoSystemReport_*.html
 BravoSystemReport_*.csv
 BravoSystemReport_*.zip
+
+# BRAVO SYSTEM REPORT generated sensitive reports
+reports/
+dist/reports/
+**/BravoSystemReport_*.json
+**/BravoSystemReport_*.html
+**/BravoSystemReport_*.csv
+**/BravoSystemReport_*.zip
+**/BravoSystemReport_*.sha512
