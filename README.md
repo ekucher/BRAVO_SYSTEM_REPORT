@@ -1,4 +1,4 @@
-# BRAVO SYSTEM REPORT
+﻿# BRAVO SYSTEM REPORT
 
 **BRAVO SYSTEM REPORT** — PowerShell-проект для збору детального технічного звіту про Windows-машину або сервер.
 
@@ -102,3 +102,13 @@ Clear-Host
 Set-Location "E:\GitHub\BRAVO_SYSTEM_REPORT"
 $ErrorActionPreference = "Stop"
 ```
+
+## Storage Deep Audit
+
+Починаючи з 0.3.0, профілі Deep та Forensic збирають базовий розширений аудит сховища у JSON-секцію Hardware.Disks.Deep:
+
+- LogicalDisks;
+- Volumes;
+- Disks.
+
+HTML-таблиці та додаткові storage-підсекції додаються окремими PR після стабілізації JSON-структури.

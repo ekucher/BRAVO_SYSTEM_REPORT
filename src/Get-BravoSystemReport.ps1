@@ -40,9 +40,123 @@ param(
     [string]$SmtpServer = ''
 )
 
+
+# --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
+function Convert-BravoBytesToGB {
+    param([Parameter(Mandatory = $false)]$Bytes)
+
+    if ($null -eq $Bytes -or $Bytes -eq '') {
+        return $null
+    }
+
+    try {
+        return [Math]::Round(([double]$Bytes / 1GB), 2)
+    } catch {
+        return $null
+    }
+}
+
+function Get-BravoStorageDeepAudit {
+    $storage = [ordered]@{
+        CollectedAt  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        LogicalDisks = @()
+        Volumes      = @()
+        Disks        = @()
+    }
+
+    try {
+        $logicalDisks = Get-AuditObject -ClassName 'Win32_LogicalDisk' -Filter 'DriveType=3'
+        foreach ($disk in $logicalDisks) {
+            $freePercent = if ($disk.Size -gt 0) {
+                [Math]::Round(($disk.FreeSpace / $disk.Size) * 100, 2)
+            } else {
+                $null
+            }
+
+            $storage.LogicalDisks += [PSCustomObject]@{
+                DeviceID    = $disk.DeviceID
+                VolumeName  = $disk.VolumeName
+                FileSystem  = $disk.FileSystem
+                TotalGB     = Convert-BravoBytesToGB $disk.Size
+                FreeGB      = Convert-BravoBytesToGB $disk.FreeSpace
+                FreePercent = $freePercent
+                Compressed  = $disk.Compressed
+            }
+        }
+    } catch {
+        Add-AuditError -Section 'StorageDeep.LogicalDisks' -Message $_.Exception.Message
+    }
+
+    if (Get-Command Get-Volume -ErrorAction SilentlyContinue) {
+        try {
+            $volumes = Get-Volume -ErrorAction Stop
+            foreach ($volume in $volumes) {
+                $freePercent = if ($volume.Size -gt 0) {
+                    [Math]::Round(($volume.SizeRemaining / $volume.Size) * 100, 2)
+                } else {
+                    $null
+                }
+
+                $storage.Volumes += [PSCustomObject]@{
+                    DriveLetter       = $volume.DriveLetter
+                    FileSystemLabel   = $volume.FileSystemLabel
+                    FileSystem        = $volume.FileSystem
+                    DriveType         = [string]$volume.DriveType
+                    HealthStatus      = [string]$volume.HealthStatus
+                    OperationalStatus = ($volume.OperationalStatus -join ', ')
+                    SizeGB            = Convert-BravoBytesToGB $volume.Size
+                    FreeGB            = Convert-BravoBytesToGB $volume.SizeRemaining
+                    FreePercent       = $freePercent
+                }
+
+                if ($volume.HealthStatus -and [string]$volume.HealthStatus -notin @('Healthy','Unknown')) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "Том $($volume.DriveLetter): HealthStatus=$($volume.HealthStatus)" -Recommendation 'Перевірте стан тому через Get-Volume, Event Viewer та інструменти виробника диска.'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.GetVolume' -Message $_.Exception.Message
+        }
+    }
+
+    if (Get-Command Get-Disk -ErrorAction SilentlyContinue) {
+        try {
+            $disks = Get-Disk -ErrorAction Stop
+            foreach ($disk in $disks) {
+                $storage.Disks += [PSCustomObject]@{
+                    Number            = $disk.Number
+                    FriendlyName      = $disk.FriendlyName
+                    SerialNumber      = $disk.SerialNumber
+                    BusType           = [string]$disk.BusType
+                    MediaType         = [string]$disk.MediaType
+                    PartitionStyle    = [string]$disk.PartitionStyle
+                    OperationalStatus = ($disk.OperationalStatus -join ', ')
+                    HealthStatus      = [string]$disk.HealthStatus
+                    IsBoot            = $disk.IsBoot
+                    IsSystem          = $disk.IsSystem
+                    IsOffline         = $disk.IsOffline
+                    IsReadOnly        = $disk.IsReadOnly
+                    SizeGB            = Convert-BravoBytesToGB $disk.Size
+                }
+
+                if ($disk.IsOffline -or $disk.IsReadOnly) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "Disk $($disk.Number): IsOffline=$($disk.IsOffline), IsReadOnly=$($disk.IsReadOnly)" -Recommendation 'Перевірте Get-Disk, diskpart, SAN policy, стан носія та контролер.'
+                }
+
+                if ($disk.HealthStatus -and [string]$disk.HealthStatus -notin @('Healthy','Unknown')) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "Disk $($disk.Number): HealthStatus=$($disk.HealthStatus)" -Recommendation 'Негайно перевірте SMART, журнали та резервні копії.'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.GetDisk' -Message $_.Exception.Message
+        }
+    }
+
+    return [PSCustomObject]$storage
+}
+
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = '0.2.1'
+$ScriptVersion = '0.3.0'
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
@@ -280,7 +394,7 @@ Write-Host ''
 Set-Location $ScriptDirectory -ErrorAction SilentlyContinue
 
 $script:Report = [ordered]@{
-    SchemaVersion = '0.2.1'
+    SchemaVersion = '0.3.0'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -489,6 +603,26 @@ try {
     Write-Host "  $IconError Помилка збору дисків: $($_.Exception.Message)" -ForegroundColor Red
 }
 
+
+# --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
+if ($Profile -in @('Deep','Forensic')) {
+    try {
+        Write-Host "  [INFO] Storage Deep Audit: збір базових storage-даних..."
+
+        $storageDeep = Get-BravoStorageDeepAudit
+
+        if ($script:Report.Hardware.Disks -is [System.Collections.IDictionary]) {
+            $script:Report.Hardware.Disks['Deep'] = $storageDeep
+        } else {
+            $script:Report.Hardware.Disks | Add-Member -MemberType NoteProperty -Name 'Deep' -Value $storageDeep -Force
+        }
+
+        Write-Host ("  [OK] Storage Deep Audit: logicalDisks={0}, volumes={1}, disks={2}" -f @($storageDeep.LogicalDisks).Count, @($storageDeep.Volumes).Count, @($storageDeep.Disks).Count)
+    } catch {
+        Add-AuditError -Section 'StorageDeep' -Message $_.Exception.Message
+        Write-Host "  [ERROR] Storage Deep Audit: $($_.Exception.Message)"
+    }
+}
 # --- Мережа ---
 try {
     $script:Report.Network.General.Hostname = $env:COMPUTERNAME
