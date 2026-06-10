@@ -1,4 +1,12 @@
-﻿## v0.3.10 — винесення Network collector-а у модуль
+﻿## v0.3.11 — винесення Security collector-а у модуль
+
+- Винесено збір інформації про безпеку у `src\34-Collectors-Security.ps1`.
+- Додано функцію `Get-BravoSecurityAudit`.
+- Перенесено збір UAC, RDP, антивірусу та Windows Firewall з `src\90-Main.ps1`.
+- Збережено логіку findings для вимкненого UAC, увімкненого RDP та вимкнених Firewall-профілів.
+- Оновлено `src\90-Main.ps1`: inline-блок безпеки замінено на виклик `Get-BravoSecurityAudit`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, UAC, RDP, Antivirus, Firewall profiles та `CollectionErrors=0`.
+## v0.3.10 — винесення Network collector-а у модуль
 
 - Винесено збір мережевої інформації у `src\33-Collectors-Network.ps1`.
 - Додано функцію `Get-BravoNetworkAudit`.
