@@ -762,27 +762,241 @@ if (-not $JSONOnly) {
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>BRAVO SYSTEM REPORT - $($script:Report.ComputerName)</title>
 <style>
-body{font-family:'Segoe UI',sans-serif;margin:20px;background:#1a1a2e;}
-.container{max-width:1280px;margin:0 auto;background:white;border-radius:15px;overflow:hidden;}
-.header{background:linear-gradient(135deg,#0f3460,#16213e);color:white;padding:30px;text-align:center;}
-.content{padding:30px;}
-h2{color:#0f3460;border-left:4px solid #e94560;padding-left:15px;}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:20px;}
-.card{background:#f8f9fa;border-radius:10px;padding:20px;}
-.info-row{display:flex;justify-content:space-between;gap:15px;padding:8px 0;border-bottom:1px solid #dee2e6;}
-.info-label{font-weight:600;color:#6c757d;}
-.info-value{color:#212529;text-align:right;word-break:break-word;}
-.progress-bar{background:#e9ecef;border-radius:10px;overflow:hidden;margin-top:5px;min-width:160px;}
-.progress-fill{background:#e94560;color:white;text-align:center;padding:2px;}
-table{width:100%;border-collapse:collapse;margin-top:10px;} th,td{border:1px solid #dee2e6;padding:8px;text-align:left;} th{background:#f1f3f5;}
-.badge{display:inline-block;border-radius:999px;padding:6px 12px;background:#0f3460;color:white;font-weight:600;}
-.footer{background:#f8f9fa;padding:20px;text-align:center;color:#6c757d;}
+:root{
+  --bg:#0b1020;
+  --panel:#ffffff;
+  --panel-soft:#f8fafc;
+  --text:#0f172a;
+  --muted:#64748b;
+  --line:#e2e8f0;
+  --primary:#2563eb;
+  --primary-dark:#1e40af;
+  --accent:#06b6d4;
+  --success:#16a34a;
+  --warning:#d97706;
+  --critical:#dc2626;
+  --shadow:0 20px 50px rgba(15,23,42,.20);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:'Segoe UI',Roboto,Arial,sans-serif;
+  background:
+    radial-gradient(circle at 20% 10%,rgba(37,99,235,.35),transparent 30%),
+    radial-gradient(circle at 90% 20%,rgba(6,182,212,.30),transparent 30%),
+    linear-gradient(135deg,#0b1020,#111827 45%,#020617);
+  color:var(--text);
+}
+.container{
+  max-width:1320px;
+  margin:28px auto;
+  background:var(--panel);
+  border-radius:24px;
+  overflow:hidden;
+  box-shadow:var(--shadow);
+}
+.header{
+  position:relative;
+  padding:34px 38px;
+  color:white;
+  background:
+    linear-gradient(135deg,rgba(37,99,235,.95),rgba(14,165,233,.85)),
+    linear-gradient(135deg,#0f172a,#1e293b);
+}
+.header:after{
+  content:'';
+  position:absolute;
+  inset:auto -80px -110px auto;
+  width:260px;
+  height:260px;
+  border-radius:999px;
+  background:rgba(255,255,255,.12);
+}
+.brand{
+  display:flex;
+  align-items:center;
+  gap:18px;
+  position:relative;
+  z-index:1;
+}
+.brand-icon{
+  width:64px;
+  height:64px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:18px;
+  background:rgba(255,255,255,.18);
+  border:1px solid rgba(255,255,255,.25);
+  font-size:34px;
+}
+.header h1{
+  margin:0;
+  font-size:34px;
+  letter-spacing:.5px;
+}
+.header p{
+  margin:8px 0 0 0;
+  opacity:.92;
+}
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border-radius:999px;
+  padding:8px 14px;
+  background:rgba(255,255,255,.16);
+  border:1px solid rgba(255,255,255,.28);
+  color:white;
+  font-weight:700;
+}
+.content{padding:30px}
+.summary-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:16px;
+  margin-bottom:28px;
+}
+.summary-card{
+  background:linear-gradient(180deg,#ffffff,#f8fafc);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:18px;
+  box-shadow:0 8px 22px rgba(15,23,42,.07);
+}
+.summary-icon{
+  font-size:26px;
+  margin-bottom:8px;
+}
+.summary-label{
+  color:var(--muted);
+  font-size:13px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.summary-value{
+  margin-top:6px;
+  font-size:24px;
+  font-weight:800;
+  color:var(--text);
+}
+h2{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:30px 0 16px 0;
+  color:#0f172a;
+  font-size:22px;
+}
+h2:after{
+  content:'';
+  flex:1;
+  height:1px;
+  background:var(--line);
+}
+.section-icon{
+  width:36px;
+  height:36px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:12px;
+  background:#eff6ff;
+  color:var(--primary);
+}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
+  gap:18px;
+}
+.card{
+  background:var(--panel-soft);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:20px;
+  box-shadow:0 8px 22px rgba(15,23,42,.06);
+}
+.card h3{
+  margin:0 0 14px 0;
+  font-size:18px;
+  color:#0f172a;
+}
+.info-row{
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+}
+.info-row:last-child{border-bottom:none}
+.info-label{
+  font-weight:700;
+  color:var(--muted);
+}
+.info-value{
+  color:var(--text);
+  text-align:right;
+  word-break:break-word;
+  font-weight:600;
+}
+.progress-bar{
+  background:#e2e8f0;
+  border-radius:999px;
+  overflow:hidden;
+  min-width:170px;
+  height:24px;
+}
+.progress-fill{
+  height:24px;
+  line-height:24px;
+  background:linear-gradient(90deg,var(--primary),var(--accent));
+  color:white;
+  text-align:center;
+  font-size:12px;
+  font-weight:800;
+}
+table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  margin-top:12px;
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:14px;
+}
+th,td{
+  padding:11px 12px;
+  text-align:left;
+  border-bottom:1px solid var(--line);
+}
+th{
+  background:#eff6ff;
+  color:#1e3a8a;
+  font-size:13px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+tr:last-child td{border-bottom:none}
+.footer{
+  background:#f8fafc;
+  border-top:1px solid var(--line);
+  padding:18px 24px;
+  text-align:center;
+  color:var(--muted);
+  font-size:13px;
+}
+@media print{
+  body{background:white}
+  .container{box-shadow:none;margin:0;border-radius:0}
+  .header{background:#1e40af !important}
+}
 </style></head>
 <body><div class="container"><div class="header"><h1>BRAVO SYSTEM REPORT</h1><p>$($script:Report.ComputerName) | $($script:Report.Timestamp) | Profile: $Profile</p><p><span class="badge">Health Score: $($script:Report.Health.Score)/100 — $($script:Report.Health.Status)</span></p></div>
 <div class="content">
-<h2>Система та обладнання</h2>
+<h2><span class="section-icon">&#x1F5A5;</span>Система та обладнання</h2>
 <div class="grid">
-<div class="card"><h3>Система</h3>
+<div class="card"><h3>&#x1F5A5; Система</h3>
 <div class="info-row"><span class="info-label">OS:</span><span class="info-value">$($script:Report.OS.Caption)</span></div>
 <div class="info-row"><span class="info-label">Build:</span><span class="info-value">$($script:Report.OS.Build)</span></div>
 <div class="info-row"><span class="info-label">Архітектура:</span><span class="info-value">$($script:Report.OS.Architecture)</span></div>
@@ -790,32 +1004,32 @@ table{width:100%;border-collapse:collapse;margin-top:10px;} th,td{border:1px sol
 <div class="info-row"><span class="info-label">.NET:</span><span class="info-value">$($script:Report.DotNet.v4)</span></div>
 <div class="info-row"><span class="info-label">Uptime:</span><span class="info-value">$($script:Report.OS.UptimeDays) днів</span></div>
 </div>
-<div class="card"><h3>Процесор та пам'ять</h3>
+<div class="card"><h3>&#x1F9E0; Процесор та пам'ять</h3>
 <div class="info-row"><span class="info-label">CPU:</span><span class="info-value">$($script:Report.Hardware.CPU.Name)</span></div>
 <div class="info-row"><span class="info-label">Ядра/потоки:</span><span class="info-value">$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)</span></div>
 <div class="info-row"><span class="info-label">Завантаження CPU:</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.CPU.LoadPercent)%">$($script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>
 <div class="info-row"><span class="info-label">RAM:</span><span class="info-value">$($script:Report.Hardware.RAM.TotalGB) GB</span></div>
 <div class="info-row"><span class="info-label">RAM використано:</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.RAM.UsedPercent)%">$($script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div>
 </div>
-<div class="card"><h3>Диски</h3>
+<div class="card"><h3>&#x1F4BF; Диски</h3>
 <div class="info-row"><span class="info-label">Всього місця:</span><span class="info-value">$(Format-Size $script:Report.Hardware.Disks.TotalGB)</span></div>
 <div class="info-row"><span class="info-label">Вільно місця:</span><span class="info-value">$(Format-Size $script:Report.Hardware.Disks.FreeGB)</span></div>
 <div class="info-row"><span class="info-label">Вільно %:</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.Disks.FreePercent)%">$($script:Report.Hardware.Disks.FreePercent)%</div></div></span></div>
 </div>
-<div class="card"><h3>Мережа</h3>
+<div class="card"><h3>&#x1F310; Мережа</h3>
 <div class="info-row"><span class="info-label">Хостнейм:</span><span class="info-value">$($script:Report.Network.General.Hostname)</span></div>
 <div class="info-row"><span class="info-label">Домен:</span><span class="info-value">$($script:Report.Network.General.Domain)</span></div>
 <div class="info-row"><span class="info-label">IPv4:</span><span class="info-value">$($script:Report.Network.IP.IPv4 -join ', ')</span></div>
 <div class="info-row"><span class="info-label">Шлюз:</span><span class="info-value">$($script:Report.Network.Routing.DefaultGateway)</span></div>
 <div class="info-row"><span class="info-label">DNS:</span><span class="info-value">$($script:Report.Network.Routing.DNSServers -join ', ')</span></div>
 </div>
-<div class="card"><h3>Безпека</h3>
+<div class="card"><h3>&#x1F512; Безпека</h3>
 <div class="info-row"><span class="info-label">UAC:</span><span class="info-value">$(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'})</span></div>
 <div class="info-row"><span class="info-label">RDP:</span><span class="info-value">$(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'})</span></div>
 <div class="info-row"><span class="info-label">Антивірус:</span><span class="info-value">$($script:Report.Security.Antivirus.Product)</span></div>
 </div>
 </div>
-<h2>Статистика</h2>
+<h2><span class="section-icon">&#x1F4C8;</span>Статистика</h2>
 <div class="grid"><div class="card">
 <div class="info-row"><span class="info-label">Процеси:</span><span class="info-value">$($script:Report.Processes.Total)</span></div>
 <div class="info-row"><span class="info-label">Служб запущено:</span><span class="info-value">$($script:Report.Services.Running)/$($script:Report.Services.Total)</span></div>
@@ -825,8 +1039,8 @@ table{width:100%;border-collapse:collapse;margin-top:10px;} th,td{border:1px sol
 <div class="info-row"><span class="info-label">Встановлено ПЗ:</span><span class="info-value">$($script:Report.Software.Installed.Count)</span></div>
 <div class="info-row"><span class="info-label">Локальних адмінів:</span><span class="info-value">$($script:Report.Users.LocalAdmins.Count)</span></div>
 </div></div>
-<h2>Findings</h2><table><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr>$findingsRows</table>
-<h2>Помилки збору даних</h2><table><tr><th>Time</th><th>Section</th><th>Message</th></tr>$errorsRows</table>
+<h2><span class="section-icon">&#x1F50E;</span>Findings</h2><table><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr>$findingsRows</table>
+<h2><span class="section-icon">&#x1F6E0;</span>Помилки збору даних</h2><table><tr><th>Time</th><th>Section</th><th>Message</th></tr>$errorsRows</table>
 </div>
 <div class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $outputDir</p></div>
 </div></body></html>
