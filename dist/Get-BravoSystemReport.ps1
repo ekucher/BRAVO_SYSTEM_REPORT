@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-06-11 01:55:51
+    GeneratedAt: 2026-06-11 02:07:24
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1266,6 +1266,31 @@ function Update-BravoHealthScore {
 # ============================================================
 
 # MODULE: 50-Export-Json.ps1
+# Експорт BRAVO SYSTEM REPORT у JSON.
+
+function Export-BravoJsonReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$OutputDir,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$BaseFileName
+    )
+
+    # JSON
+    try {
+        $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
+        ConvertTo-Json $script:Report -Depth 12 | Out-File $jsonPath -Encoding utf8
+        $script:Report.GeneratedFiles += $jsonPath
+        Write-Host "  $IconJson JSON: $BaseFileName.json" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Export.Json' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка JSON: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
 
 
 # ============================================================
@@ -1604,15 +1629,7 @@ Write-Host ''
 Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
 # JSON
-try {
-    $jsonPath = Join-Path $outputDir "$baseFileName.json"
-    ConvertTo-Json $script:Report -Depth 12 | Out-File $jsonPath -Encoding utf8
-    $script:Report.GeneratedFiles += $jsonPath
-    Write-Host "  $IconJson JSON: $baseFileName.json" -ForegroundColor Green
-} catch {
-    Add-AuditError -Section 'Export.Json' -Message $_.Exception.Message
-    Write-Host "  $IconError Помилка JSON: $($_.Exception.Message)" -ForegroundColor Red
-}
+Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
 # HTML
 if (-not $JSONOnly) {

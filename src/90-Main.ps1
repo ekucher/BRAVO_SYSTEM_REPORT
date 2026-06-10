@@ -302,15 +302,7 @@ Write-Host ''
 Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
 # JSON
-try {
-    $jsonPath = Join-Path $outputDir "$baseFileName.json"
-    ConvertTo-Json $script:Report -Depth 12 | Out-File $jsonPath -Encoding utf8
-    $script:Report.GeneratedFiles += $jsonPath
-    Write-Host "  $IconJson JSON: $baseFileName.json" -ForegroundColor Green
-} catch {
-    Add-AuditError -Section 'Export.Json' -Message $_.Exception.Message
-    Write-Host "  $IconError Помилка JSON: $($_.Exception.Message)" -ForegroundColor Red
-}
+Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
 # HTML
 if (-not $JSONOnly) {
