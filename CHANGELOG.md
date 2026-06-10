@@ -1,4 +1,13 @@
-﻿## v0.3.16 — винесення розрахунку оцінки стану у модуль
+﻿## v0.3.17 — винесення JSON export у модуль
+
+- Винесено експорт JSON-звіту у `src\50-Export-Json.ps1`.
+- Додано функцію `Export-BravoJsonReport`.
+- Передано `OutputDir` і `BaseFileName` як явні параметри export-функції.
+- Збережено генерацію JSON через `ConvertTo-Json` з глибиною `12`.
+- Збережено запис згенерованого JSON-файлу у `Report.GeneratedFiles`.
+- Оновлено `src\90-Main.ps1`: inline-блок `# JSON` замінено на виклик `Export-BravoJsonReport`.
+- Перевірено build, parser check для `dist`, Quick `JSONOnly` runtime, Deep runtime, JSON/HTML export, відсутність HTML у `JSONOnly`, `CollectionErrors=0` та `git diff --check`.
+## v0.3.16 — винесення розрахунку оцінки стану у модуль
 
 - Винесено розрахунок підсумкової оцінки стану машини у `src\40-Health.ps1`.
 - Додано функцію `Update-BravoHealthScore`.
