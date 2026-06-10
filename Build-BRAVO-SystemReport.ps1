@@ -1,12 +1,4 @@
-﻿<# 
-.SYNOPSIS
-    Збирає модульний BRAVO SYSTEM REPORT у монолітний runtime-скрипт.
-.DESCRIPTION
-    Читає порядок модулів із src\BRAVO.build.json, об'єднує їх у dist\Get-BravoSystemReport.ps1,
-    виконує PowerShell parser check і створює SHA512 checksum.
-#>
-
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ManifestPath = ".\src\BRAVO.build.json",
     [switch]$Clean,
@@ -56,7 +48,7 @@ if (-not (Test-Path -LiteralPath $outputDir)) {
 $generatedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 $header = @"
-<# 
+<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
     GeneratedAt: $generatedAt
@@ -91,6 +83,7 @@ foreach ($relativeFile in $manifest.files) {
 
 $tokens = $null
 $parseErrors = $null
+
 $null = [System.Management.Automation.Language.Parser]::ParseFile(
     $outputPath,
     [ref]$tokens,
