@@ -1,0 +1,173 @@
+name: Local Windows Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  validate-local-windows:
+    name: Validate on local Windows runner
+    runs-on: [self-hosted, Windows, X64, bravo-system-report]
+
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show runner context
+        run: |
+          Write-Host "=== RUNNER CONTEXT ==="
+          Write-Host "[INFO] ComputerName: $env:COMPUTERNAME"
+          Write-Host "[INFO] UserName: $env:USERNAME"
+          Write-Host "[INFO] UserDomain: $env:USERDOMAIN"
+          Write-Host "[INFO] Workspace: $env:GITHUB_WORKSPACE"
+          Write-Host "[INFO] PowerShell: $($PSVersionTable.PSVersion)"
+
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+          $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+          Write-Host "[INFO] Identity: $($identity.Name)"
+          Write-Host "[INFO] IsAdmin: $isAdmin"
+
+      - name: Git diff whitespace check
+        run: |
+          Write-Host "=== GIT DIFF CHECK ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          Write-Host "[INFO] Current directory: $(Get-Location)"
+          Write-Host "[INFO] Configure git safe.directory: $env:GITHUB_WORKSPACE"
+
+          git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+          if ($LASTEXITCODE -ne 0) {
+            throw "git config safe.directory failed with code $LASTEXITCODE"
+          }
+
+          Write-Host "[INFO] Git top-level:"
+          git -C "$env:GITHUB_WORKSPACE" rev-parse --show-toplevel
+          if ($LASTEXITCODE -ne 0) {
+            throw "git rev-parse failed with code $LASTEXITCODE"
+          }
+
+          git -C "$env:GITHUB_WORKSPACE" diff --check
+          if ($LASTEXITCODE -ne 0) {
+            throw "git diff --check failed with code $LASTEXITCODE"
+          }
+
+          Write-Host "[OK] Git diff check passed"
+
+      - name: PowerShell parser check
+        run: |
+          Write-Host "=== POWERSHELL PARSER CHECK ==="
+
+          $scriptPath = Join-Path $env:GITHUB_WORKSPACE "src\Get-BravoSystemReport.ps1"
+
+          $tokens = $null
+          $parseErrors = $null
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $scriptPath,
+            [ref]$tokens,
+            [ref]$parseErrors
+          )
+
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | Format-Table Message,Extent -AutoSize
+            throw "PowerShell parser check failed."
+          }
+
+          Write-Host "[OK] Parser clean"
+
+      - name: Quick runtime test
+        run: |
+          Write-Host "=== QUICK RUNTIME TEST ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
+          New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Get-BravoSystemReport.ps1" -Profile Quick -NoPause -NoOpenFolder -OutputPath $reportsDir
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Quick runtime test failed with code $LASTEXITCODE"
+          }
+
+          Write-Host "[OK] Quick runtime test passed"
+          Write-Host "[INFO] Reports dir: $reportsDir"
+
+          Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.*" -ErrorAction SilentlyContinue |
+            Select-Object Name,Length,LastWriteTime |
+            Format-Table -AutoSize
+
+      - name: Quick BAT test
+        run: |
+          Write-Host "=== QUICK BAT TEST ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          cmd.exe /c call ".\BRAVO-SystemReport-Quick.bat" --nopause
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Quick BAT test failed with code $LASTEXITCODE"
+          }
+
+          Write-Host "[OK] Quick BAT test passed"
+
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
+          Write-Host "[INFO] Reports dir after BAT: $reportsDir"
+
+          Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.*" -ErrorAction SilentlyContinue |
+            Select-Object Name,Length,LastWriteTime |
+            Format-Table -AutoSize
+
+      - name: Validate latest JSON
+        run: |
+          Write-Host "=== JSON VALIDATION ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
+          Write-Host "[INFO] Reports dir: $reportsDir"
+
+          if (-not (Test-Path -LiteralPath $reportsDir)) {
+            throw "Reports directory not found: $reportsDir"
+          }
+
+          $reportFiles = @(Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.json" -ErrorAction SilentlyContinue)
+
+          if ($reportFiles.Count -eq 0) {
+            Write-Host "[ERROR] JSON files not found in reports directory."
+            Get-ChildItem -LiteralPath $reportsDir -Force -ErrorAction SilentlyContinue |
+              Select-Object Name,Length,LastWriteTime |
+              Format-Table -AutoSize
+
+            throw "No BravoSystemReport_*.json files found in $reportsDir"
+          }
+
+          $latestJson = $reportFiles |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          $report = Get-Content -LiteralPath $latestJson.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+
+          Write-Host "[INFO] JSON: $($latestJson.FullName)"
+          Write-Host "[INFO] ScriptVersion: $($report.ScriptVersion)"
+          Write-Host "[INFO] Profile: $($report.Profile)"
+          Write-Host "[INFO] Health: $($report.Health.Score)/100 $($report.Health.Status)"
+          Write-Host "[INFO] CollectionErrors: $(@($report.CollectionErrors).Count)"
+
+          if ($report.Profile -ne "Quick") {
+            throw "Expected Profile=Quick, got Profile=$($report.Profile)"
+          }
+
+          if (@($report.CollectionErrors).Count -ne 0) {
+            throw "Expected CollectionErrors=0, got CollectionErrors=$(@($report.CollectionErrors).Count)"
+          }
+
+          Write-Host "[OK] JSON validation passed"
