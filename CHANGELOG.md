@@ -1,4 +1,14 @@
-﻿## v0.3.9 — винесення Storage collector-а у модуль
+﻿## v0.3.10 — винесення Network collector-а у модуль
+
+- Винесено збір мережевої інформації у `src\33-Collectors-Network.ps1`.
+- Додано функцію `Get-BravoNetworkAudit`.
+- Перенесено збір hostname, domain, IPv4, gateway, DNS, adapters та TCP-з'єднань з `src\90-Main.ps1`.
+- Збережено логіку визначення primary IPv4 через `Get-BravoPrimaryNetworkInterface`.
+- Збережено логіку впорядкування IPv4 через `Move-BravoIPv4ToFront`.
+- Збережено логіку визначення public IPv4 без виводу значення public IP у консоль.
+- Оновлено `src\90-Main.ps1`: inline-блок мережі замінено на виклик `Get-BravoNetworkAudit`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, primary IPv4, public IPv4 status, listening ports та `CollectionErrors=0`.
+## v0.3.9 — винесення Storage collector-а у модуль
 
 - Винесено storage helper-и у `src\32-Collectors-Storage.ps1`.
 - Додано функцію `Get-BravoStorageAudit`.
