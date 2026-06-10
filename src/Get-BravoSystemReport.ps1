@@ -154,9 +154,132 @@ function Get-BravoStorageDeepAudit {
     return [PSCustomObject]$storage
 }
 
+
+# --- BRAVO v0.3.2 Storage Critical Findings ---
+function Get-BravoStorageRiskSummary {
+    param(
+        [Parameter(Mandatory = $true)]
+        $StorageDeep
+    )
+
+    $criticalThreshold = 5
+    $warningThreshold = 10
+    $systemWarningThreshold = 15
+    $systemDrive = ($env:SystemDrive -replace ':','').ToUpperInvariant()
+
+    $risk = [ordered]@{
+        CollectedAt                = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        CriticalFreePercent        = $criticalThreshold
+        WarningFreePercent         = $warningThreshold
+        SystemWarningFreePercent   = $systemWarningThreshold
+        CriticalVolumes            = @()
+        WarningVolumes             = @()
+        SystemVolumeWarnings       = @()
+        HealthyVolumes             = @()
+        Summary                    = [ordered]@{
+            CriticalCount           = 0
+            WarningCount            = 0
+            SystemWarningCount      = 0
+            HealthyCount            = 0
+        }
+    }
+
+    if (-not $StorageDeep -or -not $StorageDeep.Volumes) {
+        return [PSCustomObject]$risk
+    }
+
+    foreach ($volume in @($StorageDeep.Volumes)) {
+        $driveLetter = ''
+        if ($null -ne $volume.DriveLetter -and [string]$volume.DriveLetter -ne '') {
+            $driveLetter = ([string]$volume.DriveLetter).TrimEnd(':').ToUpperInvariant()
+        }
+
+        $label = [string]$volume.FileSystemLabel
+        $displayName = if ($driveLetter) {
+            if ($label) { "$driveLetter`: $label" } else { "$driveLetter`:" }
+        } elseif ($label) {
+            $label
+        } else {
+            'Volume без літери'
+        }
+
+        $freePercent = $null
+        try {
+            if ($null -ne $volume.FreePercent -and [string]$volume.FreePercent -ne '') {
+                $freePercent = [double]$volume.FreePercent
+            }
+        } catch {
+            $freePercent = $null
+        }
+
+        $freeGB = $volume.FreeGB
+        $sizeGB = $volume.SizeGB
+
+        $volumeRisk = [PSCustomObject]@{
+            DriveLetter  = $driveLetter
+            Name         = $displayName
+            Label        = $label
+            FileSystem   = $volume.FileSystem
+            HealthStatus = $volume.HealthStatus
+            SizeGB       = $sizeGB
+            FreeGB       = $freeGB
+            FreePercent  = $freePercent
+        }
+
+        if ($null -eq $freePercent) {
+            continue
+        }
+
+        if ($freePercent -lt $criticalThreshold) {
+            $risk.CriticalVolumes += $volumeRisk
+
+            Add-AuditFinding `
+                -Severity 'CRITICAL' `
+                -Category 'Storage.FreeSpace' `
+                -Message ("Том {0} має критично мало вільного місця: {1} GB з {2} GB ({3}%)." -f $displayName, $freeGB, $sizeGB, $freePercent) `
+                -Recommendation 'Терміново звільніть місце або розширте том. Для VM/backup/workload томів перевірте snapshots, ISO, тимчасові файли, кеші, старі архіви та дублікати.'
+
+            continue
+        }
+
+        if ($freePercent -lt $warningThreshold) {
+            $risk.WarningVolumes += $volumeRisk
+
+            Add-AuditFinding `
+                -Severity 'WARNING' `
+                -Category 'Storage.FreeSpace' `
+                -Message ("Том {0} має мало вільного місця: {1} GB з {2} GB ({3}%)." -f $displayName, $freeGB, $sizeGB, $freePercent) `
+                -Recommendation 'Заплануйте очищення або розширення тому, щоб уникнути переходу в критичний стан.'
+
+            continue
+        }
+
+        if ($driveLetter -eq $systemDrive -and $freePercent -lt $systemWarningThreshold) {
+            $risk.SystemVolumeWarnings += $volumeRisk
+
+            Add-AuditFinding `
+                -Severity 'WARNING' `
+                -Category 'Storage.SystemDrive' `
+                -Message ("Системний том {0} має менше {1}% вільного місця: {2}%." -f $displayName, $systemWarningThreshold, $freePercent) `
+                -Recommendation 'Для системного тому бажано тримати запас вільного місця для оновлень Windows, кешів, crash dumps і тимчасових файлів.'
+
+            continue
+        }
+
+        $risk.HealthyVolumes += $volumeRisk
+    }
+
+    $risk.Summary.CriticalCount = @($risk.CriticalVolumes).Count
+    $risk.Summary.WarningCount = @($risk.WarningVolumes).Count
+    $risk.Summary.SystemWarningCount = @($risk.SystemVolumeWarnings).Count
+    $risk.Summary.HealthyCount = @($risk.HealthyVolumes).Count
+
+    return [PSCustomObject]$risk
+}
+
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = '0.3.0'
+$ScriptVersion = '0.3.2'
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
@@ -394,7 +517,7 @@ Write-Host ''
 Set-Location $ScriptDirectory -ErrorAction SilentlyContinue
 
 $script:Report = [ordered]@{
-    SchemaVersion = '0.3.0'
+    SchemaVersion = '0.3.2'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -618,6 +741,15 @@ if ($Profile -in @('Deep','Forensic')) {
         }
 
         Write-Host ("  [OK] Storage Deep Audit: logicalDisks={0}, volumes={1}, disks={2}" -f @($storageDeep.LogicalDisks).Count, @($storageDeep.Volumes).Count, @($storageDeep.Disks).Count)
+        $storageRisk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+        if ($script:Report.Hardware.Disks -is [System.Collections.IDictionary]) {
+            $script:Report.Hardware.Disks['StorageRisk'] = $storageRisk
+        } else {
+            $script:Report.Hardware.Disks | Add-Member -MemberType NoteProperty -Name 'StorageRisk' -Value $storageRisk -Force
+        }
+
+        Write-Host ("  [OK] Storage Risk: critical={0}, warning={1}, systemWarning={2}, healthy={3}" -f $storageRisk.Summary.CriticalCount, $storageRisk.Summary.WarningCount, $storageRisk.Summary.SystemWarningCount, $storageRisk.Summary.HealthyCount)
     } catch {
         Add-AuditError -Section 'StorageDeep' -Message $_.Exception.Message
         Write-Host "  [ERROR] Storage Deep Audit: $($_.Exception.Message)"
