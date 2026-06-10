@@ -1,14 +1,15 @@
-name: Local Windows Validation
+﻿name: Local Windows Validation
 
 on:
   pull_request:
     branches:
       - main
+      - bravo/integration/modular-build
   workflow_dispatch:
 
 jobs:
   validate-local-windows:
-    name: Validate on local Windows runner
+    name: Validate modular build on local Windows runner
     runs-on: [self-hosted, Windows, X64, bravo-system-report]
 
     defaults:
@@ -18,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Show runner context
         run: |
@@ -40,37 +43,49 @@ jobs:
           Write-Host "=== GIT DIFF CHECK ==="
 
           Set-Location $env:GITHUB_WORKSPACE
-
-          Write-Host "[INFO] Current directory: $(Get-Location)"
-          Write-Host "[INFO] Configure git safe.directory: $env:GITHUB_WORKSPACE"
-
           git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
-          if ($LASTEXITCODE -ne 0) {
-            throw "git config safe.directory failed with code $LASTEXITCODE"
-          }
 
-          Write-Host "[INFO] Git top-level:"
-          git -C "$env:GITHUB_WORKSPACE" rev-parse --show-toplevel
-          if ($LASTEXITCODE -ne 0) {
-            throw "git rev-parse failed with code $LASTEXITCODE"
-          }
-
-          git -C "$env:GITHUB_WORKSPACE" diff --check
+          git diff --check
           if ($LASTEXITCODE -ne 0) {
             throw "git diff --check failed with code $LASTEXITCODE"
           }
 
           Write-Host "[OK] Git diff check passed"
 
-      - name: PowerShell parser check
+      - name: Build modular monolith
+        run: |
+          Write-Host "=== BUILD MODULAR MONOLITH ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          .\Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build failed with code $LASTEXITCODE"
+          }
+
+          if (-not (Test-Path -LiteralPath ".\dist\Get-BravoSystemReport.ps1")) {
+            throw "Runtime script not found: dist\Get-BravoSystemReport.ps1"
+          }
+
+          if (-not (Test-Path -LiteralPath ".\dist\Get-BravoSystemReport.ps1.sha512")) {
+            throw "SHA512 file not found: dist\Get-BravoSystemReport.ps1.sha512"
+          }
+
+          Write-Host "[OK] Build completed"
+
+      - name: PowerShell parser check for dist
         run: |
           Write-Host "=== POWERSHELL PARSER CHECK ==="
 
-          $scriptPath = Join-Path $env:GITHUB_WORKSPACE "src\Get-BravoSystemReport.ps1"
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $scriptPath = Join-Path $env:GITHUB_WORKSPACE "dist\Get-BravoSystemReport.ps1"
 
           $tokens = $null
           $parseErrors = $null
-          $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
             $scriptPath,
             [ref]$tokens,
             [ref]$parseErrors
@@ -89,10 +104,15 @@ jobs:
 
           Set-Location $env:GITHUB_WORKSPACE
 
-          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports\ci-quick"
+
+          if (Test-Path -LiteralPath $reportsDir) {
+            Remove-Item -LiteralPath $reportsDir -Recurse -Force
+          }
+
           New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Get-BravoSystemReport.ps1" -Profile Quick -NoPause -NoOpenFolder -OutputPath $reportsDir
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\dist\Get-BravoSystemReport.ps1" -Profile Quick -NoPause -NoOpenFolder -OutputPath $reportsDir
 
           if ($LASTEXITCODE -ne 0) {
             throw "Quick runtime test failed with code $LASTEXITCODE"
@@ -101,69 +121,64 @@ jobs:
           Write-Host "[OK] Quick runtime test passed"
           Write-Host "[INFO] Reports dir: $reportsDir"
 
-          Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.*" -ErrorAction SilentlyContinue |
-            Select-Object Name,Length,LastWriteTime |
-            Format-Table -AutoSize
-
-      - name: Quick BAT test
-        run: |
-          Write-Host "=== QUICK BAT TEST ==="
-
-          Set-Location $env:GITHUB_WORKSPACE
-
-          cmd.exe /c call ".\BRAVO-SystemReport-Quick.bat" --nopause
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Quick BAT test failed with code $LASTEXITCODE"
-          }
-
-          Write-Host "[OK] Quick BAT test passed"
-
-          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
-          Write-Host "[INFO] Reports dir after BAT: $reportsDir"
-
-          Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.*" -ErrorAction SilentlyContinue |
-            Select-Object Name,Length,LastWriteTime |
-            Format-Table -AutoSize
-
       - name: Validate latest JSON
         run: |
           Write-Host "=== JSON VALIDATION ==="
 
           Set-Location $env:GITHUB_WORKSPACE
 
-          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
-          Write-Host "[INFO] Reports dir: $reportsDir"
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports\ci-quick"
 
           if (-not (Test-Path -LiteralPath $reportsDir)) {
             throw "Reports directory not found: $reportsDir"
           }
 
-          $reportFiles = @(Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.json" -ErrorAction SilentlyContinue)
-
-          if ($reportFiles.Count -eq 0) {
-            Write-Host "[ERROR] JSON files not found in reports directory."
-            Get-ChildItem -LiteralPath $reportsDir -Force -ErrorAction SilentlyContinue |
-              Select-Object Name,Length,LastWriteTime |
-              Format-Table -AutoSize
-
-            throw "No BravoSystemReport_*.json files found in $reportsDir"
-          }
-
-          $latestJson = $reportFiles |
+          $latestJson = Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.json" -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
+          if (-not $latestJson) {
+            throw "No BravoSystemReport_*.json files found in $reportsDir"
+          }
+
           $report = Get-Content -LiteralPath $latestJson.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
 
-          Write-Host "[INFO] JSON: $($latestJson.FullName)"
+          Write-Host "[INFO] JSON: $($latestJson.Name)"
+          Write-Host "[INFO] SchemaVersion: $($report.SchemaVersion)"
           Write-Host "[INFO] ScriptVersion: $($report.ScriptVersion)"
           Write-Host "[INFO] Profile: $($report.Profile)"
           Write-Host "[INFO] Health: $($report.Health.Score)/100 $($report.Health.Status)"
+          Write-Host "[INFO] OS: $($report.OS.Caption)"
+          Write-Host "[INFO] CPU: $($report.Hardware.CPU.Cores) / $($report.Hardware.CPU.LogicalProcessors)"
+          Write-Host "[INFO] RAM UsedPercent: $($report.Hardware.RAM.UsedPercent)"
+          Write-Host "[INFO] Disk FreePercent: $($report.Hardware.Disks.FreePercent)"
+          Write-Host "[INFO] PrimaryIPv4: $($report.Network.PrimaryIPv4)"
+          Write-Host "[INFO] PublicIPv4Status: $($report.Network.PublicIPv4Status)"
+          Write-Host "[INFO] Public IPv4 value is intentionally not printed."
           Write-Host "[INFO] CollectionErrors: $(@($report.CollectionErrors).Count)"
 
           if ($report.Profile -ne "Quick") {
             throw "Expected Profile=Quick, got Profile=$($report.Profile)"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($report.OS.Caption)) {
+            throw "OS.Caption is empty"
+          }
+
+          if (-not $report.Hardware.CPU.Cores) {
+            throw "Hardware.CPU.Cores is empty"
+          }
+
+          if ($report.Hardware.RAM.UsedPercent -le 0 -or $report.Hardware.RAM.UsedPercent -gt 100) {
+            throw "Hardware.RAM.UsedPercent is invalid: $($report.Hardware.RAM.UsedPercent)"
+          }
+
+          if ($report.Hardware.Disks.FreePercent -le 0 -or $report.Hardware.Disks.FreePercent -gt 100) {
+            throw "Hardware.Disks.FreePercent is invalid: $($report.Hardware.Disks.FreePercent)"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($report.Network.PrimaryIPv4)) {
+            throw "Network.PrimaryIPv4 is empty"
           }
 
           if (@($report.CollectionErrors).Count -ne 0) {
@@ -171,3 +186,56 @@ jobs:
           }
 
           Write-Host "[OK] JSON validation passed"
+
+      - name: Public IPv4 literal scan
+        run: |
+          Write-Host "=== PUBLIC IPv4 LITERAL SCAN ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $files = git ls-files
+
+          $ipv4Regex = '\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b'
+          $hits = @()
+
+          foreach ($file in $files) {
+            if ($file -match '(^|/)reports(/|$)') {
+              continue
+            }
+
+            if (-not (Test-Path -LiteralPath $file)) {
+              continue
+            }
+
+            $content = Get-Content -LiteralPath $file -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+
+            foreach ($match in [regex]::Matches($content, $ipv4Regex)) {
+              $ip = $match.Value
+              $octets = $ip.Split('.') | ForEach-Object { [int]$_ }
+
+              $isPrivateOrSafe =
+                ($octets[0] -eq 0) -or
+                ($octets[0] -eq 10) -or
+                ($octets[0] -eq 127) -or
+                ($octets[0] -eq 169 -and $octets[1] -eq 254) -or
+                ($octets[0] -eq 172 -and $octets[1] -ge 16 -and $octets[1] -le 31) -or
+                ($octets[0] -eq 192 -and $octets[1] -eq 168) -or
+                ($octets[0] -eq 100 -and $octets[1] -ge 64 -and $octets[1] -le 127) -or
+                ($octets[0] -eq 198 -and ($octets[1] -eq 18 -or $octets[1] -eq 19)) -or
+                ($octets[0] -eq 203 -and $octets[1] -eq 0 -and $octets[2] -eq 113)
+
+              if (-not $isPrivateOrSafe) {
+                $hits += [pscustomobject]@{
+                  File = $file
+                  IP   = $ip
+                }
+              }
+            }
+          }
+
+          if ($hits.Count -gt 0) {
+            $hits | Format-Table -AutoSize
+            throw "Public IPv4 literal found in tracked files."
+          }
+
+          Write-Host "[OK] Public IPv4 literal scan passed"
