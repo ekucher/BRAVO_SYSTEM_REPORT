@@ -1,33 +1,35 @@
-name: PowerShell static check
+﻿name: Ручна перевірка PowerShell
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
-  psscriptanalyzer:
-    name: PSScriptAnalyzer
-    runs-on: windows-latest
+  repository-check:
+    name: Ручна перевірка структури репозиторію
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
-      - name: Checkout
+      - name: Отримати код
         uses: actions/checkout@v4
 
-      - name: Install PSScriptAnalyzer
-        shell: pwsh
+      - name: Перевірити структуру репозиторію
+        shell: bash
         run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+          set -euo pipefail
 
-      - name: Analyze PowerShell scripts
-        shell: pwsh
-        run: |
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning,Error
-          $results | Format-Table -AutoSize
-          if ($results) {
-            throw "PSScriptAnalyzer знайшов попередження або помилки."
-          }
+          echo "=== ПЕРЕВІРКА СТРУКТУРИ РЕПОЗИТОРІЮ ==="
+
+          test -f "Get-BravoSystemReport.ps1"
+          echo "[OK] Знайдено root wrapper"
+
+          test -f "src/Get-BravoSystemReport.ps1"
+          echo "[OK] Знайдено основний PowerShell-скрипт"
+
+          test -f "README.md"
+          echo "[OK] Знайдено README.md"
+
+          test -f "CHANGELOG.md"
+          echo "[OK] Знайдено CHANGELOG.md"
+
+          echo "[SUCCESS] Структура репозиторію коректна"

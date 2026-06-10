@@ -1,0 +1,17 @@
+# Довідковий опис patch v0.2.0
+
+Цей файл залишено як короткий опис змін. Основне застосування виконується скриптом `patch/APPLY-v0.2.0-stabilization.ps1`, який копіює перевірені файли з `patch/files`.
+
+Зміни:
+
+- стабілізовано `src/Get-BravoSystemReport.ps1`;
+- додано профілі `Quick`, `Full`, `Deep`, `Forensic`;
+- додано `-OutputPath`, `-NoOpenFolder`, `-EventLogDays`;
+- додано `Health.Score`, `Health.Status`, `Health.Findings`;
+- додано `CollectionErrors`;
+- виправлено конфлікти змінних `$cpu` і `$disk`;
+- оновлено `tools/Publish-ToGitHub.ps1`;
+- додано `.editorconfig`;
+- уніфіковано консольний вивід: секції `=== ... ===`, маркери `[INFO]`, `[OK]`, `[SUCCESS]`, `[ERROR]`;
+- усі службові повідомлення, документація та Git commit message — українською;
+- PowerShell-скрипти збережено у UTF-8 з BOM.
