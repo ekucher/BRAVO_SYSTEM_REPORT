@@ -38,7 +38,16 @@ jobs:
       - name: Git diff whitespace check
         run: |
           Write-Host "=== GIT DIFF CHECK ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          Write-Host "[INFO] Current directory: $(Get-Location)"
+          Write-Host "[INFO] Git top-level:"
+          git rev-parse --show-toplevel
+
           git diff --check
+
+          Write-Host "[OK] Git diff check passed"
 
       - name: PowerShell parser check
         run: |
