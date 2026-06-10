@@ -27,9 +27,12 @@ jobs:
           Write-Host "[INFO] UserDomain: $env:USERDOMAIN"
           Write-Host "[INFO] Workspace: $env:GITHUB_WORKSPACE"
           Write-Host "[INFO] PowerShell: $($PSVersionTable.PSVersion)"
+
           $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
           $principal = New-Object Security.Principal.WindowsPrincipal($identity)
           $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+          Write-Host "[INFO] Identity: $($identity.Name)"
           Write-Host "[INFO] IsAdmin: $isAdmin"
 
       - name: Git diff whitespace check
@@ -40,6 +43,7 @@ jobs:
       - name: PowerShell parser check
         run: |
           Write-Host "=== POWERSHELL PARSER CHECK ==="
+
           $scriptPath = Join-Path $env:GITHUB_WORKSPACE "src\Get-BravoSystemReport.ps1"
 
           $tokens = $null
@@ -60,19 +64,29 @@ jobs:
       - name: Quick runtime test
         run: |
           Write-Host "=== QUICK RUNTIME TEST ==="
+
           Set-Location $env:GITHUB_WORKSPACE
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Get-BravoSystemReport.ps1" -Profile Quick -NoPause -NoOpenFolder -OutputPath ".\reports"
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
+          New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Get-BravoSystemReport.ps1" -Profile Quick -NoPause -NoOpenFolder -OutputPath $reportsDir
 
           if ($LASTEXITCODE -ne 0) {
             throw "Quick runtime test failed with code $LASTEXITCODE"
           }
 
           Write-Host "[OK] Quick runtime test passed"
+          Write-Host "[INFO] Reports dir: $reportsDir"
+
+          Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.*" -ErrorAction SilentlyContinue |
+            Select-Object Name,Length,LastWriteTime |
+            Format-Table -AutoSize
 
       - name: Quick BAT test
         run: |
           Write-Host "=== QUICK BAT TEST ==="
+
           Set-Location $env:GITHUB_WORKSPACE
 
           cmd.exe /c call ".\BRAVO-SystemReport-Quick.bat" --nopause
@@ -83,12 +97,38 @@ jobs:
 
           Write-Host "[OK] Quick BAT test passed"
 
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
+          Write-Host "[INFO] Reports dir after BAT: $reportsDir"
+
+          Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.*" -ErrorAction SilentlyContinue |
+            Select-Object Name,Length,LastWriteTime |
+            Format-Table -AutoSize
+
       - name: Validate latest JSON
         run: |
           Write-Host "=== JSON VALIDATION ==="
+
           Set-Location $env:GITHUB_WORKSPACE
 
-          $latestJson = Get-ChildItem ".\reports\BravoSystemReport_*.json" -ErrorAction Stop |
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports"
+          Write-Host "[INFO] Reports dir: $reportsDir"
+
+          if (-not (Test-Path -LiteralPath $reportsDir)) {
+            throw "Reports directory not found: $reportsDir"
+          }
+
+          $reportFiles = @(Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.json" -ErrorAction SilentlyContinue)
+
+          if ($reportFiles.Count -eq 0) {
+            Write-Host "[ERROR] JSON files not found in reports directory."
+            Get-ChildItem -LiteralPath $reportsDir -Force -ErrorAction SilentlyContinue |
+              Select-Object Name,Length,LastWriteTime |
+              Format-Table -AutoSize
+
+            throw "No BravoSystemReport_*.json files found in $reportsDir"
+          }
+
+          $latestJson = $reportFiles |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
