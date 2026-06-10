@@ -37,3 +37,11 @@ Desktop.ini
 .env
 .env.*
 local.settings.json
+
+# BRAVO SYSTEM REPORT generated reports
+/reports/
+/src/reports/
+BravoSystemReport_*.json
+BravoSystemReport_*.html
+BravoSystemReport_*.csv
+BravoSystemReport_*.zip
