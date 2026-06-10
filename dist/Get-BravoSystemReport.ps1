@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-06-11 01:37:18
+    GeneratedAt: 2026-06-11 01:42:56
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1151,6 +1151,36 @@ function Get-BravoProcessesServicesAudit {
 # ============================================================
 
 # MODULE: 37-Collectors-Events.ps1
+# Збір інформації про журнали подій Windows.
+
+function Get-BravoEventLogsAudit {
+    [CmdletBinding()]
+    param()
+
+    # --- Журнали подій ---
+    try {
+        $lastDay = (Get-Date).AddDays(-1)
+        $eventLogStart = (Get-Date).AddDays(-1 * $EventLogDays)
+
+        $systemErrors24h = Get-EventLog -LogName System -EntryType Error -After $lastDay -ErrorAction SilentlyContinue
+        $systemWarnings24h = Get-EventLog -LogName System -EntryType Warning -After $lastDay -ErrorAction SilentlyContinue
+        $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue
+        $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue
+
+        $script:Report.EventLogs.SystemErrors24h = @($systemErrors24h).Count
+        $script:Report.EventLogs.SystemWarnings24h = @($systemWarnings24h).Count
+        $script:Report.EventLogs.SystemErrors = @($systemErrors).Count
+        $script:Report.EventLogs.SystemWarnings = @($systemWarnings).Count
+
+        if ($script:Report.EventLogs.SystemErrors -gt 0) {
+            Add-AuditFinding -Severity 'WARNING' -Category 'EventLogs' -Message "За $EventLogDays днів знайдено системних помилок: $($script:Report.EventLogs.SystemErrors)." -Recommendation 'Перегляньте System log і визначте повторювані джерела помилок.'
+        }
+
+        Write-Host "  $IconEvent Події System: помилок=$($script:Report.EventLogs.SystemErrors), попереджень=$($script:Report.EventLogs.SystemWarnings) за $EventLogDays дн." -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'EventLogs' -Message $_.Exception.Message
+    }
+}
 
 
 # ============================================================
@@ -1482,28 +1512,7 @@ Get-BravoUsersAudit
 Get-BravoProcessesServicesAudit
 
 # --- Журнали подій ---
-try {
-    $lastDay = (Get-Date).AddDays(-1)
-    $eventLogStart = (Get-Date).AddDays(-1 * $EventLogDays)
-
-    $systemErrors24h = Get-EventLog -LogName System -EntryType Error -After $lastDay -ErrorAction SilentlyContinue
-    $systemWarnings24h = Get-EventLog -LogName System -EntryType Warning -After $lastDay -ErrorAction SilentlyContinue
-    $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue
-    $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue
-
-    $script:Report.EventLogs.SystemErrors24h = @($systemErrors24h).Count
-    $script:Report.EventLogs.SystemWarnings24h = @($systemWarnings24h).Count
-    $script:Report.EventLogs.SystemErrors = @($systemErrors).Count
-    $script:Report.EventLogs.SystemWarnings = @($systemWarnings).Count
-
-    if ($script:Report.EventLogs.SystemErrors -gt 0) {
-        Add-AuditFinding -Severity 'WARNING' -Category 'EventLogs' -Message "За $EventLogDays днів знайдено системних помилок: $($script:Report.EventLogs.SystemErrors)." -Recommendation 'Перегляньте System log і визначте повторювані джерела помилок.'
-    }
-
-    Write-Host "  $IconEvent Події System: помилок=$($script:Report.EventLogs.SystemErrors), попереджень=$($script:Report.EventLogs.SystemWarnings) за $EventLogDays дн." -ForegroundColor Green
-} catch {
-    Add-AuditError -Section 'EventLogs' -Message $_.Exception.Message
-}
+Get-BravoEventLogsAudit
 
 # --- Програмне забезпечення ---
 try {

@@ -1,4 +1,13 @@
-﻿## v0.3.13 — винесення collector-а процесів і служб у модуль
+﻿## v0.3.14 — винесення EventLogs collector-а у модуль
+
+- Винесено збір журналів подій Windows у `src\37-Collectors-Events.ps1`.
+- Додано функцію `Get-BravoEventLogsAudit`.
+- Перенесено збір System Errors/Warnings за 24 години та за період профілю з `src\90-Main.ps1`.
+- Збережено використання параметра `EventLogDays`.
+- Збережено finding для системних помилок у журналі System.
+- Оновлено `src\90-Main.ps1`: inline-блок журналів подій замінено на виклик `Get-BravoEventLogsAudit`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, SystemErrors24h, SystemWarnings24h, SystemErrors, SystemWarnings та `CollectionErrors=0`.
+## v0.3.13 — винесення collector-а процесів і служб у модуль
 
 - Винесено збір інформації про процеси та служби у `src\36-Collectors-ProcessesServices.ps1`.
 - Додано функцію `Get-BravoProcessesServicesAudit`.
