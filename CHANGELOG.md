@@ -1,4 +1,4 @@
-﻿## v0.3.7 — винесення ReportModel у модуль
+## v0.3.7 — винесення ReportModel у модуль
 
 - Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.
 - Додано функцію `New-BravoReportModel`.
@@ -207,13 +207,20 @@
 ### Додано
 - Додано HTML-секцію Storage Critical Findings з підсумком критичних, попереджувальних, системних і здорових томів.
 - Додано HTML-секцію Storage Deep з таблицею томів, файлових систем, health/operational status, розміру, вільного місця, free percent і risk.
-- Додано CSS-класи для відображення storage-ризиків: `risk-critical`, `risk-warning`, `risk-ok`, `risk-unknown`.
+- Додано CSS-класи для відображення storage-ризиків:
+`risk-critical`,
+`risk-warning`,
+`risk-ok`,
+`risk-unknown`.
 - Додано HTML-екранування значень storage-таблиць перед вставкою у звіт.
 
 ### Перевірено
 - PowerShell parser check проходить.
 - Quick runtime test створює JSON і HTML.
-- HTML містить маркери Storage Critical Findings, Storage Deep, storage-table, `risk-critical`, `risk-warning`, `risk-ok`.
+- HTML містить маркери Storage Critical Findings, Storage Deep, storage-table,
+`risk-critical`,
+`risk-warning`,
+`risk-ok`.
 - JSON validation проходить з Profile=Quick і CollectionErrors=0.
 ## v0.3.7 — винесення ReportModel у модуль
 

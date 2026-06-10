@@ -1,4 +1,4 @@
-﻿# MODULE: 90-Main.ps1
+# MODULE: 90-Main.ps1
 # Основний execution flow BRAVO SYSTEM REPORT.
 # Param-блок винесено у src\05-Params.ps1.
 # Helper-функції винесено у src\10-Core.ps1.
@@ -502,33 +502,7 @@ Write-Host '=== ЗБІР ІНФОРМАЦІЇ ПРО МАШИНУ ===' -Foregrou
 Write-Host ''
 
 # --- ОС ---
-try {
-    $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
-    $script:Report.OS.Caption = $osInfo.Caption
-    $script:Report.OS.Version = $osInfo.Version
-    $script:Report.OS.Build = $osInfo.BuildNumber
-    $script:Report.OS.Architecture = $osInfo.OSArchitecture
-
-    $installDate = Convert-AuditDateTime -Value $osInfo.InstallDate -UseCim:$script:UseCim
-    if ($installDate) { $script:Report.OS.InstallDate = $installDate.ToString('yyyy-MM-dd') }
-
-    $lastBoot = Convert-AuditDateTime -Value $osInfo.LastBootUpTime -UseCim:$script:UseCim
-    if ($lastBoot) {
-        $uptime = (Get-Date) - $lastBoot
-        $script:Report.OS.LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
-        $script:Report.OS.UptimeDays = $uptime.Days
-        $script:Report.OS.UptimeHours = [Math]::Round($uptime.TotalHours, 1)
-    }
-
-    if ($script:Report.OS.UptimeDays -gt 90) {
-        Add-AuditFinding -Severity 'WARNING' -Category 'OS' -Message "Uptime більше 90 днів: $($script:Report.OS.UptimeDays)" -Recommendation 'Заплануйте контрольоване перезавантаження після перевірки критичних служб.'
-    }
-
-    Write-Host "  $IconOk ОС: $($script:Report.OS.Caption)" -ForegroundColor Green
-} catch {
-    Add-AuditError -Section 'OS' -Message $_.Exception.Message
-    Write-Host "  $IconError Помилка збору даних ОС: $($_.Exception.Message)" -ForegroundColor Red
-}
+Get-BravoOperatingSystemAudit
 
 # --- .NET ---
 try {
@@ -544,51 +518,7 @@ try {
 }
 
 # --- Апаратне забезпечення ---
-try {
-    $cpuInfo = Get-AuditObject -ClassName 'Win32_Processor' -First
-    $computerSystemInfo = Get-AuditObject -ClassName 'Win32_ComputerSystem' -First
-
-    $script:Report.Hardware.ComputerSystem.Manufacturer = $computerSystemInfo.Manufacturer
-    $script:Report.Hardware.ComputerSystem.Model = $computerSystemInfo.Model
-    $script:Report.Hardware.ComputerSystem.Domain = $computerSystemInfo.Domain
-    $script:Report.Hardware.ComputerSystem.TotalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
-
-    $script:Report.Hardware.CPU.Name = ($cpuInfo.Name | ForEach-Object { $_.Trim() })
-    $script:Report.Hardware.CPU.Cores = $cpuInfo.NumberOfCores
-    $script:Report.Hardware.CPU.LogicalProcessors = $cpuInfo.NumberOfLogicalProcessors
-    $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
-    $script:Report.Hardware.CPU.LoadPercent = [Math]::Round(($cpuInfo.LoadPercentage | Measure-Object -Average).Average)
-
-    $script:Report.Hardware.RAM.TotalGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
-    if ($osInfo.TotalVisibleMemorySize -gt 0) {
-        $script:Report.Hardware.RAM.UsedPercent = [Math]::Round((($osInfo.TotalVisibleMemorySize - $osInfo.FreePhysicalMemory) / $osInfo.TotalVisibleMemorySize) * 100)
-    }
-
-    if ($Profile -in @('Full','Deep','Forensic')) {
-        try {
-            $memoryModules = Get-AuditObject -ClassName 'Win32_PhysicalMemory'
-            foreach ($module in $memoryModules) {
-                $script:Report.Hardware.RAM.Modules += [PSCustomObject]@{
-                    BankLabel    = $module.BankLabel
-                    DeviceLocator = $module.DeviceLocator
-                    Manufacturer = $module.Manufacturer
-                    PartNumber   = ($module.PartNumber | ForEach-Object { if ($_) { $_.Trim() } })
-                    SerialNumber = $module.SerialNumber
-                    CapacityGB   = [Math]::Round($module.Capacity / 1GB, 2)
-                    SpeedMHz     = $module.Speed
-                }
-            }
-        } catch {
-            Add-AuditError -Section 'Hardware.RAM.Modules' -Message $_.Exception.Message
-        }
-    }
-
-    Write-Host "  $IconCpu CPU: $($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків ($($script:Report.Hardware.CPU.LoadPercent)%)" -ForegroundColor Green
-    Write-Host "  $IconRam RAM: $($script:Report.Hardware.RAM.TotalGB) GB ($($script:Report.Hardware.RAM.UsedPercent)% використано)" -ForegroundColor Green
-} catch {
-    Add-AuditError -Section 'Hardware' -Message $_.Exception.Message
-    Write-Host "  $IconError Помилка апаратних даних: $($_.Exception.Message)" -ForegroundColor Red
-}
+Get-BravoHardwareAudit
 
 # --- BIOS ---
 try {
