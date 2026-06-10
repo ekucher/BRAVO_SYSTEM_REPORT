@@ -1,3 +1,17 @@
+## v0.3.4 - 2026-06-10
+
+### Змінено
+- Оновлено BAT-запускачі Quick, Full, Deep, Forensic.
+- Додано обробку аргументів --nopause, -nopause, /nopause на рівні BAT-обгорток.
+- BAT-запускачі більше не виконують pause, якщо передано --nopause.
+- BAT-запускачі повертають exit code основного PowerShell-скрипта.
+
+### Перевірено
+- BRAVO-SystemReport-Quick.bat --nopause завершується без Press any key to continue.
+- Quick runtime створює JSON і HTML.
+- ExitCode=0.
+- PowerShell parser check проходить.
+- git diff --check проходить без whitespace error.
 ## v0.3.3 - 2026-06-10
 
 ### Додано

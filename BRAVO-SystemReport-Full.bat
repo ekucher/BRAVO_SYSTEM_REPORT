@@ -1,42 +1,64 @@
-﻿@echo off
-chcp 65001 >nul
-setlocal
-
-title BRAVO SYSTEM REPORT - Full
+@echo off
+setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
 set "SCRIPT=%SCRIPT_DIR%Get-BravoSystemReport.ps1"
 set "REPORTS=%SCRIPT_DIR%reports"
+set "NO_PAUSE=0"
+
+:parse_args
+if "%~1"=="" goto after_parse_args
+
+if /I "%~1"=="--nopause" (
+    set "NO_PAUSE=1"
+    shift
+    goto parse_args
+)
+
+if /I "%~1"=="-nopause" (
+    set "NO_PAUSE=1"
+    shift
+    goto parse_args
+)
+
+if /I "%~1"=="/nopause" (
+    set "NO_PAUSE=1"
+    shift
+    goto parse_args
+)
+
+shift
+goto parse_args
+
+:after_parse_args
 
 echo === BRAVO SYSTEM REPORT ===
-echo [INFO] Режим запуску: Full
-echo [INFO] Директорія: %SCRIPT_DIR%
-echo [INFO] Звіти: %REPORTS%
-echo.
+echo [INFO] Profile: Full
+echo [INFO] Script: %SCRIPT%
+echo [INFO] Reports: %REPORTS%
 
 if not exist "%SCRIPT%" (
-    echo [ERROR] Не знайдено файл: %SCRIPT%
-    echo.
-    pause
+    echo [ERROR] Script not found: %SCRIPT%
+    if "%NO_PAUSE%"=="0" pause
     exit /b 1
 )
 
 if not exist "%REPORTS%" (
-    mkdir "%REPORTS%" >nul 2>&1
+    mkdir "%REPORTS%"
 )
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" -Profile Full -NoPause -NoOpenFolder -OutputPath "%REPORTS%"
 
 set "EXIT_CODE=%ERRORLEVEL%"
 
-echo.
-if "%EXIT_CODE%"=="0" (
-    echo [SUCCESS] BRAVO SYSTEM REPORT завершено успішно.
-    echo [INFO] Звіти збережено: %REPORTS%
+if not "%EXIT_CODE%"=="0" (
+    echo [ERROR] BRAVO SYSTEM REPORT failed. ExitCode=%EXIT_CODE%
 ) else (
-    echo [ERROR] BRAVO SYSTEM REPORT завершився з кодом: %EXIT_CODE%
+    echo [SUCCESS] BRAVO SYSTEM REPORT completed successfully.
 )
 
-echo.
-pause
+echo [INFO] Reports saved: %REPORTS%
+
+if "%NO_PAUSE%"=="0" pause
+
 exit /b %EXIT_CODE%
