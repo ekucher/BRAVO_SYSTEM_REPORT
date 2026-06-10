@@ -1,4 +1,13 @@
-﻿## v0.3.14 — винесення EventLogs collector-а у модуль
+﻿## v0.3.15 — винесення Software collector-а у модуль
+
+- Винесено збір інформації про встановлене програмне забезпечення у `src\38-Collectors-Software.ps1`.
+- Додано функцію `Get-BravoSoftwareAudit`.
+- Перенесено збір програм з registry uninstall-гілок `HKLM` та `WOW6432Node`.
+- Збережено додатковий збір `HKCU` uninstall-гілки для профілів `Deep` та `Forensic`.
+- Збережено різний формат виводу: назви програм для `Quick`, деталізовані об'єкти для інших профілів.
+- Оновлено `src\90-Main.ps1`: inline-блок програмного забезпечення замінено на виклик `Get-BravoSoftwareAudit`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, Software.Installed та `CollectionErrors=0`.
+## v0.3.14 — винесення EventLogs collector-а у модуль
 
 - Винесено збір журналів подій Windows у `src\37-Collectors-Events.ps1`.
 - Додано функцію `Get-BravoEventLogsAudit`.
