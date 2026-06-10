@@ -36,7 +36,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = $PSScriptRoot
-$ScriptPath = Join-Path $RepoRoot 'src\Get-BravoSystemReport.ps1'
+$ScriptPath = Join-Path $RepoRoot 'dist\\Get-BravoSystemReport.ps1'
 
 if (-not (Test-Path -LiteralPath $ScriptPath)) {
     throw "Не знайдено основний скрипт: $ScriptPath"
