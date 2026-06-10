@@ -1,3 +1,12 @@
+﻿## 0.3.0 - Unreleased
+
+### Додано
+- Додано перший безпечний skeleton Storage Deep Audit для профілів Deep та Forensic.
+- Додано JSON-секцію Hardware.Disks.Deep з базовими даними LogicalDisks, Volumes та Disks.
+
+### Змінено
+- Оновлено ScriptVersion та SchemaVersion до 0.3.0.
+
 # Журнал змін
 
 ## 0.2.0 — 2026-06-10
