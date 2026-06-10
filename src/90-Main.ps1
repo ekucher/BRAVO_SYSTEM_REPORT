@@ -781,8 +781,50 @@ try {
             Add-AuditError -Section 'Network.TcpConnections' -Message $_.Exception.Message
         }
     }
+# BRAVO IP ORDER OUTPUT START
+$bravoPrimaryNetwork = Get-BravoPrimaryNetworkInterface
+$bravoPrimaryIPv4 = $null
 
-    Write-Host "  $IconNetwork IP: $($script:Report.Network.IP.IPv4 -join ', ')" -ForegroundColor Green
+if ($bravoPrimaryNetwork -and $bravoPrimaryNetwork.IPv4) {
+    $bravoPrimaryIPv4 = $bravoPrimaryNetwork.IPv4
+}
+
+$bravoIPv4Source = @(Get-BravoAllUsableIPv4AddressList)
+
+if ($bravoIPv4Source.Count -eq 0 -and $Report.Network) {
+    if ($Report.Network -is [System.Collections.IDictionary]) {
+        if ($Report.Network.Contains("IPv4")) {
+            $bravoIPv4Source = @($Report.Network["IPv4"])
+        }
+    } elseif ($Report.Network.IPv4) {
+        $bravoIPv4Source = @($Report.Network.IPv4)
+    }
+}
+
+$bravoOrderedIPv4 = @(Move-BravoIPv4ToFront -IPv4 $bravoIPv4Source -PrimaryIPv4 $bravoPrimaryIPv4)
+
+if ($bravoOrderedIPv4.Count -gt 0) {
+    $bravoPrimaryIPv4 = $bravoOrderedIPv4[0]
+    $bravoIPv4Text = $bravoOrderedIPv4 -join ", "
+} else {
+    $bravoPrimaryIPv4 = "N/A"
+    $bravoIPv4Text = "N/A"
+}
+
+if ($Report.Network) {
+    if ($Report.Network -is [System.Collections.IDictionary]) {
+        $Report.Network["IPv4"] = @($bravoOrderedIPv4)
+        $Report.Network["PrimaryIPv4"] = $bravoPrimaryIPv4
+        $Report.Network["PrimaryInterface"] = $bravoPrimaryNetwork
+    } else {
+        $Report.Network | Add-Member -NotePropertyName "IPv4" -NotePropertyValue @($bravoOrderedIPv4) -Force
+        $Report.Network | Add-Member -NotePropertyName "PrimaryIPv4" -NotePropertyValue $bravoPrimaryIPv4 -Force
+        $Report.Network | Add-Member -NotePropertyName "PrimaryInterface" -NotePropertyValue $bravoPrimaryNetwork -Force
+    }
+}
+
+Write-Host "  [OK] IP: $bravoIPv4Text" -ForegroundColor Green
+# BRAVO IP ORDER OUTPUT END
 } catch {
     Add-AuditError -Section 'Network' -Message $_.Exception.Message
     Write-Host "  $IconError Помилка мережевих даних: $($_.Exception.Message)" -ForegroundColor Red
