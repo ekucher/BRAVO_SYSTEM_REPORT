@@ -1,3 +1,11 @@
+﻿## v0.3.9 — винесення Storage collector-а у модуль
+
+- Винесено storage helper-и у `src\32-Collectors-Storage.ps1`.
+- Додано функцію `Get-BravoStorageAudit`.
+- Перенесено базовий збір дисків з `src\90-Main.ps1` у Storage collector.
+- Збережено логіку `Win32_LogicalDisk`, `Win32_DiskDrive`, `Storage Deep Audit` та `StorageRisk`.
+- Оновлено `src\90-Main.ps1`: inline-блок дисків замінено на виклик `Get-BravoStorageAudit`.
+- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, Storage Deep, StorageRisk та `CollectionErrors=0`.
 ## v0.3.7 — винесення ReportModel у модуль
 
 - Винесено створення базової моделі звіту у `src\20-ReportModel.ps1`.

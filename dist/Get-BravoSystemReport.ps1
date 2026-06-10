@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-06-11 00:59:39
+    GeneratedAt: 2026-06-11 01:15:28
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -513,119 +513,8 @@ function Get-BravoHardwareAudit {
 # ============================================================
 
 # MODULE: 32-Collectors-Storage.ps1
+# Збір інформації про диски, Storage Deep Audit та storage-ризики.
 
-
-# ============================================================
-# MODULE: src/33-Collectors-Network.ps1
-# ============================================================
-
-# MODULE: 33-Collectors-Network.ps1
-
-
-# ============================================================
-# MODULE: src/34-Collectors-Security.ps1
-# ============================================================
-
-# MODULE: 34-Collectors-Security.ps1
-
-
-# ============================================================
-# MODULE: src/35-Collectors-Users.ps1
-# ============================================================
-
-# MODULE: 35-Collectors-Users.ps1
-
-
-# ============================================================
-# MODULE: src/36-Collectors-ProcessesServices.ps1
-# ============================================================
-
-# MODULE: 36-Collectors-ProcessesServices.ps1
-
-
-# ============================================================
-# MODULE: src/37-Collectors-Events.ps1
-# ============================================================
-
-# MODULE: 37-Collectors-Events.ps1
-
-
-# ============================================================
-# MODULE: src/38-Collectors-Software.ps1
-# ============================================================
-
-# MODULE: 38-Collectors-Software.ps1
-
-
-# ============================================================
-# MODULE: src/40-Health.ps1
-# ============================================================
-
-# MODULE: 40-Health.ps1
-
-
-# ============================================================
-# MODULE: src/50-Export-Json.ps1
-# ============================================================
-
-# MODULE: 50-Export-Json.ps1
-
-
-# ============================================================
-# MODULE: src/51-Export-Html.ps1
-# ============================================================
-
-# MODULE: 51-Export-Html.ps1
-
-
-# ============================================================
-# MODULE: src/52-Export-Csv.ps1
-# ============================================================
-
-# MODULE: 52-Export-Csv.ps1
-
-
-# ============================================================
-# MODULE: src/53-Export-Zip.ps1
-# ============================================================
-
-# MODULE: 53-Export-Zip.ps1
-
-
-# ============================================================
-# MODULE: src/54-Export-Email.ps1
-# ============================================================
-
-# MODULE: 54-Export-Email.ps1
-
-
-# ============================================================
-# MODULE: src/90-Main.ps1
-# ============================================================
-
-# MODULE: 90-Main.ps1
-# Основний execution flow BRAVO SYSTEM REPORT.
-# Param-блок винесено у src\05-Params.ps1.
-# Helper-функції винесено у src\10-Core.ps1.
-
-<#
-.SYNOPSIS
-    BRAVO SYSTEM REPORT — детальний аудит Windows-машини.
-.DESCRIPTION
-    Збирає базову інформацію про ОС, апаратне забезпечення, диски, мережу,
-    безпеку, користувачів, процеси, служби, події та встановлене ПЗ.
-
-    Версія 0.2.0 стабілізує початковий скрипт:
-    - додає профілі аудиту;
-    - додає OutputPath, NoOpenFolder, NoPause;
-    - виправляє конфлікти змінних іконок з об'єктами CPU/дисків;
-    - додає CollectionErrors та Findings;
-    - виправляє обчислення часу виконання;
-    - прибирає порожні catch-блоки.
-.NOTES
-    Рекомендована версія: Windows PowerShell 5.1+.
-    Для частини даних потрібні права адміністратора.
-#>
 # --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
 function Convert-BravoBytesToGB {
     param([Parameter(Mandatory = $false)]$Bytes)
@@ -862,6 +751,210 @@ function Get-BravoStorageRiskSummary {
     return [PSCustomObject]$risk
 }
 
+function Get-BravoStorageAudit {
+    [CmdletBinding()]
+    param()
+
+    # --- Диски ---
+    try {
+        $logicalDiskInfo = Get-AuditObject -ClassName 'Win32_LogicalDisk' -Filter 'DriveType=3'
+        $totalSpace = 0
+        $totalFree = 0
+
+        foreach ($logicalDisk in $logicalDiskInfo) {
+            $totalSpace += [double]$logicalDisk.Size
+            $totalFree += [double]$logicalDisk.FreeSpace
+
+            $volume = [PSCustomObject]@{
+                DeviceID    = $logicalDisk.DeviceID
+                VolumeName  = $logicalDisk.VolumeName
+                FileSystem  = $logicalDisk.FileSystem
+                TotalGB     = [Math]::Round($logicalDisk.Size / 1GB, 2)
+                FreeGB      = [Math]::Round($logicalDisk.FreeSpace / 1GB, 2)
+                FreePercent = if ($logicalDisk.Size -gt 0) { [Math]::Round(($logicalDisk.FreeSpace / $logicalDisk.Size) * 100, 2) } else { 0 }
+            }
+            $script:Report.Hardware.Disks.Volumes += $volume
+
+            if ($volume.FreePercent -lt 10) {
+                Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 10% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
+            } elseif ($volume.FreePercent -lt 20) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 20% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
+            }
+        }
+
+        if ($totalSpace -gt 0) {
+            $script:Report.Hardware.Disks.TotalGB = [Math]::Round($totalSpace / 1GB, 2)
+            $script:Report.Hardware.Disks.FreeGB = [Math]::Round($totalFree / 1GB, 2)
+            $script:Report.Hardware.Disks.FreePercent = [Math]::Round(($totalFree / $totalSpace) * 100, 2)
+        }
+
+        if ($Profile -in @('Full','Deep','Forensic')) {
+            try {
+                $physicalDisks = Get-AuditObject -ClassName 'Win32_DiskDrive'
+                foreach ($physicalDisk in $physicalDisks) {
+                    $script:Report.Hardware.Disks.PhysicalDisks += [PSCustomObject]@{
+                        Model        = $physicalDisk.Model
+                        SerialNumber = $physicalDisk.SerialNumber
+                        Interface    = $physicalDisk.InterfaceType
+                        MediaType    = $physicalDisk.MediaType
+                        SizeGB       = [Math]::Round($physicalDisk.Size / 1GB, 2)
+                        Status       = $physicalDisk.Status
+                    }
+                }
+            } catch {
+                Add-AuditError -Section 'Storage.PhysicalDisks' -Message $_.Exception.Message
+            }
+        }
+
+        Write-Host "  $IconDisk Диски: $(Format-Size $script:Report.Hardware.Disks.FreeGB) вільно ($($script:Report.Hardware.Disks.FreePercent)%)" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Storage' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка збору дисків: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+
+    # --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
+    if ($Profile -in @('Deep','Forensic')) {
+        try {
+            Write-Host "  [INFO] Storage Deep Audit: збір базових storage-даних..."
+
+            $storageDeep = Get-BravoStorageDeepAudit
+
+            if ($script:Report.Hardware.Disks -is [System.Collections.IDictionary]) {
+                $script:Report.Hardware.Disks['Deep'] = $storageDeep
+            } else {
+                $script:Report.Hardware.Disks | Add-Member -MemberType NoteProperty -Name 'Deep' -Value $storageDeep -Force
+            }
+
+            Write-Host ("  [OK] Storage Deep Audit: logicalDisks={0}, volumes={1}, disks={2}" -f @($storageDeep.LogicalDisks).Count, @($storageDeep.Volumes).Count, @($storageDeep.Disks).Count)
+            $storageRisk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+            if ($script:Report.Hardware.Disks -is [System.Collections.IDictionary]) {
+                $script:Report.Hardware.Disks['StorageRisk'] = $storageRisk
+            } else {
+                $script:Report.Hardware.Disks | Add-Member -MemberType NoteProperty -Name 'StorageRisk' -Value $storageRisk -Force
+            }
+
+            Write-Host ("  [OK] Storage Risk: critical={0}, warning={1}, systemWarning={2}, healthy={3}" -f $storageRisk.Summary.CriticalCount, $storageRisk.Summary.WarningCount, $storageRisk.Summary.SystemWarningCount, $storageRisk.Summary.HealthyCount)
+        } catch {
+            Add-AuditError -Section 'StorageDeep' -Message $_.Exception.Message
+            Write-Host "  [ERROR] Storage Deep Audit: $($_.Exception.Message)"
+        }
+    }
+}
+
+
+# ============================================================
+# MODULE: src/33-Collectors-Network.ps1
+# ============================================================
+
+# MODULE: 33-Collectors-Network.ps1
+
+
+# ============================================================
+# MODULE: src/34-Collectors-Security.ps1
+# ============================================================
+
+# MODULE: 34-Collectors-Security.ps1
+
+
+# ============================================================
+# MODULE: src/35-Collectors-Users.ps1
+# ============================================================
+
+# MODULE: 35-Collectors-Users.ps1
+
+
+# ============================================================
+# MODULE: src/36-Collectors-ProcessesServices.ps1
+# ============================================================
+
+# MODULE: 36-Collectors-ProcessesServices.ps1
+
+
+# ============================================================
+# MODULE: src/37-Collectors-Events.ps1
+# ============================================================
+
+# MODULE: 37-Collectors-Events.ps1
+
+
+# ============================================================
+# MODULE: src/38-Collectors-Software.ps1
+# ============================================================
+
+# MODULE: 38-Collectors-Software.ps1
+
+
+# ============================================================
+# MODULE: src/40-Health.ps1
+# ============================================================
+
+# MODULE: 40-Health.ps1
+
+
+# ============================================================
+# MODULE: src/50-Export-Json.ps1
+# ============================================================
+
+# MODULE: 50-Export-Json.ps1
+
+
+# ============================================================
+# MODULE: src/51-Export-Html.ps1
+# ============================================================
+
+# MODULE: 51-Export-Html.ps1
+
+
+# ============================================================
+# MODULE: src/52-Export-Csv.ps1
+# ============================================================
+
+# MODULE: 52-Export-Csv.ps1
+
+
+# ============================================================
+# MODULE: src/53-Export-Zip.ps1
+# ============================================================
+
+# MODULE: 53-Export-Zip.ps1
+
+
+# ============================================================
+# MODULE: src/54-Export-Email.ps1
+# ============================================================
+
+# MODULE: 54-Export-Email.ps1
+
+
+# ============================================================
+# MODULE: src/90-Main.ps1
+# ============================================================
+
+# MODULE: 90-Main.ps1
+# Основний execution flow BRAVO SYSTEM REPORT.
+# Param-блок винесено у src\05-Params.ps1.
+# Helper-функції винесено у src\10-Core.ps1.
+
+<#
+.SYNOPSIS
+    BRAVO SYSTEM REPORT — детальний аудит Windows-машини.
+.DESCRIPTION
+    Збирає базову інформацію про ОС, апаратне забезпечення, диски, мережу,
+    безпеку, користувачів, процеси, служби, події та встановлене ПЗ.
+
+    Версія 0.2.0 стабілізує початковий скрипт:
+    - додає профілі аудиту;
+    - додає OutputPath, NoOpenFolder, NoPause;
+    - виправляє конфлікти змінних іконок з об'єктами CPU/дисків;
+    - додає CollectionErrors та Findings;
+    - виправляє обчислення часу виконання;
+    - прибирає порожні catch-блоки.
+.NOTES
+    Рекомендована версія: Windows PowerShell 5.1+.
+    Для частини даних потрібні права адміністратора.
+#>
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
 $ScriptVersion = "0.3.4"
@@ -1137,91 +1230,8 @@ try {
 }
 
 # --- Диски ---
-try {
-    $logicalDiskInfo = Get-AuditObject -ClassName 'Win32_LogicalDisk' -Filter 'DriveType=3'
-    $totalSpace = 0
-    $totalFree = 0
+Get-BravoStorageAudit
 
-    foreach ($logicalDisk in $logicalDiskInfo) {
-        $totalSpace += [double]$logicalDisk.Size
-        $totalFree += [double]$logicalDisk.FreeSpace
-
-        $volume = [PSCustomObject]@{
-            DeviceID    = $logicalDisk.DeviceID
-            VolumeName  = $logicalDisk.VolumeName
-            FileSystem  = $logicalDisk.FileSystem
-            TotalGB     = [Math]::Round($logicalDisk.Size / 1GB, 2)
-            FreeGB      = [Math]::Round($logicalDisk.FreeSpace / 1GB, 2)
-            FreePercent = if ($logicalDisk.Size -gt 0) { [Math]::Round(($logicalDisk.FreeSpace / $logicalDisk.Size) * 100, 2) } else { 0 }
-        }
-        $script:Report.Hardware.Disks.Volumes += $volume
-
-        if ($volume.FreePercent -lt 10) {
-            Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 10% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
-        } elseif ($volume.FreePercent -lt 20) {
-            Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 20% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
-        }
-    }
-
-    if ($totalSpace -gt 0) {
-        $script:Report.Hardware.Disks.TotalGB = [Math]::Round($totalSpace / 1GB, 2)
-        $script:Report.Hardware.Disks.FreeGB = [Math]::Round($totalFree / 1GB, 2)
-        $script:Report.Hardware.Disks.FreePercent = [Math]::Round(($totalFree / $totalSpace) * 100, 2)
-    }
-
-    if ($Profile -in @('Full','Deep','Forensic')) {
-        try {
-            $physicalDisks = Get-AuditObject -ClassName 'Win32_DiskDrive'
-            foreach ($physicalDisk in $physicalDisks) {
-                $script:Report.Hardware.Disks.PhysicalDisks += [PSCustomObject]@{
-                    Model        = $physicalDisk.Model
-                    SerialNumber = $physicalDisk.SerialNumber
-                    Interface    = $physicalDisk.InterfaceType
-                    MediaType    = $physicalDisk.MediaType
-                    SizeGB       = [Math]::Round($physicalDisk.Size / 1GB, 2)
-                    Status       = $physicalDisk.Status
-                }
-            }
-        } catch {
-            Add-AuditError -Section 'Storage.PhysicalDisks' -Message $_.Exception.Message
-        }
-    }
-
-    Write-Host "  $IconDisk Диски: $(Format-Size $script:Report.Hardware.Disks.FreeGB) вільно ($($script:Report.Hardware.Disks.FreePercent)%)" -ForegroundColor Green
-} catch {
-    Add-AuditError -Section 'Storage' -Message $_.Exception.Message
-    Write-Host "  $IconError Помилка збору дисків: $($_.Exception.Message)" -ForegroundColor Red
-}
-
-
-# --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
-if ($Profile -in @('Deep','Forensic')) {
-    try {
-        Write-Host "  [INFO] Storage Deep Audit: збір базових storage-даних..."
-
-        $storageDeep = Get-BravoStorageDeepAudit
-
-        if ($script:Report.Hardware.Disks -is [System.Collections.IDictionary]) {
-            $script:Report.Hardware.Disks['Deep'] = $storageDeep
-        } else {
-            $script:Report.Hardware.Disks | Add-Member -MemberType NoteProperty -Name 'Deep' -Value $storageDeep -Force
-        }
-
-        Write-Host ("  [OK] Storage Deep Audit: logicalDisks={0}, volumes={1}, disks={2}" -f @($storageDeep.LogicalDisks).Count, @($storageDeep.Volumes).Count, @($storageDeep.Disks).Count)
-        $storageRisk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
-
-        if ($script:Report.Hardware.Disks -is [System.Collections.IDictionary]) {
-            $script:Report.Hardware.Disks['StorageRisk'] = $storageRisk
-        } else {
-            $script:Report.Hardware.Disks | Add-Member -MemberType NoteProperty -Name 'StorageRisk' -Value $storageRisk -Force
-        }
-
-        Write-Host ("  [OK] Storage Risk: critical={0}, warning={1}, systemWarning={2}, healthy={3}" -f $storageRisk.Summary.CriticalCount, $storageRisk.Summary.WarningCount, $storageRisk.Summary.SystemWarningCount, $storageRisk.Summary.HealthyCount)
-    } catch {
-        Add-AuditError -Section 'StorageDeep' -Message $_.Exception.Message
-        Write-Host "  [ERROR] Storage Deep Audit: $($_.Exception.Message)"
-    }
-}
 # --- Мережа ---
 try {
     $script:Report.Network.General.Hostname = $env:COMPUTERNAME
