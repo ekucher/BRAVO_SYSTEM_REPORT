@@ -138,8 +138,27 @@ function Get-BravoNetworkAudit {
         }
     }
 
+    $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
+
+    if ($Report.Network -and $Report.Network.IP) {
+        $Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
+        $Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
+        $Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
+        $Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
+        $Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
+        $Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
+        $Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
+        $Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
+        $Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
+        $Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
+        $Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
+    }
     if ($bravoPublicIPv4Info.Status -eq "Detected") {
-        Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+        if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
+            Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
+        } else {
+            Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+        }
     } else {
         Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
     }
