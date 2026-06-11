@@ -1,3 +1,15 @@
+## Unreleased — інтерактивний HTML dashboard JS tabs
+
+- Додано автономний inline JavaScript без зовнішніх CDN.
+- Додано функцію `openTab(event, tabId)` для перемикання вкладок.
+- Додано приховування неактивних `.tab-panel` через `display: none`.
+- Додано показ активної `.tab-panel.active` через `display: block`.
+- Додано керування класом `.active` для `.tab-button`.
+- Додано `aria-selected` для активної/неактивних кнопок вкладок.
+- Додано ініціалізацію першої вкладки `tab-general` після завантаження HTML.
+- Додано підтримку відкриття вкладки з URL hash, наприклад `#tab-network`.
+- Збережено print/PDF fallback: у режимі друку всі `.tab-panel` показуються.
+
 ## Unreleased — інтерактивний HTML dashboard UI
 
 - Оновлено `src\51-Export-Html.ps1` під HTML dashboard layout.
@@ -9,7 +21,7 @@
 - Додано універсальні таблиці `.data-table` та scroll-контейнери `.table-scroll` для великих списків.
 - Додано адаптивну верстку для вузьких екранів.
 - Додано print CSS, який приховує навігацію та прибирає обмеження scroll-контейнерів для друку/PDF.
-- JS-перемикання вкладок ще не реалізовано; це окремий Sprint 3.
+- JS-перемикання вкладок реалізовано окремим Sprint 3.
 
 ## Unreleased — інтерактивний HTML dashboard backend
 
