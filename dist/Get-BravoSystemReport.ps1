@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-06-11 03:15:41
+    GeneratedAt: 2026-06-11 04:17:09
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -2000,6 +2000,36 @@ function Export-BravoCsvReport {
 # MODULE: 53-Export-Zip.ps1
 # Експорт BRAVO SYSTEM REPORT у ZIP.
 
+function Import-BravoZipAssemblies {
+    [CmdletBinding()]
+    param()
+
+    $assemblies = @(
+        'System.IO.Compression',
+        'System.IO.Compression.FileSystem'
+    )
+
+    foreach ($assemblyName in $assemblies) {
+        try {
+            Add-Type -AssemblyName $assemblyName -ErrorAction Stop
+        } catch {
+            throw "Не вдалося завантажити .NET assembly $assemblyName`: $($_.Exception.Message)"
+        }
+    }
+
+    $requiredTypes = @(
+        'System.IO.Compression.ZipArchive',
+        'System.IO.Compression.ZipArchiveMode',
+        'System.IO.Compression.ZipFileExtensions'
+    )
+
+    foreach ($typeName in $requiredTypes) {
+        if (-not ($typeName -as [type])) {
+            throw "Не знайдено .NET тип $typeName після завантаження System.IO.Compression assemblies. Перевірте версію .NET Framework."
+        }
+    }
+}
+
 function Export-BravoZipReport {
     [CmdletBinding()]
     param(
@@ -2017,9 +2047,13 @@ function Export-BravoZipReport {
 
     # ZIP
     if ($Zip) {
+        $zipArchive = $null
+        $zipStream = $null
+
         try {
+            Import-BravoZipAssemblies
+
             $zipPath = Join-Path $OutputDir "$BaseFileName.zip"
-            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 
             if (Test-Path -LiteralPath $zipPath) {
                 Remove-Item -LiteralPath $zipPath -Force
@@ -2030,18 +2064,23 @@ function Export-BravoZipReport {
 
             foreach ($file in $script:Report.GeneratedFiles) {
                 if (Test-Path -LiteralPath $file) {
-                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zipArchive, $file, (Split-Path $file -Leaf), [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                        $zipArchive,
+                        $file,
+                        (Split-Path $file -Leaf),
+                        [System.IO.Compression.CompressionLevel]::Optimal
+                    ) | Out-Null
                 }
             }
-
-            $zipArchive.Dispose()
-            $zipStream.Dispose()
 
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
         } catch {
             Add-AuditError -Section 'Export.Zip' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка створення ZIP: $($_.Exception.Message)" -ForegroundColor Red
+        } finally {
+            if ($null -ne $zipArchive) { $zipArchive.Dispose() }
+            if ($null -ne $zipStream) { $zipStream.Dispose() }
         }
     }
 }
@@ -2350,7 +2389,6 @@ try {
 } catch {
     Add-AuditError -Section 'BIOS' -Message $_.Exception.Message
 }
-
 # --- Диски ---
 Get-BravoStorageAudit
 
@@ -2411,15 +2449,23 @@ Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpS
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)
+$jsonPath = Join-Path $outputDir "$baseFileName.json"
+$htmlPath = Join-Path $outputDir "$baseFileName.html"
+$csvPath = Join-Path $outputDir "$baseFileName.csv"
+$zipPath = Join-Path $outputDir "$baseFileName.zip"
 
 Write-Host ''
 Write-Host '=== АУДИТ МАШИНИ ЗАВЕРШЕНО ===' -ForegroundColor Green
 Write-Host ''
 Write-Host "$IconFolder Звіти збережено: $outputDir" -ForegroundColor Cyan
-Write-Host "$IconJson JSON: $baseFileName.json" -ForegroundColor White
-if (-not $JSONOnly) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
-if ($CSV) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
-if ($Zip) { Write-Host "$IconZip ZIP: $baseFileName.zip" -ForegroundColor White }
+if (Test-Path -LiteralPath $jsonPath) { Write-Host "$IconJson JSON: $baseFileName.json" -ForegroundColor White }
+if ((-not $JSONOnly) -and (Test-Path -LiteralPath $htmlPath)) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
+if ($CSV -and (Test-Path -LiteralPath $csvPath)) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
+if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
+    Write-Host "$IconZip ZIP: $baseFileName.zip" -ForegroundColor White
+} elseif ($Zip) {
+    Write-Host "$IconError ZIP не створено: $baseFileName.zip" -ForegroundColor Red
+}
 Write-Host "Оцінка стану: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))" -ForegroundColor Cyan
 Write-Host "Знахідки: $($script:Report.Health.Findings.Count); помилки збору: $($script:Report.CollectionErrors.Count)" -ForegroundColor Cyan
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
