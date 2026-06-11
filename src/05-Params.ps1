@@ -4,13 +4,13 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Quick','Full','Deep','Forensic')]
-    [string]$Profile = 'Full',
+    [string]$Profile = 'Forensic',
 
     [string]$OutputPath = '',
 
     [switch]$JSONOnly,
     [switch]$CSV,
-    [switch]$Zip,
+    [switch]$Zip = $true,
     [switch]$NoEmoji,
     [switch]$NoElevate,
     [switch]$NoPause,
