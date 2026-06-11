@@ -72,6 +72,17 @@ return [ordered]@{
             PrimaryInterface=$null
             PublicIPv4=''
             PublicIPv4Provider=''
+            PublicIPv4LookupProvider=''
+            PublicIPv4ISP=''
+            PublicIPv4Organization=''
+            PublicIPv4ASN=''
+            PublicIPv4Country=''
+            PublicIPv4Region=''
+            PublicIPv4City=''
+            PublicIPv4Timezone=''
+            PublicIPv4ProviderInfoCheckedAt=''
+            PublicIPv4ProviderInfoStatus='NotChecked'
+            PublicIPv4ProviderInfoError=''
             PublicIPv4CheckedAt=''
             PublicIPv4Status='NotChecked'
         }

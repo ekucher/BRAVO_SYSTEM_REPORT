@@ -287,3 +287,72 @@ function Get-BravoPublicIPv4Address {
         Error       = "Public IPv4 не визначено через доступні HTTPS endpoints."
     }
 }
+function Get-BravoPublicIPv4ProviderInfo {
+    [CmdletBinding()]
+    param(
+        [string]$PublicIPv4,
+        [int]$TimeoutSec = 5
+    )
+
+    $checkedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    if (-not (Test-BravoUsableIPv4Address -Address $PublicIPv4)) {
+        return [pscustomobject]@{
+            IPAddress       = $PublicIPv4
+            LookupProvider  = ""
+            ISP             = ""
+            Organization    = ""
+            ASN             = ""
+            Country         = ""
+            Region          = ""
+            City            = ""
+            Timezone        = ""
+            CheckedAt       = $checkedAt
+            Status          = "Skipped"
+            Error           = "Public IPv4 is empty or invalid."
+        }
+    }
+
+    $uri = "https://ipapi.co/$PublicIPv4/json/"
+
+    try {
+        $response = Invoke-RestMethod `
+            -Uri $uri `
+            -UseBasicParsing `
+            -TimeoutSec $TimeoutSec `
+            -Headers @{ "User-Agent" = "BRAVO-SYSTEM-REPORT" } `
+            -ErrorAction Stop
+
+        $org = [string]$response.org
+
+        return [pscustomobject]@{
+            IPAddress       = [string]$response.ip
+            LookupProvider  = "ipapi.co"
+            ISP             = $org
+            Organization    = $org
+            ASN             = [string]$response.asn
+            Country         = [string]$response.country_name
+            Region          = [string]$response.region
+            City            = [string]$response.city
+            Timezone        = [string]$response.timezone
+            CheckedAt       = $checkedAt
+            Status          = "Detected"
+            Error           = ""
+        }
+    } catch {
+        return [pscustomobject]@{
+            IPAddress       = $PublicIPv4
+            LookupProvider  = "ipapi.co"
+            ISP             = ""
+            Organization    = ""
+            ASN             = ""
+            Country         = ""
+            Region          = ""
+            City            = ""
+            Timezone        = ""
+            CheckedAt       = $checkedAt
+            Status          = "Unavailable"
+            Error           = $_.Exception.Message
+        }
+    }
+}
