@@ -1,4 +1,4 @@
-# BRAVO SYSTEM REPORT
+﻿# BRAVO SYSTEM REPORT
 
 BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого, повного, глибокого та forensic-аудиту Windows-машини.
 
@@ -23,7 +23,7 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 
 ## Поточний статус
 
-Поточна стабільна версія: **v0.3.4**.
+Поточна стабільна версія: **v0.4.0**.
 
 Стабільні етапи:
 
@@ -32,6 +32,7 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - **v0.3.2** — Storage Critical Findings;
 - **v0.3.3** — HTML-таблиці Storage Deep / Storage Critical Findings;
 - **v0.3.4** — виправлено BAT `--nopause`;
+- **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у src-модулі.
 - **v0.3.5** — актуалізація README / документації.
 
 ## Швидкий запуск
