@@ -1,4 +1,17 @@
-﻿## v0.3.21 — винесення Email export у модуль
+﻿## v0.4.0 — модульна архітектура BRAVO SYSTEM REPORT
+
+- Оновлено `ScriptVersion` до `0.4.0`.
+- Інтегровано повну модульну архітектуру BRAVO SYSTEM REPORT.
+- Додано модульну збірку монолітного runtime-скрипта через `Build-BRAVO-SystemReport.ps1`.
+- Винесено модель звіту у `src\20-ReportModel.ps1`.
+- Винесено collector-и у модулі: OS, Hardware, Storage, Network, Security, Users, Processes/Services, EventLogs, Software.
+- Винесено розрахунок Health Score у `src\40-Health.ps1`.
+- Винесено export-и у модулі: JSON, HTML, CSV, ZIP, Email.
+- Оновлено `dist\Get-BravoSystemReport.ps1` і SHA512.
+- Оновлено README для стабільної версії `v0.4.0`.
+- Перевірено build, parser check для `src` і `dist`, Quick JSONOnly, Deep CSV ZIP, ZIP-вміст, `CollectionErrors=0`, tracked public IPv4 literal scan та self-hosted Windows CI.
+
+## v0.3.21 — винесення Email export у модуль
 
 - Винесено Email export у `src\54-Export-Email.ps1`.
 - Додано функцію `Send-BravoEmailReport`.
