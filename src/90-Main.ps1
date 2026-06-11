@@ -257,7 +257,6 @@ try {
 } catch {
     Add-AuditError -Section 'BIOS' -Message $_.Exception.Message
 }
-
 # --- Диски ---
 Get-BravoStorageAudit
 
@@ -318,15 +317,23 @@ Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpS
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)
+$jsonPath = Join-Path $outputDir "$baseFileName.json"
+$htmlPath = Join-Path $outputDir "$baseFileName.html"
+$csvPath = Join-Path $outputDir "$baseFileName.csv"
+$zipPath = Join-Path $outputDir "$baseFileName.zip"
 
 Write-Host ''
 Write-Host '=== АУДИТ МАШИНИ ЗАВЕРШЕНО ===' -ForegroundColor Green
 Write-Host ''
 Write-Host "$IconFolder Звіти збережено: $outputDir" -ForegroundColor Cyan
-Write-Host "$IconJson JSON: $baseFileName.json" -ForegroundColor White
-if (-not $JSONOnly) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
-if ($CSV) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
-if ($Zip) { Write-Host "$IconZip ZIP: $baseFileName.zip" -ForegroundColor White }
+if (Test-Path -LiteralPath $jsonPath) { Write-Host "$IconJson JSON: $baseFileName.json" -ForegroundColor White }
+if ((-not $JSONOnly) -and (Test-Path -LiteralPath $htmlPath)) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
+if ($CSV -and (Test-Path -LiteralPath $csvPath)) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
+if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
+    Write-Host "$IconZip ZIP: $baseFileName.zip" -ForegroundColor White
+} elseif ($Zip) {
+    Write-Host "$IconError ZIP не створено: $baseFileName.zip" -ForegroundColor Red
+}
 Write-Host "Оцінка стану: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))" -ForegroundColor Cyan
 Write-Host "Знахідки: $($script:Report.Health.Findings.Count); помилки збору: $($script:Report.CollectionErrors.Count)" -ForegroundColor Cyan
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
