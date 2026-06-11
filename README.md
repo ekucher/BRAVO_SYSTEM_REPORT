@@ -1,4 +1,4 @@
-﻿# BRAVO SYSTEM REPORT
+# BRAVO SYSTEM REPORT
 
 BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого, повного, глибокого та forensic-аудиту Windows-машини.
 
@@ -32,8 +32,8 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - **v0.3.2** — Storage Critical Findings;
 - **v0.3.3** — HTML-таблиці Storage Deep / Storage Critical Findings;
 - **v0.3.4** — виправлено BAT `--nopause`;
-- **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у src-модулі.
-- **v0.3.5** — актуалізація README / документації.
+- **v0.3.5** — актуалізація README / документації;
+- **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у `src`-модулі.
 
 ## Швидкий запуск
 
@@ -200,12 +200,21 @@ BRAVO-SYSTEM-REPORT-WIN
 Перевірки:
 
 - `git diff --check`;
-- PowerShell parser check;
+- build modular monolith;
+- PowerShell parser check для `dist`;
 - Quick runtime test;
-- Quick BAT test;
 - JSON validation;
 - перевірка `Profile=Quick`;
-- перевірка `CollectionErrors=0`.
+- перевірка `CollectionErrors=0`;
+- перевірка, що у tracked files немає випадково закомічених публічних IPv4 literals.
+
+Окремо є ручний workflow:
+
+```text
+.github/workflows/powershell-static-check.yml
+```
+
+Він виконує базову перевірку структури репозиторію.
 
 ## Вимоги
 
@@ -220,13 +229,45 @@ BRAVO-SYSTEM-REPORT-WIN
 ```text
 BRAVO_SYSTEM_REPORT
 ├── .github/workflows/
-│   └── local-windows-validation.yml
+│   ├── local-windows-validation.yml
+│   └── powershell-static-check.yml
+├── dist/
+│   ├── Get-BravoSystemReport.ps1
+│   └── Get-BravoSystemReport.ps1.sha512
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── IMPLEMENTATION_PLAN.md
+│   ├── PROJECT_RULES.md
+│   ├── ROADMAP.md
+│   └── SECURITY.md
 ├── examples/
 ├── patch/
 ├── review/
 ├── src/
-│   └── Get-BravoSystemReport.ps1
+│   ├── 00-Header.ps1
+│   ├── 05-Params.ps1
+│   ├── 10-Core.ps1
+│   ├── 20-ReportModel.ps1
+│   ├── 30-Collectors-OS.ps1
+│   ├── 31-Collectors-Hardware.ps1
+│   ├── 32-Collectors-Storage.ps1
+│   ├── 33-Collectors-Network.ps1
+│   ├── 34-Collectors-Security.ps1
+│   ├── 35-Collectors-Users.ps1
+│   ├── 36-Collectors-ProcessesServices.ps1
+│   ├── 37-Collectors-Events.ps1
+│   ├── 38-Collectors-Software.ps1
+│   ├── 40-Health.ps1
+│   ├── 50-Export-Json.ps1
+│   ├── 51-Export-Html.ps1
+│   ├── 52-Export-Csv.ps1
+│   ├── 53-Export-Zip.ps1
+│   ├── 54-Export-Email.ps1
+│   ├── 90-Main.ps1
+│   └── BRAVO.build.json
 ├── tools/
+│   └── New-ReleasePackage.ps1
+├── Build-BRAVO-SystemReport.ps1
 ├── BRAVO-SystemReport-Quick.bat
 ├── BRAVO-SystemReport-Full.bat
 ├── BRAVO-SystemReport-Deep.bat
@@ -238,11 +279,41 @@ BRAVO_SYSTEM_REPORT
 └── LICENSE.md
 ```
 
+## Документація
+
+Основні документи:
+
+- `docs/ARCHITECTURE.md` — цільова архітектура та модель модулів;
+- `docs/ROADMAP.md` — актуальний backlog і етапи розвитку;
+- `docs/IMPLEMENTATION_PLAN.md` — практичний план впровадження наступних доробок;
+- `docs/SECURITY.md` — правила безпечної роботи зі звітами;
+- `docs/PROJECT_RULES.md` — правила мови, стилю, git workflow і console contract.
+
+## Відомі технічні борги
+
+Після аналізу репозиторію зафіксовано такі ключові напрями доробки:
+
+- release package має включати `dist\Get-BravoSystemReport.ps1` і SHA512, бо root wrapper запускає саме `dist`;
+- старий моноліт `src\Get-BravoSystemReport.ps1` потрібно прибрати з основного release flow або перенести в legacy;
+- Health Score потрібно перераховувати після export-етапів або окремо враховувати export health;
+- потрібно реалізувати `-Sanitize` для безпечної передачі звітів третім сторонам;
+- потрібно уніфікувати network schema для `IPv4`, `PrimaryIPv4` і `PrimaryInterface`;
+- потрібно розширити Deep/Forensic профілі: TPM, Secure Boot, BitLocker, Pending Reboot, RDP/NLA, WinRM, SMBv1, TLS baseline, EventLog provider summary;
+- потрібно додати Markdown/TXT summary і розширити CI-перевірки.
+
+Детальний план впровадження описано у файлі:
+
+```text
+docs/IMPLEMENTATION_PLAN.md
+```
+
 ## Безпека
 
 Скрипт не змінює системні налаштування Windows. Він виконує аудит і формує локальні звіти.
 
 Звіти можуть містити службову інформацію про машину, мережу, локальних користувачів, служби, диски та події. Перед передачею звітів третім особам потрібно перевіряти вміст JSON/HTML/CSV.
+
+Для майбутньої безпечної передачі звітів заплановано параметр `-Sanitize`.
 
 ## Правила проєкту
 
@@ -251,7 +322,7 @@ BRAVO_SYSTEM_REPORT
 - Консольні повідомлення без emoji.
 - HTML-звіт може використовувати emoji як візуальні маркери.
 - Після кожного етапу виконуються parser/runtime checks.
-- Зміни проходять через PR і Local Windows Validation.
+- Зміни проходять через patch-гілки та PR.
 
 ## Обов'язковий формат локальних команд
 
@@ -263,11 +334,18 @@ $ErrorActionPreference = "Stop"
 
 ## Плани розвитку
 
-Можливі наступні етапи:
+Найближчі етапи:
 
-- покращення README examples;
-- додавання HTML-фільтрів або компактних секцій;
-- розширення Storage Deep Audit;
-- network/security deep audit;
-- release artifacts;
-- автоматизована публікація release notes.
+- стабілізувати release package;
+- прибрати legacy-конфлікт `src\Get-BravoSystemReport.ps1`;
+- додати `-Sanitize`, `-SkipPublicIP` і `-Offline`;
+- розширити hardware/storage/network/security/event log аудит;
+- додати Markdown/TXT summary;
+- розширити Local Windows Validation для Full/Deep/Forensic, BAT і release package тестів.
+
+Актуальний деталізований план ведеться у:
+
+```text
+docs/ROADMAP.md
+docs/IMPLEMENTATION_PLAN.md
+```
