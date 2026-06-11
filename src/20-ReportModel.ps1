@@ -6,12 +6,14 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.3.2'
+    SchemaVersion = '0.4.1'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     ComputerName = $env:COMPUTERNAME
     Elevated = $isAdmin
+    Status = 'OK'
+    StatusReason = 'Початковий стан до розрахунку Health Score'
     OutputPath = ''
     GeneratedFiles = @()
     Meta = [ordered]@{
@@ -21,6 +23,30 @@ return [ordered]@{
         UserDomainName = [Environment]::UserDomainName
         UseCim = $script:UseCim
         EventLogDays = $EventLogDays
+    }
+    Dashboard = [ordered]@{
+        Header = [ordered]@{
+            ComputerName = $env:COMPUTERNAME
+            GeneratedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            UptimeText = ''
+            Status = 'OK'
+            StatusReason = 'Початковий стан до розрахунку Health Score'
+        }
+        Metrics = [ordered]@{
+            CPU = [ordered]@{ Title='CPU'; Value=''; Status='OK'; Details='' }
+            RAM = [ordered]@{ Title='RAM'; Value=''; Status='OK'; Details='' }
+            Disk = [ordered]@{ Title='Disk'; Value=''; Status='OK'; Details='' }
+            OS = [ordered]@{ Title='OS'; Value=''; Status='OK'; Details='' }
+        }
+        Tabs = [ordered]@{
+            General = $true
+            OS = $true
+            Hardware = $true
+            Network = $true
+            Security = $true
+            Services = $true
+            Software = $true
+        }
     }
     Health = [ordered]@{
         Score = 100
@@ -35,13 +61,21 @@ return [ordered]@{
     Hardware = [ordered]@{
         ComputerSystem = [ordered]@{ Manufacturer=''; Model=''; Domain=''; TotalPhysicalMemoryGB=0 }
         CPU = [ordered]@{ Name=''; Cores=0; LogicalProcessors=0; MaxClockSpeedMHz=0; LoadPercent=0 }
-        RAM = [ordered]@{ TotalGB=0; UsedPercent=0; Modules=@() }
+        RAM = [ordered]@{ TotalGB=0; TotalVisibleMemoryGB=0; FreeGB=0; UsedGB=0; UsedPercent=0; Source=''; Modules=@() }
         Disks = [ordered]@{ FreePercent=0; TotalGB=0; FreeGB=0; Volumes=@(); PhysicalDisks=@() }
     }
     Network = [ordered]@{
         General = [ordered]@{ Hostname=''; Domain='' }
-        IP = [ordered]@{ IPv4=@() }
-        Routing = [ordered]@{ DefaultGateway=''; DNSServers=@() }
+        IP = [ordered]@{
+            IPv4=@()
+            PrimaryIPv4=''
+            PrimaryInterface=$null
+            PublicIPv4=''
+            PublicIPv4Provider=''
+            PublicIPv4CheckedAt=''
+            PublicIPv4Status='NotChecked'
+        }
+        Routing = [ordered]@{ DefaultGateway=''; DefaultGateways=@(); DNSServers=@(); DNSSuffixSearchOrder=@() }
         Adapters = @()
         Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@() }
     }

@@ -1,3 +1,40 @@
+## Unreleased — інтерактивний HTML dashboard JS tabs
+
+- Додано автономний inline JavaScript без зовнішніх CDN.
+- Додано функцію `openTab(event, tabId)` для перемикання вкладок.
+- Додано приховування неактивних `.tab-panel` через `display: none`.
+- Додано показ активної `.tab-panel.active` через `display: block`.
+- Додано керування класом `.active` для `.tab-button`.
+- Додано `aria-selected` для активної/неактивних кнопок вкладок.
+- Додано ініціалізацію першої вкладки `tab-general` після завантаження HTML.
+- Додано підтримку відкриття вкладки з URL hash, наприклад `#tab-network`.
+- Збережено print/PDF fallback: у режимі друку всі `.tab-panel` показуються.
+
+## Unreleased — інтерактивний HTML dashboard UI
+
+- Оновлено `src\51-Export-Html.ps1` під HTML dashboard layout.
+- Додано автономний CSS-каркас без зовнішніх CDN.
+- Додано `dashboard-header` з computer name, uptime, primary IPv4, health/status і status reason.
+- Додано `tab-nav` з anchor-кнопками для майбутньої JS-логіки вкладок.
+- Додано секції `tab-panel`: General, OS, Hardware, Network, Security, Services, Software, Findings.
+- Додано метричні картки `metric-card` для CPU, RAM, Disk і OS.
+- Додано універсальні таблиці `.data-table` та scroll-контейнери `.table-scroll` для великих списків.
+- Додано адаптивну верстку для вузьких екранів.
+- Додано print CSS, який приховує навігацію та прибирає обмеження scroll-контейнерів для друку/PDF.
+- JS-перемикання вкладок реалізовано окремим Sprint 3.
+
+## Unreleased — інтерактивний HTML dashboard backend
+
+- Підготовлено backend-структуру для майбутнього інтерактивного HTML-звіту Dashboard & Tabs.
+- Оновлено `SchemaVersion` до `0.4.1`.
+- Додано top-level поля `Status` і `StatusReason` у модель звіту.
+- Додано секцію `Dashboard` з `Header`, `Metrics` і `Tabs`.
+- Додано dashboard-метрики `CPU`, `RAM`, `Disk`, `OS`.
+- Виправлено RAM-метрики: додано `TotalVisibleMemoryGB`, `FreeGB`, `UsedGB`, `UsedPercent`, `Source`.
+- Розширено network-модель для HTML-вкладки: `DefaultGateways`, `DNSServers`, `DNSSuffixSearchOrder`, nested `Network.IP.PrimaryIPv4`, `PrimaryInterface`, `PublicIPv4*`.
+- Синхронізовано `Health.Status` з `Report.Status` і `Dashboard.Header.Status`.
+- Локально перевірено smoke test профілю `Forensic` з `CSV` і `ZIP`: `SchemaVersion=0.4.1`, `Dashboard` заповнено, `CollectionErrors=0`.
+
 ## Unreleased — документація та план впровадження
 
 - Оновлено `README.md` відповідно до фактичної структури проєкту після переходу на модульну архітектуру.
@@ -86,49 +123,3 @@
 - Збережено різний формат виводу: назви програм для `Quick`, деталізовані об'єкти для інших профілів.
 - Оновлено `src\90-Main.ps1`: inline-блок програмного забезпечення замінено на виклик `Get-BravoSoftwareAudit`.
 - Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, Software.Installed та `CollectionErrors=0`.
-## v0.3.14 — винесення EventLogs collector-а у модуль
-
-- Винесено збір журналів подій Windows у `src\37-Collectors-Events.ps1`.
-- Додано функцію `Get-BravoEventLogsAudit`.
-- Перенесено збір System Errors/Warnings за 24 години та за період профілю з `src\90-Main.ps1`.
-- Збережено використання параметра `EventLogDays`.
-- Збережено finding для системних помилок у журналі System.
-- Оновлено `src\90-Main.ps1`: inline-блок журналів подій замінено на виклик `Get-BravoEventLogsAudit`.
-- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, SystemErrors24h, SystemWarnings24h, SystemErrors, SystemWarnings та `CollectionErrors=0`.
-## v0.3.13 — винесення collector-а процесів і служб у модуль
-
-- Винесено збір інформації про процеси та служби у `src\36-Collectors-ProcessesServices.ps1`.
-- Додано функцію `Get-BravoProcessesServicesAudit`.
-- Перенесено збір процесів через `Get-Process` з `src\90-Main.ps1`.
-- Збережено логіку `TopMemory` для профілів `Full`, `Deep` та `Forensic`.
-- Перенесено збір служб через `Get-Service`.
-- Збережено логіку пошуку автоматичних служб, які не запущені, через `Win32_Service`.
-- Збережено finding для автоматичних служб, які мають бути запущені, але зупинені.
-- Оновлено `src\90-Main.ps1`: inline-блоки процесів і служб замінено на виклик `Get-BravoProcessesServicesAudit`.
-- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, Processes, TopMemory, Services, AutomaticStopped та `CollectionErrors=0`.
-## v0.3.12 — винесення Users collector-а у модуль
-
-- Винесено збір інформації про локальних адміністраторів у `src\35-Collectors-Users.ps1`.
-- Перенесено helper `Get-LocalAdministratorsSafe` з `src\90-Main.ps1` у Users collector.
-- Додано функцію `Get-BravoUsersAudit`.
-- Оновлено `src\90-Main.ps1`: inline-блок користувачів замінено на виклик `Get-BravoUsersAudit`.
-- Збережено логіку отримання локальних адміністраторів через `Get-LocalGroupMember` з fallback на `net localgroup`.
-- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, LocalAdmins та `CollectionErrors=0`.
-## v0.3.11 — винесення Security collector-а у модуль
-
-- Винесено збір інформації про безпеку у `src\34-Collectors-Security.ps1`.
-- Додано функцію `Get-BravoSecurityAudit`.
-- Перенесено збір UAC, RDP, антивірусу та Windows Firewall з `src\90-Main.ps1`.
-- Збережено логіку findings для вимкненого UAC, увімкненого RDP та вимкнених Firewall-профілів.
-- Оновлено `src\90-Main.ps1`: inline-блок безпеки замінено на виклик `Get-BravoSecurityAudit`.
-- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, UAC, RDP, Antivirus, Firewall profiles та `CollectionErrors=0`.
-## v0.3.10 — винесення Network collector-а у модуль
-
-- Винесено збір мережевої інформації у `src\33-Collectors-Network.ps1`.
-- Додано функцію `Get-BravoNetworkAudit`.
-- Перенесено збір hostname, domain, IPv4, gateway, DNS, adapters та TCP-з'єднань з `src\90-Main.ps1`.
-- Збережено логіку визначення primary IPv4 через `Get-BravoPrimaryNetworkInterface`.
-- Збережено логіку впорядкування IPv4 через `Move-BravoIPv4ToFront`.
-- Збережено логіку визначення public IPv4 без виводу значення public IP у консоль.
-- Оновлено `src\90-Main.ps1`: inline-блок мережі замінено на виклик `Get-BravoNetworkAudit`.
-- Перевірено build, parser check для `dist`, Quick runtime, Deep runtime, JSON/HTML export, PrimaryIPv4, PublicIPv4Status, відсутність public IPv4 у консолі та `CollectionErrors=0`.

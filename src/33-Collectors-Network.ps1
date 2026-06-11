@@ -19,12 +19,20 @@ function Get-BravoNetworkAudit {
                 }
             }
 
-            if ($adapterConfig.DefaultIPGateway -and -not $script:Report.Network.Routing.DefaultGateway) {
-                $script:Report.Network.Routing.DefaultGateway = $adapterConfig.DefaultIPGateway[0]
+            if ($adapterConfig.DefaultIPGateway) {
+                $script:Report.Network.Routing.DefaultGateways = @($script:Report.Network.Routing.DefaultGateways + $adapterConfig.DefaultIPGateway) | Where-Object { $_ } | Select-Object -Unique
+
+                if (-not $script:Report.Network.Routing.DefaultGateway) {
+                    $script:Report.Network.Routing.DefaultGateway = $adapterConfig.DefaultIPGateway[0]
+                }
             }
 
             if ($adapterConfig.DNSServerSearchOrder) {
-                $script:Report.Network.Routing.DNSServers = @($script:Report.Network.Routing.DNSServers + $adapterConfig.DNSServerSearchOrder) | Select-Object -Unique
+                $script:Report.Network.Routing.DNSServers = @($script:Report.Network.Routing.DNSServers + $adapterConfig.DNSServerSearchOrder) | Where-Object { $_ } | Select-Object -Unique
+            }
+
+            if ($adapterConfig.DNSDomainSuffixSearchOrder) {
+                $script:Report.Network.Routing.DNSSuffixSearchOrder = @($script:Report.Network.Routing.DNSSuffixSearchOrder + $adapterConfig.DNSDomainSuffixSearchOrder) | Where-Object { $_ } | Select-Object -Unique
             }
 
             $script:Report.Network.Adapters += [PSCustomObject]@{
@@ -32,8 +40,9 @@ function Get-BravoNetworkAudit {
                 MACAddress  = $adapterConfig.MACAddress
                 DHCPEnabled = $adapterConfig.DHCPEnabled
                 IPv4        = @($adapterConfig.IPAddress | Where-Object { $_ -notlike '*:*' })
-                Gateway     = $adapterConfig.DefaultIPGateway
-                DNS         = $adapterConfig.DNSServerSearchOrder
+                Gateway     = @($adapterConfig.DefaultIPGateway)
+                DNS         = @($adapterConfig.DNSServerSearchOrder)
+                DNSSuffixSearchOrder = @($adapterConfig.DNSDomainSuffixSearchOrder)
             }
         }
 
@@ -87,10 +96,16 @@ function Get-BravoNetworkAudit {
             $Report.Network["IPv4"] = @($bravoOrderedIPv4)
             $Report.Network["PrimaryIPv4"] = $bravoPrimaryIPv4
             $Report.Network["PrimaryInterface"] = $bravoPrimaryNetwork
+            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
+            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
+            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
         } else {
             $Report.Network | Add-Member -NotePropertyName "IPv4" -NotePropertyValue @($bravoOrderedIPv4) -Force
             $Report.Network | Add-Member -NotePropertyName "PrimaryIPv4" -NotePropertyValue $bravoPrimaryIPv4 -Force
             $Report.Network | Add-Member -NotePropertyName "PrimaryInterface" -NotePropertyValue $bravoPrimaryNetwork -Force
+            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
+            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
+            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
         }
     }
 
@@ -107,11 +122,19 @@ function Get-BravoNetworkAudit {
             $Report.Network["PublicIPv4Provider"] = $bravoPublicIPv4Info.Provider
             $Report.Network["PublicIPv4CheckedAt"] = $bravoPublicIPv4Info.CheckedAt
             $Report.Network["PublicIPv4Status"] = $bravoPublicIPv4Info.Status
+            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
+            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
+            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
+            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
         } else {
             $Report.Network | Add-Member -NotePropertyName "PublicIPv4" -NotePropertyValue $bravoPublicIPv4Info.IPv4 -Force
             $Report.Network | Add-Member -NotePropertyName "PublicIPv4Provider" -NotePropertyValue $bravoPublicIPv4Info.Provider -Force
             $Report.Network | Add-Member -NotePropertyName "PublicIPv4CheckedAt" -NotePropertyValue $bravoPublicIPv4Info.CheckedAt -Force
             $Report.Network | Add-Member -NotePropertyName "PublicIPv4Status" -NotePropertyValue $bravoPublicIPv4Info.Status -Force
+            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
+            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
+            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
+            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
         }
     }
 
