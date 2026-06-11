@@ -1,3 +1,16 @@
+## Unreleased — інтерактивний HTML dashboard UI
+
+- Оновлено `src\51-Export-Html.ps1` під HTML dashboard layout.
+- Додано автономний CSS-каркас без зовнішніх CDN.
+- Додано `dashboard-header` з computer name, uptime, primary IPv4, health/status і status reason.
+- Додано `tab-nav` з anchor-кнопками для майбутньої JS-логіки вкладок.
+- Додано секції `tab-panel`: General, OS, Hardware, Network, Security, Services, Software, Findings.
+- Додано метричні картки `metric-card` для CPU, RAM, Disk і OS.
+- Додано універсальні таблиці `.data-table` та scroll-контейнери `.table-scroll` для великих списків.
+- Додано адаптивну верстку для вузьких екранів.
+- Додано print CSS, який приховує навігацію та прибирає обмеження scroll-контейнерів для друку/PDF.
+- JS-перемикання вкладок ще не реалізовано; це окремий Sprint 3.
+
 ## Unreleased — інтерактивний HTML dashboard backend
 
 - Підготовлено backend-структуру для майбутнього інтерактивного HTML-звіту Dashboard & Tabs.
