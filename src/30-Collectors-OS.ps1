@@ -22,10 +22,16 @@ function Get-BravoOperatingSystemAudit {
             $script:Report.OS.LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
             $script:Report.OS.UptimeDays = $uptime.Days
             $script:Report.OS.UptimeHours = [Math]::Round($uptime.TotalHours, 1)
+            $script:Report.Dashboard.Header.UptimeText = "$($script:Report.OS.UptimeDays) дн. / $($script:Report.OS.UptimeHours) год."
         }
+
+        $script:Report.Dashboard.Metrics.OS.Value = $script:Report.OS.Caption
+        $script:Report.Dashboard.Metrics.OS.Details = "Build $($script:Report.OS.Build), $($script:Report.OS.Architecture)"
+        $script:Report.Dashboard.Metrics.OS.Status = 'OK'
 
         if ($script:Report.OS.UptimeDays -gt 90) {
             Add-AuditFinding -Severity 'WARNING' -Category 'OS' -Message "Uptime більше 90 днів: $($script:Report.OS.UptimeDays)" -Recommendation 'Заплануйте контрольоване перезавантаження після перевірки критичних служб.'
+            $script:Report.Dashboard.Metrics.OS.Status = 'WARNING'
         }
 
         Write-Host "  $IconOk ОС: $($script:Report.OS.Caption)" -ForegroundColor Green
