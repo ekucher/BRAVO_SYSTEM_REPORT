@@ -22,6 +22,15 @@ function Get-BravoStorageDeepAudit {
         LogicalDisks = @()
         Volumes      = @()
         Disks        = @()
+        Partitions            = @()
+        PhysicalDisks         = @()
+        ReliabilityCounters   = @()
+        BitLocker             = @()
+        ShadowCopies          = @()
+        StoragePools          = @()
+        StorageSubsystems     = @()
+        SmartPredictFailures  = @()
+        PageFiles             = @()
     }
 
     try {
@@ -109,6 +118,53 @@ function Get-BravoStorageDeepAudit {
         } catch {
             Add-AuditError -Section 'StorageDeep.GetDisk' -Message $_.Exception.Message
         }
+    }
+
+
+    if (Get-Command Get-Partition -ErrorAction SilentlyContinue) {
+        try {
+            $partitions = Get-Partition -ErrorAction Stop
+            foreach ($partition in $partitions) {
+                $storage.Partitions += [PSCustomObject]@{
+                    DiskNumber      = $partition.DiskNumber
+                    PartitionNumber = $partition.PartitionNumber
+                    DriveLetter     = $partition.DriveLetter
+                    Type            = [string]$partition.Type
+                    GptType         = [string]$partition.GptType
+                    MbrType         = [string]$partition.MbrType
+                    IsActive        = $partition.IsActive
+                    IsBoot          = $partition.IsBoot
+                    IsSystem        = $partition.IsSystem
+                    IsHidden        = $partition.IsHidden
+                    IsReadOnly      = $partition.IsReadOnly
+                    OffsetGB        = Convert-BravoBytesToGB $partition.Offset
+                    SizeGB          = Convert-BravoBytesToGB $partition.Size
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.GetPartition' -Message $_.Exception.Message
+        }
+    }
+
+    try {
+        $pageFiles = Get-AuditObject -ClassName 'Win32_PageFileUsage'
+        foreach ($pageFile in $pageFiles) {
+            $storage.PageFiles += [PSCustomObject]@{
+                Name            = $pageFile.Name
+                AllocatedBaseMB = $pageFile.AllocatedBaseSize
+                CurrentUsageMB  = $pageFile.CurrentUsage
+                PeakUsageMB     = $pageFile.PeakUsage
+                InstallDate     = if ($pageFile.InstallDate) {
+                    $pageFileInstallDate = Convert-AuditDateTime -Value $pageFile.InstallDate -UseCim:$script:UseCim
+                    if ($pageFileInstallDate) { $pageFileInstallDate.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+                } else {
+                    ''
+                }
+                Status          = $pageFile.Status
+            }
+        }
+    } catch {
+        Add-AuditError -Section 'StorageDeep.PageFiles' -Message $_.Exception.Message
     }
 
     return [PSCustomObject]$storage

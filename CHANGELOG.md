@@ -1,3 +1,13 @@
+﻿## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
+
+- Змінено профіль запуску за замовчуванням з `Full` на `Forensic`.
+- Увімкнено створення ZIP-архіву за замовчуванням.
+- Додано можливість вимкнути ZIP через `-Zip:$false`.
+- Розширено `StorageDeep` полями `Partitions` і `PageFiles`.
+- Додано збір partition-даних через `Get-Partition`.
+- Додано збір pagefile-даних через `Win32_PageFileUsage`.
+- Збережено існуючу логіку `StorageRisk` без змін.
+- Перевірено default runtime test: `Forensic + ZIP`, `CollectionErrors=0`, `Partitions=10`, `PageFiles=1`.
 ## Unreleased — інтерактивний HTML dashboard polish
 
 - Додано пошук по великих HTML-таблицях без зовнішніх CDN.
