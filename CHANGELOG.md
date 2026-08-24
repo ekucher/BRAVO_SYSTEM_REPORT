@@ -12,6 +12,8 @@
 - Додано метричну картку `Updates` і вкладку `Updates` у HTML-звіт із таблицями доступних і встановлених оновлень.
 - Додано поля оновлень у CSV-експорт.
 - Додано параметри `-SkipUpdateSearch` і `-UpdateSearchTimeoutSec`; профіль `Quick` онлайн-пошук не виконує.
+- Додано дати завершення підтримки для Windows 11 25H2 (build 26200) у таблицю життєвого циклу.
+- Додано у local Windows validation кроки `Full runtime test` і `Validate updates section` для перевірки онлайн-пошуку оновлень.
 
 ## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
 

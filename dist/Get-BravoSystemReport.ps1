@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-24 17:05:01
+    GeneratedAt: 2026-08-24 17:14:00
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1531,7 +1531,8 @@ function Get-BravoWindowsLifecycleTable {
     # Статична таблиця життєвого циклу Windows.
     # Дані потребують періодичного оновлення разом із $BravoLifecycleTableUpdatedAt.
     return @(
-        [PSCustomObject]@{ Build = 26200; IsServer = $false; Product = 'Windows 11'; DisplayVersion = '25H2'; SupportEndConsumer = ''; SupportEndEnterprise = '' }
+        # 25H2: дати виведені за штатним циклом Microsoft (24 міс. Home/Pro, 36 міс. Enterprise/Education) і не звірені з lifecycle-сторінкою.
+        [PSCustomObject]@{ Build = 26200; IsServer = $false; Product = 'Windows 11'; DisplayVersion = '25H2'; SupportEndConsumer = '2027-10-12'; SupportEndEnterprise = '2028-10-10' }
         [PSCustomObject]@{ Build = 26100; IsServer = $false; Product = 'Windows 11'; DisplayVersion = '24H2'; SupportEndConsumer = '2026-10-13'; SupportEndEnterprise = '2027-10-12' }
         [PSCustomObject]@{ Build = 22631; IsServer = $false; Product = 'Windows 11'; DisplayVersion = '23H2'; SupportEndConsumer = '2025-11-11'; SupportEndEnterprise = '2026-11-10' }
         [PSCustomObject]@{ Build = 22621; IsServer = $false; Product = 'Windows 11'; DisplayVersion = '22H2'; SupportEndConsumer = '2024-10-08'; SupportEndEnterprise = '2025-10-14' }
