@@ -90,10 +90,27 @@ BRAVO-SystemReport-Forensic.bat --nopause
 
 Що збирається:
 
-- **Життєвий цикл ОС** — продукт, `DisplayVersion` (наприклад `24H2`), full build з `UBR`, канал
-  (Consumer або Enterprise / LTSC), дата завершення підтримки, кількість днів до неї та статус
+- **Життєвий цикл ОС** — продукт, `DisplayVersion` (наприклад `24H2`), full build з `UBR`, канал,
+  дата завершення підтримки, кількість днів до неї та статус
   `Supported` / `EndingSoon` / `EndOfSupport` / `Unknown`. Дані беруться зі статичної таблиці життєвого циклу
   всередині скрипта; дата її актуальності виводиться у полі `LifecycleDataUpdatedAt`.
+
+  Канал визначається за `Caption` ОС і має три значення з окремими датами:
+
+  | Канал | Редакції |
+  |---|---|
+  | `Consumer` | Home, Pro, Core |
+  | `Enterprise / Education` | Enterprise, Education, серверні редакції |
+  | `LTSC / LTSB` | Enterprise LTSC та LTSB |
+
+  Таблиця покриває всі випуски Windows від Windows 2000 до Windows 11 25H2 і від Windows 2000 Server
+  до Windows Server 2025, включно з усіма піврічними релізами Windows 10, LTSB/LTSC-редакціями і
+  Windows Server SAC. Клієнтські та серверні ОС з однаковим build (3790, 6002, 7601, 9200, 9600,
+  14393, 17763, 26100) розрізняються автоматично.
+
+  Свідомі виключення: IoT LTSC-редакції не виділені окремо; дати ESU не використовуються — показується
+  дата завершення звичайної підтримки (наприклад, Windows 7 SP1 — `2020-01-14`, а не `2023-01-10`);
+  Windows Server SAC 1809 пропущено через збіг build 17763 із Windows Server 2019.
 - **Доступні оновлення** — пошук через COM `Microsoft.Update.Session`
   (`IsInstalled=0 and IsHidden=0`): назва, KB, категорії, `MsrcSeverity`, розмір, чи вже завантажено, дата випуску.
   Зведення: `Total`, `Security`, `Critical`, `Driver`, `Definition`, `Other`, `Downloaded`, `TotalSizeMB`, `MaxAgeDays`.

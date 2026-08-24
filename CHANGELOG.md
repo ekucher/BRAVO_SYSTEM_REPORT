@@ -14,6 +14,11 @@
 - Додано параметри `-SkipUpdateSearch` і `-UpdateSearchTimeoutSec`; профіль `Quick` онлайн-пошук не виконує.
 - Додано дати завершення підтримки для Windows 11 25H2 (build 26200) у таблицю життєвого циклу.
 - Додано у local Windows validation кроки `Full runtime test` і `Validate updates section` для перевірки онлайн-пошуку оновлень.
+- Виправлено помилку `TryParse` з `[ref]` на неініціалізованих змінних, через яку успішний пошук оновлень позначався як `Failed`, а `MaxAgeDays` не обчислювався.
+- Захищено `Search.Status = OK` від перезапису помилкою пост-обробки.
+- Додано третій канал підтримки `LTSC / LTSB` з окремими датами замість змішування з Enterprise.
+- Розширено таблицю життєвого циклу до повного покриття: від Windows 2000 і Windows 2000 Server до Windows 11 25H2 і Windows Server 2025, включно з Windows 10 1511/1703/1709/1803/1903 і Windows Server SAC.
+- Посилено CI-перевірку секції `Updates`: неконсистентність `Search.Status`/`Pending.Total` і ненульові `CollectionErrors` тепер валять збірку.
 
 ## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
 

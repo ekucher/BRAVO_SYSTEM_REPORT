@@ -265,6 +265,19 @@ jobs:
             throw "Updates.Installed.Total is invalid: $($report.Updates.Installed.Total)"
           }
 
+          if ($report.Updates.Search.Status -ne "OK") {
+            Write-Host "[INFO] Search Error: $($report.Updates.Search.Error)"
+
+            if ([int]$report.Updates.Pending.Total -ne 0) {
+              throw "Inconsistent state: Search.Status=$($report.Updates.Search.Status) but Pending.Total=$($report.Updates.Pending.Total)"
+            }
+          }
+
+          if (@($report.CollectionErrors).Count -ne 0) {
+            $report.CollectionErrors | ForEach-Object { Write-Host "[INFO] CollectionError: $($_.Section): $($_.Message)" }
+            throw "Expected CollectionErrors=0, got CollectionErrors=$(@($report.CollectionErrors).Count)"
+          }
+
           Write-Host "[OK] Updates section validation passed"
 
       - name: Public IPv4 literal scan
