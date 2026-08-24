@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - 'v*'
-  # Ручний запуск завжди dry run: пакет збирається і додається як workflow artifact,
-  # але реліз не публікується — реліз створюється лише push-ом тега.
+  # Ручний запуск за замовчуванням dry run: пакет збирається і додається як workflow artifact.
+  # Публікація релізу з ручного запуску вмикається окремим input-ом publish_release —
+  # тег при цьому створює сам GitHub на тому commit, з якого запущено workflow.
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish GitHub Release (creates the tag from the current commit)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -197,7 +203,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || inputs.publish_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -234,12 +240,14 @@ jobs:
 
           $releaseNotes = if ($notesMatch.Success) { $notesMatch.Value.Trim() } else { "BRAVO SYSTEM REPORT v$env:PACKAGE_VERSION" }
 
+          # target_commitish let GitHub create the tag itself when it does not exist yet.
           $releasePayload = @{
-            tag_name = $env:RELEASE_TAG
-            name     = "BRAVO SYSTEM REPORT $env:RELEASE_TAG"
-            body     = $releaseNotes
-            draft    = $false
-            prerelease = $false
+            tag_name         = $env:RELEASE_TAG
+            target_commitish = $env:GITHUB_SHA
+            name             = "BRAVO SYSTEM REPORT $env:RELEASE_TAG"
+            body             = $releaseNotes
+            draft            = $false
+            prerelease       = $false
           } | ConvertTo-Json -Depth 4
 
           $release = Invoke-RestMethod -Uri $releasesUri -Headers $apiHeaders -Method Post `
@@ -273,9 +281,10 @@ jobs:
           Write-Host "[SUCCESS] Release $env:RELEASE_TAG published"
 
       - name: Dry run summary
-        if: github.event_name != 'push'
+        if: github.event_name != 'push' && !inputs.publish_release
         run: |
           Write-Host "=== DRY RUN ==="
           Write-Host "[INFO] Release is not published: workflow was started manually."
           Write-Host "[INFO] Package was built and uploaded as a workflow artifact."
-          Write-Host "[INFO] To publish, create a tag: git tag v$env:PACKAGE_VERSION; git push origin v$env:PACKAGE_VERSION"
+          Write-Host "[INFO] To publish, push a tag: git tag v$env:PACKAGE_VERSION; git push origin v$env:PACKAGE_VERSION"
+          Write-Host "[INFO] Or start this workflow manually with publish_release enabled."
