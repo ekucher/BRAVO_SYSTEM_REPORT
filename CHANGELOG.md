@@ -1,4 +1,12 @@
-﻿## Unreleased — аналіз ОС і оновлень Windows
+﻿## v0.5.0 — аналіз ОС і оновлень Windows
+
+### реліз-пакет
+
+- Виправлено склад реліз-пакета: замість застарілого моноліту `src\Get-BravoSystemReport.ps1` пакується робочий runtime `dist\Get-BravoSystemReport.ps1`.
+- Контрольна сума runtime генерується з файлу, який реально потрапляє в пакет, а всі текстові файли нормалізуються до CRLF.
+- Fallback визначення версії переведено з застарілого моноліту на `src\90-Main.ps1`.
+- `tools\New-ReleasePackage.ps1` зроблено кросплатформним і додано читабельний перелік вмісту пакета.
+- Нормалізовано переноси рядків у `dist\Get-BravoSystemReport.ps1` до CRLF.
 
 - Додано модуль `src\39-Collectors-Updates.ps1` з колектором `Get-BravoUpdatesAudit`.
 - Додано секцію `Updates` у модель звіту та підвищено `SchemaVersion` до `0.5.0`.
@@ -30,7 +38,7 @@
 - Pro Education і Pro for Workstations тепер обслуговуються за споживчим циклом, а не за Enterprise.
 - Метрика Updates стає CRITICAL і за наявності critical-оновлень, а не лише security.
 
-## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
+### Forensic ZIP default та Storage Deep Inventory v2
 
 - Змінено профіль запуску за замовчуванням з `Full` на `Forensic`.
 - Увімкнено створення ZIP-архіву за замовчуванням.
@@ -40,7 +48,7 @@
 - Додано збір pagefile-даних через `Win32_PageFileUsage`.
 - Збережено існуючу логіку `StorageRisk` без змін.
 - Перевірено default runtime test: `Forensic + ZIP`, `CollectionErrors=0`, `Partitions=10`, `PageFiles=1`.
-## Unreleased — інтерактивний HTML dashboard polish
+### інтерактивний HTML dashboard polish
 
 - Додано пошук по великих HTML-таблицях без зовнішніх CDN.
 - Додано helper `New-BravoTableToolbarHtml` для генерації toolbar біля таблиць.
@@ -50,7 +58,7 @@
 - Додано пошук для Storage Critical Findings, Storage Deep, Network Adapters, Automatic stopped services, Installed software, Findings і Collection errors.
 - Збережено print/PDF fallback: toolbar приховується, а всі рядки таблиць показуються при друку.
 
-## Unreleased — інтерактивний HTML dashboard JS tabs
+### інтерактивний HTML dashboard JS tabs
 
 - Додано автономний inline JavaScript без зовнішніх CDN.
 - Додано функцію `openTab(event, tabId)` для перемикання вкладок.
@@ -62,7 +70,7 @@
 - Додано підтримку відкриття вкладки з URL hash, наприклад `#tab-network`.
 - Збережено print/PDF fallback: у режимі друку всі `.tab-panel` показуються.
 
-## Unreleased — інтерактивний HTML dashboard UI
+### інтерактивний HTML dashboard UI
 
 - Оновлено `src\51-Export-Html.ps1` під HTML dashboard layout.
 - Додано автономний CSS-каркас без зовнішніх CDN.
@@ -75,7 +83,7 @@
 - Додано print CSS, який приховує навігацію та прибирає обмеження scroll-контейнерів для друку/PDF.
 - JS-перемикання вкладок реалізовано окремим Sprint 3.
 
-## Unreleased — інтерактивний HTML dashboard backend
+### інтерактивний HTML dashboard backend
 
 - Підготовлено backend-структуру для майбутнього інтерактивного HTML-звіту Dashboard & Tabs.
 - Оновлено `SchemaVersion` до `0.4.1`.
@@ -87,7 +95,7 @@
 - Синхронізовано `Health.Status` з `Report.Status` і `Dashboard.Header.Status`.
 - Локально перевірено smoke test профілю `Forensic` з `CSV` і `ZIP`: `SchemaVersion=0.4.1`, `Dashboard` заповнено, `CollectionErrors=0`.
 
-## Unreleased — документація та план впровадження
+### документація та план впровадження
 
 - Оновлено `README.md` відповідно до фактичної структури проєкту після переходу на модульну архітектуру.
 - Додано посилання на `docs/IMPLEMENTATION_PLAN.md`.
