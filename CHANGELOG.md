@@ -1,4 +1,26 @@
-﻿## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
+﻿## Unreleased — код-рев'ю: privacy, health score, dist rebuild
+
+- **[Blocker]** Перезібрано `dist/Get-BravoSystemReport.ps1` — Windows Update collector нарешті потрапив у виконуваний артефакт.
+- Додано прапорець `-SkipPublicIP` та гейтинг профілем (`Full`/`Deep`/`Forensic`) для запитів публічного IP/ISP/geo до сторонніх сервісів — для профілю `Quick` та за наявності прапорця дані більше не відправляються.
+- `Update-BravoHealthScore` тепер перераховується вдруге після export-етапів (JSON/HTML/CSV), а JSON перезаписується з фінальною оцінкою — виправлено розсинхронізацію `Health.Score` при помилках експорту.
+- Прибрано порожні `catch {}` у `10-Core.ps1` — додано коментарі, що пояснюють свідомо ігноровані сценарії (відповідно до `docs/AI_RULES.md`).
+- Виправлено `33-Collectors-Network.ps1`: усунено звернення до `$Report` без `script:`-префіксу, прибрано недосяжний (мертвий) `else`-код для не-`IDictionary` типу, прибрано дублювання CIM-запиту при формуванні fallback-списку IPv4.
+- Додано severity-класи `Moderate`/`Low` у HTML-мапінг ризику Windows Update (раніше потрапляли в `risk-unknown`).
+- Видалено застарілий сміттєвий файл `tools/Publish-ToGitHub.ps1.broken`.
+- `SchemaVersion` піднято `0.4.1` → `0.5.0` (контракт звіту змінено: додана секція `WindowsUpdate`, нове поле `PublicIPv4Status='Skipped'`).
+
+## Unreleased — Windows Update audit
+
+- Додано модуль `39-Collectors-Updates.ps1` зі збором даних Windows Update.
+- Додано секцію `WindowsUpdate` у модель звіту (`SchemaVersion` піднято до `0.5.0`, див. запис вище).
+- Додано збір встановлених оновлень через `Get-HotFix` з датою останнього встановлення.
+- Додано перевірку pending reboot через ключі реєстру Windows Update та CBS.
+- Додано пошук відсутніх оновлень через Windows Update Agent COM API (лише профілі `Deep`/`Forensic`).
+- Додано findings: CRITICAL для невстановлених критичних оновлень; WARNING для застарілості >60 днів, pending reboot, вимкненої служби wuauserv та черги оновлень.
+- Додано картку `Windows Update` та таблицю `Pending Windows Updates` з пошуком у вкладку OS HTML-звіту.
+- Додано `src/39-Collectors-Updates.ps1` у `BRAVO.build.json`.
+
+## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
 
 - Змінено профіль запуску за замовчуванням з `Full` на `Forensic`.
 - Увімкнено створення ZIP-архіву за замовчуванням.

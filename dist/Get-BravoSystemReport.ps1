@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-06-11 14:10:21
+    GeneratedAt: 2026-08-24 23:27:18
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -38,6 +38,7 @@ param(
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipPublicIP,
 
     [int]$EventLogDays = 0,
 
@@ -194,6 +195,8 @@ function Get-BravoPrimaryNetworkInterface {
             }
         }
     } catch {
+        # Свідомо ігноруємо: сучасний Get-NetRoute/Get-NetAdapter шлях недоступний
+        # або впав (наприклад, немає модуля NetTCPIP) — нижче є CIM/WMI fallback.
     }
 
     try {
@@ -223,6 +226,8 @@ function Get-BravoPrimaryNetworkInterface {
             }
         }
     } catch {
+        # Свідомо ігноруємо: обидва методи (NetAdapter та CIM) недоступні —
+        # повертаємо $null, виклик нижче трактує це як "primary interface не знайдено".
     }
 
     return $null
@@ -285,6 +290,8 @@ function Get-BravoAllUsableIPv4AddressList {
             }
         }
     } catch {
+        # Свідомо ігноруємо: CIM-запит недоступний на цій машині —
+        # повертаємо порожній список замість переривання збору мережевих даних.
     }
 
     return @($result)
@@ -423,7 +430,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.4.1'
+    SchemaVersion = '0.5.0'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -473,6 +480,21 @@ return [ordered]@{
     OS = [ordered]@{ Caption=''; Version=''; Build=''; Architecture=''; InstallDate=''; LastBootUpTime=''; UptimeDays=0; UptimeHours=0 }
     PowerShell = [ordered]@{ Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString() }
     DotNet = [ordered]@{ v4='Not Installed' }
+    WindowsUpdate = [ordered]@{
+        ServiceStatus = ''
+        InstalledHotFixCount = 0
+        InstalledHotFixes = @()
+        LastInstalledHotFix = ''
+        LastInstallDate = ''
+        DaysSinceLastInstall = -1
+        PendingRebootRequired = $false
+        PendingUpdates = @()
+        PendingCount = 0
+        PendingCritical = 0
+        PendingSecurity = 0
+        SearchStatus = 'NotChecked'
+        SearchError = ''
+    }
     BIOS = [ordered]@{ Version=''; SerialNumber=''; ReleaseDate='' }
     Virtualization = [ordered]@{ IsVirtual=$false; Hypervisor='' }
     Hardware = [ordered]@{
@@ -1108,7 +1130,7 @@ function Get-BravoNetworkAudit {
                 Add-AuditError -Section 'Network.TcpConnections' -Message $_.Exception.Message
             }
         }
-    # BRAVO IP ORDER OUTPUT START
+    # --- Впорядкування IPv4 (primary адреса першою) ---
     $bravoPrimaryNetwork = Get-BravoPrimaryNetworkInterface
     $bravoPrimaryIPv4 = $null
 
@@ -1118,14 +1140,8 @@ function Get-BravoNetworkAudit {
 
     $bravoIPv4Source = @(Get-BravoAllUsableIPv4AddressList)
 
-    if ($bravoIPv4Source.Count -eq 0 -and $Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            if ($Report.Network.Contains("IPv4")) {
-                $bravoIPv4Source = @($Report.Network["IPv4"])
-            }
-        } elseif ($Report.Network.IPv4) {
-            $bravoIPv4Source = @($Report.Network.IPv4)
-        }
+    if ($bravoIPv4Source.Count -eq 0 -and $script:Report.Network.IP.IPv4) {
+        $bravoIPv4Source = @($script:Report.Network.IP.IPv4)
     }
 
     $bravoOrderedIPv4 = @(Move-BravoIPv4ToFront -IPv4 $bravoIPv4Source -PrimaryIPv4 $bravoPrimaryIPv4)
@@ -1138,78 +1154,54 @@ function Get-BravoNetworkAudit {
         $bravoIPv4Text = "N/A"
     }
 
-    if ($Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            $Report.Network["IPv4"] = @($bravoOrderedIPv4)
-            $Report.Network["PrimaryIPv4"] = $bravoPrimaryIPv4
-            $Report.Network["PrimaryInterface"] = $bravoPrimaryNetwork
-            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
-            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
-            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
-        } else {
-            $Report.Network | Add-Member -NotePropertyName "IPv4" -NotePropertyValue @($bravoOrderedIPv4) -Force
-            $Report.Network | Add-Member -NotePropertyName "PrimaryIPv4" -NotePropertyValue $bravoPrimaryIPv4 -Force
-            $Report.Network | Add-Member -NotePropertyName "PrimaryInterface" -NotePropertyValue $bravoPrimaryNetwork -Force
-            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
-            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
-            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
-        }
-    }
+    $script:Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
+    $script:Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
+    $script:Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
 
     Write-Host "  [OK] IP: $bravoIPv4Text" -ForegroundColor Green
-    # BRAVO IP ORDER OUTPUT END
 
+    # --- Public IPv4 та geo/ISP-дані ---
+    # Мережево-залежна перевірка, що звертається до сторонніх сервісів:
+    # гейтована профілем (не виконується для Quick) і прапорцем -SkipPublicIP.
+    $bravoPublicIPLookupEnabled = (-not $SkipPublicIP) -and ($Profile -in @('Full', 'Deep', 'Forensic'))
 
-    # BRAVO PUBLIC IP OUTPUT START
-    $bravoPublicIPv4Info = Get-BravoPublicIPv4Address
+    if ($bravoPublicIPLookupEnabled) {
+        $bravoPublicIPv4Info = Get-BravoPublicIPv4Address
 
-    if ($Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            $Report.Network["PublicIPv4"] = $bravoPublicIPv4Info.IPv4
-            $Report.Network["PublicIPv4Provider"] = $bravoPublicIPv4Info.Provider
-            $Report.Network["PublicIPv4CheckedAt"] = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network["PublicIPv4Status"] = $bravoPublicIPv4Info.Status
-            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
-            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
-            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
+        $script:Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
+        $script:Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
+        $script:Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
+        $script:Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
+
+        $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
+
+        $script:Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
+        $script:Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
+        $script:Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
+        $script:Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
+        $script:Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
+        $script:Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
+        $script:Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
+        $script:Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
+        $script:Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
+        $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
+        $script:Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
+
+        if ($bravoPublicIPv4Info.Status -eq "Detected") {
+            if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
+                Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
+            } else {
+                Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+            }
         } else {
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4" -NotePropertyValue $bravoPublicIPv4Info.IPv4 -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4Provider" -NotePropertyValue $bravoPublicIPv4Info.Provider -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4CheckedAt" -NotePropertyValue $bravoPublicIPv4Info.CheckedAt -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4Status" -NotePropertyValue $bravoPublicIPv4Info.Status -Force
-            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
-            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
-            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
-        }
-    }
-
-    $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
-
-    if ($Report.Network -and $Report.Network.IP) {
-        $Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
-        $Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
-        $Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
-        $Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
-        $Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
-        $Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
-        $Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
-        $Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
-        $Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
-        $Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
-        $Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
-    }
-    if ($bravoPublicIPv4Info.Status -eq "Detected") {
-        if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
-            Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
-        } else {
-            Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+            Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
+        $bravoSkipReason = if ($SkipPublicIP) { "-SkipPublicIP" } else { "профіль $Profile" }
+        $script:Report.Network.IP.PublicIPv4Status = 'Skipped'
+        $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = 'Skipped'
+        Write-Host "  [INFO] Public IP: пропущено ($bravoSkipReason)" -ForegroundColor Yellow
     }
-    # BRAVO PUBLIC IP OUTPUT END
     } catch {
         Add-AuditError -Section 'Network' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка мережевих даних: $($_.Exception.Message)" -ForegroundColor Red
@@ -1464,6 +1456,153 @@ function Get-BravoSoftwareAudit {
         Write-Host "  $IconDb ПЗ: $($script:Report.Software.Installed.Count) програм" -ForegroundColor Green
     } catch {
         Add-AuditError -Section 'Software' -Message $_.Exception.Message
+    }
+}
+
+
+# ============================================================
+# MODULE: src/39-Collectors-Updates.ps1
+# ============================================================
+
+# MODULE: 39-Collectors-Updates.ps1
+# Збір інформації про Windows Update: встановлені оновлення,
+# відсутні (потрібні) оновлення та статус pending reboot.
+
+function Get-BravoWindowsUpdateAudit {
+    [CmdletBinding()]
+    param()
+
+    # --- Служба Windows Update ---
+    try {
+        $wuService = Get-Service -Name 'wuauserv' -ErrorAction Stop
+        $script:Report.WindowsUpdate.ServiceStatus = "$($wuService.Status) ($($wuService.StartType))"
+
+        if ($wuService.StartType -eq 'Disabled') {
+            Add-AuditFinding -Severity 'WARNING' -Category 'WindowsUpdate' -Message 'Служба Windows Update (wuauserv) вимкнена' -Recommendation 'Перевірте, чи вимкнення є навмисним (політика/WSUS). Інакше увімкніть службу для отримання оновлень безпеки.'
+        }
+    } catch {
+        Add-AuditError -Section 'WindowsUpdate.Service' -Message $_.Exception.Message
+    }
+
+    # --- Встановлені оновлення (HotFix) ---
+    try {
+        $hotFixes = Get-HotFix -ErrorAction Stop | Sort-Object InstalledOn -Descending
+
+        $script:Report.WindowsUpdate.InstalledHotFixCount = @($hotFixes).Count
+
+        foreach ($hotFix in $hotFixes) {
+            $installedOn = ''
+            if ($hotFix.InstalledOn) { $installedOn = $hotFix.InstalledOn.ToString('yyyy-MM-dd') }
+
+            $script:Report.WindowsUpdate.InstalledHotFixes += [PSCustomObject]@{
+                HotFixID    = $hotFix.HotFixID
+                Description = $hotFix.Description
+                InstalledOn = $installedOn
+                InstalledBy = $hotFix.InstalledBy
+            }
+        }
+
+        $lastHotFix = $hotFixes | Where-Object { $_.InstalledOn } | Select-Object -First 1
+        if ($lastHotFix) {
+            $script:Report.WindowsUpdate.LastInstalledHotFix = $lastHotFix.HotFixID
+            $script:Report.WindowsUpdate.LastInstallDate = $lastHotFix.InstalledOn.ToString('yyyy-MM-dd')
+
+            $daysSinceLastUpdate = [int]((Get-Date) - $lastHotFix.InstalledOn).TotalDays
+            $script:Report.WindowsUpdate.DaysSinceLastInstall = $daysSinceLastUpdate
+
+            if ($daysSinceLastUpdate -gt 60) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'WindowsUpdate' -Message "Останнє оновлення встановлено $daysSinceLastUpdate дн. тому ($($lastHotFix.HotFixID))" -Recommendation 'Запустіть перевірку та встановлення оновлень Windows Update.'
+            }
+        }
+
+        Write-Host "  $IconOk Встановлені оновлення: $($script:Report.WindowsUpdate.InstalledHotFixCount) (останнє: $($script:Report.WindowsUpdate.LastInstallDate))" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'WindowsUpdate.HotFix' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка збору HotFix: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # --- Pending reboot ---
+    try {
+        $rebootKeys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired',
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+        )
+
+        $pendingReboot = $false
+        foreach ($rebootKey in $rebootKeys) {
+            if (Test-Path -LiteralPath $rebootKey) { $pendingReboot = $true; break }
+        }
+
+        if (-not $pendingReboot) {
+            $sessionManager = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -ErrorAction SilentlyContinue
+            if ($sessionManager -and $sessionManager.PendingFileRenameOperations) { $pendingReboot = $true }
+        }
+
+        $script:Report.WindowsUpdate.PendingRebootRequired = $pendingReboot
+
+        if ($pendingReboot) {
+            Add-AuditFinding -Severity 'WARNING' -Category 'WindowsUpdate' -Message 'Система очікує перезавантаження для завершення встановлення оновлень' -Recommendation 'Заплануйте контрольоване перезавантаження машини.'
+        }
+    } catch {
+        Add-AuditError -Section 'WindowsUpdate.PendingReboot' -Message $_.Exception.Message
+    }
+
+    # --- Пошук відсутніх оновлень (Windows Update Agent COM API) ---
+    # Пошук може тривати кілька хвилин, тому виконується лише для Deep/Forensic.
+    if ($Profile -notin @('Deep','Forensic')) {
+        $script:Report.WindowsUpdate.SearchStatus = 'Skipped'
+        Write-Host "  $IconGear Пошук відсутніх оновлень пропущено (профіль: $Profile)" -ForegroundColor Gray
+        return
+    }
+
+    try {
+        Write-Host "  $IconGear Пошук відсутніх оновлень (може тривати кілька хвилин)..." -ForegroundColor Gray
+
+        $updateSession = New-Object -ComObject 'Microsoft.Update.Session'
+        $updateSearcher = $updateSession.CreateUpdateSearcher()
+        $searchResult = $updateSearcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+
+        $pendingCriticalCount = 0
+        $pendingSecurityCount = 0
+
+        foreach ($update in $searchResult.Updates) {
+            $kbList = @()
+            foreach ($kbArticleId in $update.KBArticleIDs) { $kbList += "KB$kbArticleId" }
+
+            $categoryNames = @()
+            foreach ($updateCategory in $update.Categories) { $categoryNames += $updateCategory.Name }
+
+            $severity = [string]$update.MsrcSeverity
+            if ($severity -eq 'Critical') { $pendingCriticalCount++ }
+            if (($categoryNames -join ' ') -match 'Security') { $pendingSecurityCount++ }
+
+            $script:Report.WindowsUpdate.PendingUpdates += [PSCustomObject]@{
+                Title        = $update.Title
+                KB           = ($kbList -join ', ')
+                Severity     = $severity
+                Categories   = ($categoryNames -join ', ')
+                IsDownloaded = [bool]$update.IsDownloaded
+                SizeMB       = [Math]::Round($update.MaxDownloadSize / 1MB, 1)
+            }
+        }
+
+        $script:Report.WindowsUpdate.PendingCount = @($script:Report.WindowsUpdate.PendingUpdates).Count
+        $script:Report.WindowsUpdate.PendingCritical = $pendingCriticalCount
+        $script:Report.WindowsUpdate.PendingSecurity = $pendingSecurityCount
+        $script:Report.WindowsUpdate.SearchStatus = 'OK'
+
+        if ($pendingCriticalCount -gt 0) {
+            Add-AuditFinding -Severity 'CRITICAL' -Category 'WindowsUpdate' -Message "Не встановлено критичних оновлень: $pendingCriticalCount" -Recommendation 'Встановіть критичні оновлення якнайшвидше.'
+        } elseif ($script:Report.WindowsUpdate.PendingCount -gt 0) {
+            Add-AuditFinding -Severity 'WARNING' -Category 'WindowsUpdate' -Message "Очікують встановлення оновлень: $($script:Report.WindowsUpdate.PendingCount) (з них security: $pendingSecurityCount)" -Recommendation 'Заплануйте встановлення оновлень у сервісне вікно.'
+        }
+
+        Write-Host "  $IconOk Відсутні оновлення: $($script:Report.WindowsUpdate.PendingCount) (critical: $pendingCriticalCount, security: $pendingSecurityCount)" -ForegroundColor Green
+    } catch {
+        $script:Report.WindowsUpdate.SearchStatus = 'Error'
+        $script:Report.WindowsUpdate.SearchError = $_.Exception.Message
+        Add-AuditError -Section 'WindowsUpdate.Search' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка пошуку оновлень: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
@@ -1797,6 +1936,24 @@ function Export-BravoHtmlReport {
                 '<tr><td colspan="11" class="muted">Storage Deep дані відсутні для поточного профілю або збір завершився з помилкою.</td></tr>'
             }
 
+            $updatesPending = @($script:Report.WindowsUpdate.PendingUpdates)
+            $updatesPendingRows = if ($updatesPending.Count -gt 0) {
+                ($updatesPending | ForEach-Object {
+                    $pendingUpdate = $_
+                    $severityText = if ([string]::IsNullOrWhiteSpace([string]$pendingUpdate.Severity)) { 'Unspecified' } else { [string]$pendingUpdate.Severity }
+                    $severityClass = switch ($severityText) {
+                        'Critical'  { 'risk-critical' }
+                        'Important' { 'risk-warning' }
+                        'Moderate'  { 'risk-warning' }
+                        'Low'       { 'risk-ok' }
+                        default     { 'risk-unknown' }
+                    }
+                    "<tr><td>$(ConvertTo-BravoHtmlText $pendingUpdate.KB)</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Title)</td><td><span class=`"risk $severityClass`">$(ConvertTo-BravoHtmlText $severityText)</span></td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Categories)</td><td>$(if($pendingUpdate.IsDownloaded){'Так'}else{'Ні'})</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.SizeMB)</td></tr>"
+                }) -join "`n"
+            } else {
+                '<tr><td colspan="6" class="muted">Відсутні оновлення не виявлені, пошук пропущено або завершився з помилкою (див. Search status).</td></tr>'
+            }
+
             $computerNameHtml = ConvertTo-BravoHtmlText $script:Report.ComputerName
             $timestampHtml = ConvertTo-BravoHtmlText $script:Report.Timestamp
             $profileHtml = ConvertTo-BravoHtmlText $Profile
@@ -1871,7 +2028,7 @@ function Export-BravoHtmlReport {
   </nav>
   <main class="content">
     <section id="tab-general" class="tab-panel active"><h2 class="tab-panel-title"><span class="section-icon">📌</span>General Dashboard</h2><div class="metrics-grid">$metricCardsHtml</div><div class="grid"><div class="card"><h3>Підсумок</h3>$(New-BravoInfoRowHtml 'Health Score' "$($script:Report.Health.Score)/100")$(New-BravoInfoRowHtml 'Status' $script:Report.Status)$(New-BravoInfoRowHtml 'Status reason' $script:Report.StatusReason)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)$(New-BravoInfoRowHtml 'Collection errors' $script:Report.CollectionErrors.Count)</div><div class="card"><h3>Ключова мережа</h3>$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div></div></section>
-    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div></div></section>
+    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Service' $script:Report.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Installed hotfixes' $script:Report.WindowsUpdate.InstalledHotFixCount)$(New-BravoInfoRowHtml 'Last hotfix' "$($script:Report.WindowsUpdate.LastInstalledHotFix) ($($script:Report.WindowsUpdate.LastInstallDate))")$(New-BravoInfoRowHtml 'Pending reboot' $(if($script:Report.WindowsUpdate.PendingRebootRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Pending updates' $script:Report.WindowsUpdate.PendingCount)$(New-BravoInfoRowHtml 'Pending critical / security' "$($script:Report.WindowsUpdate.PendingCritical) / $($script:Report.WindowsUpdate.PendingSecurity)")$(New-BravoInfoRowHtml 'Search status' $script:Report.WindowsUpdate.SearchStatus)</div></div><h3>Pending Windows Updates</h3>$(New-BravoTableToolbarHtml -TableId 'table-pending-updates' -Placeholder 'Пошук по KB, назві, severity...')<div class="table-scroll"><table id="table-pending-updates" class="data-table"><thead><tr><th>KB</th><th>Назва</th><th>Severity</th><th>Категорії</th><th>Завантажено</th><th>Size MB</th></tr></thead><tbody>$updatesPendingRows</tbody></table></div></section>
     <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.CPU.LoadPercent)%">$($script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.RAM.UsedPercent)%">$($script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.Disks.FreePercent)%">$($script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div></section>
     <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th></tr></thead><tbody>$adapterRows</tbody></table></div></section>
     <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div></div></section>
@@ -2346,6 +2503,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
+        if ($SkipPublicIP) { $arguments += '-SkipPublicIP' }
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
         if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
         if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
@@ -2389,6 +2547,9 @@ Write-Host ''
 
 # --- ОС ---
 Get-BravoOperatingSystemAudit
+
+# --- Windows Update ---
+Get-BravoWindowsUpdateAudit
 
 # --- .NET ---
 try {
@@ -2437,12 +2598,16 @@ Get-BravoEventLogsAudit
 # --- Програмне забезпечення ---
 Get-BravoSoftwareAudit
 
-# --- Health score ---
+# --- Health score (попередній розрахунок для HTML dashboard) ---
 Update-BravoHealthScore
 
 # ============================================================
 # ЗБЕРЕЖЕННЯ ЗВІТІВ
 # ============================================================
+# Примітка: Health Score рахується ще раз ПІСЛЯ export-етапів (нижче),
+# бо самі export-функції можуть додати помилки в CollectionErrors
+# (наприклад, невдалий ZIP). JSON перезаписується з фінальною оцінкою,
+# щоб файл на диску був авторитетним джерелом, а не застарілим знімком.
 
 try {
     $outputDir = Resolve-AuditOutputPath -RequestedPath $OutputPath -DefaultPath $ScriptDirectory
@@ -2467,6 +2632,12 @@ Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOn
 
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
+
+# Фінальний перерахунок Health Score — враховує помилки з export-етапів вище,
+# після чого JSON перезаписується, щоб бути авторитетним джерелом для ZIP.
+Update-BravoHealthScore
+Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # ZIP
 Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip

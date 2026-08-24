@@ -61,7 +61,7 @@ function Get-BravoNetworkAudit {
                 Add-AuditError -Section 'Network.TcpConnections' -Message $_.Exception.Message
             }
         }
-    # BRAVO IP ORDER OUTPUT START
+    # --- Впорядкування IPv4 (primary адреса першою) ---
     $bravoPrimaryNetwork = Get-BravoPrimaryNetworkInterface
     $bravoPrimaryIPv4 = $null
 
@@ -71,14 +71,8 @@ function Get-BravoNetworkAudit {
 
     $bravoIPv4Source = @(Get-BravoAllUsableIPv4AddressList)
 
-    if ($bravoIPv4Source.Count -eq 0 -and $Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            if ($Report.Network.Contains("IPv4")) {
-                $bravoIPv4Source = @($Report.Network["IPv4"])
-            }
-        } elseif ($Report.Network.IPv4) {
-            $bravoIPv4Source = @($Report.Network.IPv4)
-        }
+    if ($bravoIPv4Source.Count -eq 0 -and $script:Report.Network.IP.IPv4) {
+        $bravoIPv4Source = @($script:Report.Network.IP.IPv4)
     }
 
     $bravoOrderedIPv4 = @(Move-BravoIPv4ToFront -IPv4 $bravoIPv4Source -PrimaryIPv4 $bravoPrimaryIPv4)
@@ -91,78 +85,54 @@ function Get-BravoNetworkAudit {
         $bravoIPv4Text = "N/A"
     }
 
-    if ($Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            $Report.Network["IPv4"] = @($bravoOrderedIPv4)
-            $Report.Network["PrimaryIPv4"] = $bravoPrimaryIPv4
-            $Report.Network["PrimaryInterface"] = $bravoPrimaryNetwork
-            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
-            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
-            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
-        } else {
-            $Report.Network | Add-Member -NotePropertyName "IPv4" -NotePropertyValue @($bravoOrderedIPv4) -Force
-            $Report.Network | Add-Member -NotePropertyName "PrimaryIPv4" -NotePropertyValue $bravoPrimaryIPv4 -Force
-            $Report.Network | Add-Member -NotePropertyName "PrimaryInterface" -NotePropertyValue $bravoPrimaryNetwork -Force
-            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
-            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
-            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
-        }
-    }
+    $script:Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
+    $script:Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
+    $script:Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
 
     Write-Host "  [OK] IP: $bravoIPv4Text" -ForegroundColor Green
-    # BRAVO IP ORDER OUTPUT END
 
+    # --- Public IPv4 та geo/ISP-дані ---
+    # Мережево-залежна перевірка, що звертається до сторонніх сервісів:
+    # гейтована профілем (не виконується для Quick) і прапорцем -SkipPublicIP.
+    $bravoPublicIPLookupEnabled = (-not $SkipPublicIP) -and ($Profile -in @('Full', 'Deep', 'Forensic'))
 
-    # BRAVO PUBLIC IP OUTPUT START
-    $bravoPublicIPv4Info = Get-BravoPublicIPv4Address
+    if ($bravoPublicIPLookupEnabled) {
+        $bravoPublicIPv4Info = Get-BravoPublicIPv4Address
 
-    if ($Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            $Report.Network["PublicIPv4"] = $bravoPublicIPv4Info.IPv4
-            $Report.Network["PublicIPv4Provider"] = $bravoPublicIPv4Info.Provider
-            $Report.Network["PublicIPv4CheckedAt"] = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network["PublicIPv4Status"] = $bravoPublicIPv4Info.Status
-            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
-            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
-            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
+        $script:Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
+        $script:Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
+        $script:Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
+        $script:Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
+
+        $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
+
+        $script:Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
+        $script:Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
+        $script:Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
+        $script:Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
+        $script:Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
+        $script:Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
+        $script:Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
+        $script:Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
+        $script:Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
+        $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
+        $script:Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
+
+        if ($bravoPublicIPv4Info.Status -eq "Detected") {
+            if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
+                Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
+            } else {
+                Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+            }
         } else {
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4" -NotePropertyValue $bravoPublicIPv4Info.IPv4 -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4Provider" -NotePropertyValue $bravoPublicIPv4Info.Provider -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4CheckedAt" -NotePropertyValue $bravoPublicIPv4Info.CheckedAt -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4Status" -NotePropertyValue $bravoPublicIPv4Info.Status -Force
-            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
-            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
-            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
-        }
-    }
-
-    $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
-
-    if ($Report.Network -and $Report.Network.IP) {
-        $Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
-        $Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
-        $Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
-        $Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
-        $Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
-        $Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
-        $Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
-        $Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
-        $Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
-        $Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
-        $Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
-    }
-    if ($bravoPublicIPv4Info.Status -eq "Detected") {
-        if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
-            Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
-        } else {
-            Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+            Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
+        $bravoSkipReason = if ($SkipPublicIP) { "-SkipPublicIP" } else { "профіль $Profile" }
+        $script:Report.Network.IP.PublicIPv4Status = 'Skipped'
+        $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = 'Skipped'
+        Write-Host "  [INFO] Public IP: пропущено ($bravoSkipReason)" -ForegroundColor Yellow
     }
-    # BRAVO PUBLIC IP OUTPUT END
     } catch {
         Add-AuditError -Section 'Network' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка мережевих даних: $($_.Exception.Message)" -ForegroundColor Red

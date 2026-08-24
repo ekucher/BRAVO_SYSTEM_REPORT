@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.4.1'
+    SchemaVersion = '0.5.0'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -56,6 +56,21 @@ return [ordered]@{
     OS = [ordered]@{ Caption=''; Version=''; Build=''; Architecture=''; InstallDate=''; LastBootUpTime=''; UptimeDays=0; UptimeHours=0 }
     PowerShell = [ordered]@{ Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString() }
     DotNet = [ordered]@{ v4='Not Installed' }
+    WindowsUpdate = [ordered]@{
+        ServiceStatus = ''
+        InstalledHotFixCount = 0
+        InstalledHotFixes = @()
+        LastInstalledHotFix = ''
+        LastInstallDate = ''
+        DaysSinceLastInstall = -1
+        PendingRebootRequired = $false
+        PendingUpdates = @()
+        PendingCount = 0
+        PendingCritical = 0
+        PendingSecurity = 0
+        SearchStatus = 'NotChecked'
+        SearchError = ''
+    }
     BIOS = [ordered]@{ Version=''; SerialNumber=''; ReleaseDate='' }
     Virtualization = [ordered]@{ IsVirtual=$false; Hypervisor='' }
     Hardware = [ordered]@{

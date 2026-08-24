@@ -187,6 +187,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
+        if ($SkipPublicIP) { $arguments += '-SkipPublicIP' }
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
         if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
         if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
@@ -230,6 +231,9 @@ Write-Host ''
 
 # --- ОС ---
 Get-BravoOperatingSystemAudit
+
+# --- Windows Update ---
+Get-BravoWindowsUpdateAudit
 
 # --- .NET ---
 try {
@@ -278,12 +282,16 @@ Get-BravoEventLogsAudit
 # --- Програмне забезпечення ---
 Get-BravoSoftwareAudit
 
-# --- Health score ---
+# --- Health score (попередній розрахунок для HTML dashboard) ---
 Update-BravoHealthScore
 
 # ============================================================
 # ЗБЕРЕЖЕННЯ ЗВІТІВ
 # ============================================================
+# Примітка: Health Score рахується ще раз ПІСЛЯ export-етапів (нижче),
+# бо самі export-функції можуть додати помилки в CollectionErrors
+# (наприклад, невдалий ZIP). JSON перезаписується з фінальною оцінкою,
+# щоб файл на диску був авторитетним джерелом, а не застарілим знімком.
 
 try {
     $outputDir = Resolve-AuditOutputPath -RequestedPath $OutputPath -DefaultPath $ScriptDirectory
@@ -308,6 +316,12 @@ Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOn
 
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
+
+# Фінальний перерахунок Health Score — враховує помилки з export-етапів вище,
+# після чого JSON перезаписується, щоб бути авторитетним джерелом для ZIP.
+Update-BravoHealthScore
+Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # ZIP
 Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip

@@ -16,6 +16,7 @@ param(
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipPublicIP,
 
     [int]$EventLogDays = 0,
 
