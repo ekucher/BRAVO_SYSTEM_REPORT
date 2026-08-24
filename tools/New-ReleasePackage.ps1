@@ -46,16 +46,16 @@ function Resolve-PackageVersion {
         }
     }
 
-    $SourceScript = Join-Path $RepoPath "src\Get-BravoSystemReport.ps1"
-    if (Test-Path -LiteralPath $SourceScript) {
-        $SourceContent = Get-Content -LiteralPath $SourceScript -Raw -Encoding UTF8
+    $MainModule = Join-Path $RepoPath (Join-Path "src" "90-Main.ps1")
+    if (Test-Path -LiteralPath $MainModule) {
+        $SourceContent = Get-Content -LiteralPath $MainModule -Raw -Encoding UTF8
         $ScriptVersionMatch = [regex]::Match($SourceContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
         if ($ScriptVersionMatch.Success) {
             return $ScriptVersionMatch.Groups["Version"].Value
         }
     }
 
-    throw "Cannot detect package version from CHANGELOG.md or src\Get-BravoSystemReport.ps1"
+    throw "Cannot detect package version from CHANGELOG.md or src/90-Main.ps1"
 }
 
 Write-Host "=== BRAVO SYSTEM REPORT RELEASE PACKAGE ==="
@@ -67,9 +67,20 @@ if (-not (Test-Path -LiteralPath $RepoPath)) {
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
 Set-Location -LiteralPath $RepoPath
 
-$SourceScript = Join-Path $RepoPath "src\Get-BravoSystemReport.ps1"
-if (-not (Test-Path -LiteralPath $SourceScript)) {
-    throw "Source script not found: $SourceScript"
+# Кросплатформна нормалізація відносних шляхів пакета.
+function Resolve-PackageRelativePath {
+    param(
+        [string]$RepoPath,
+        [string]$RelativePath
+    )
+
+    $normalized = $RelativePath -replace '[\\/]', [System.IO.Path]::DirectorySeparatorChar
+    return (Join-Path $RepoPath $normalized)
+}
+
+$RuntimeScript = Resolve-PackageRelativePath -RepoPath $RepoPath -RelativePath "dist/Get-BravoSystemReport.ps1"
+if (-not (Test-Path -LiteralPath $RuntimeScript)) {
+    throw "Runtime script not found: $RuntimeScript. Спочатку виконайте Build-BRAVO-SystemReport.ps1."
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -85,7 +96,7 @@ if (-not (Test-Path -LiteralPath $OutputPath)) {
 }
 
 $PackageName = "BRAVO_SYSTEM_REPORT_v$Version"
-$StagingRoot = Join-Path $OutputPath "_staging\$PackageName"
+$StagingRoot = Join-Path (Join-Path $OutputPath "_staging") $PackageName
 $ZipPath = Join-Path $OutputPath "$PackageName.zip"
 $Sha256Path = "$ZipPath.sha256"
 
@@ -99,7 +110,7 @@ if (-not (Test-Path -LiteralPath $StagingRoot)) {
 
 $IncludeFiles = @(
     "Get-BravoSystemReport.ps1",
-    "src\Get-BravoSystemReport.ps1",
+    "dist/Get-BravoSystemReport.ps1",
     "BRAVO-SystemReport-Quick.bat",
     "BRAVO-SystemReport-Full.bat",
     "BRAVO-SystemReport-Deep.bat",
@@ -108,22 +119,22 @@ $IncludeFiles = @(
     "README.md",
     "CHANGELOG.md",
     "LICENSE.md",
-    "docs\ARCHITECTURE.md",
-    "docs\PROJECT_RULES.md",
-    "docs\ROADMAP.md",
-    "docs\SECURITY.md",
-    "examples\README.md"
+    "docs/ARCHITECTURE.md",
+    "docs/PROJECT_RULES.md",
+    "docs/ROADMAP.md",
+    "docs/SECURITY.md",
+    "examples/README.md"
 )
 
 $CopiedFiles = New-Object System.Collections.Generic.List[string]
 
 foreach ($RelativePath in $IncludeFiles) {
-    $SourcePath = Join-Path $RepoPath $RelativePath
+    $SourcePath = Resolve-PackageRelativePath -RepoPath $RepoPath -RelativePath $RelativePath
     if (-not (Test-Path -LiteralPath $SourcePath)) {
         throw "Required file not found: $RelativePath"
     }
 
-    $DestinationPath = Join-Path $StagingRoot $RelativePath
+    $DestinationPath = Resolve-PackageRelativePath -RepoPath $StagingRoot -RelativePath $RelativePath
     $DestinationDir = Split-Path -Parent $DestinationPath
 
     if (-not (Test-Path -LiteralPath $DestinationDir)) {
@@ -133,6 +144,31 @@ foreach ($RelativePath in $IncludeFiles) {
     Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
     $CopiedFiles.Add($RelativePath) | Out-Null
 }
+
+# Пакет призначений для Windows: усі текстові файли нормалізуються до CRLF,
+# щоб контрольна сума в пакеті відповідала саме тому файлу, який отримує користувач.
+$TextExtensions = @('.ps1', '.bat', '.md', '.txt')
+$Latin1 = [System.Text.Encoding]::GetEncoding(28591)
+
+Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
+    Where-Object { $TextExtensions -contains $_.Extension.ToLowerInvariant() } |
+    ForEach-Object {
+        $rawBytes = [System.IO.File]::ReadAllBytes($_.FullName)
+        $rawText = $Latin1.GetString($rawBytes)
+        $normalizedText = ($rawText -replace "`r`n", "`n") -replace "`n", "`r`n"
+
+        if ($normalizedText -ne $rawText) {
+            [System.IO.File]::WriteAllBytes($_.FullName, $Latin1.GetBytes($normalizedText))
+        }
+    }
+
+$StagedRuntime = Resolve-PackageRelativePath -RepoPath $StagingRoot -RelativePath "dist/Get-BravoSystemReport.ps1"
+$StagedSha512Path = "$StagedRuntime.sha512"
+$StagedHash = Get-FileHash -LiteralPath $StagedRuntime -Algorithm SHA512
+$StagedHash.Hash | Set-Content -LiteralPath $StagedSha512Path -Encoding ASCII
+$CopiedFiles.Add("dist/Get-BravoSystemReport.ps1.sha512") | Out-Null
+
+Write-Info "SHA512 runtime у пакеті: $($StagedHash.Hash.Substring(0,32))..."
 
 $ManifestPath = Join-Path $StagingRoot "MANIFEST.txt"
 $ManifestLines = @(
@@ -167,7 +203,7 @@ try {
     Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
         Sort-Object FullName |
         ForEach-Object {
-            $EntryName = $_.FullName.Substring($StagingRoot.Length).TrimStart('\')
+            $EntryName = $_.FullName.Substring($StagingRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\')
             Add-ZipEntry -Archive $ZipArchive -SourcePath $_.FullName -EntryName $EntryName
         }
 }
@@ -194,9 +230,12 @@ Write-Host "=== PACKAGE CONTENT ==="
 
 $Zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
 try {
-    $Zip.Entries |
-        Select-Object FullName,Length |
-        Format-Table -AutoSize
+    foreach ($Entry in ($Zip.Entries | Sort-Object FullName)) {
+        Write-Host ("{0,10}  {1}" -f $Entry.Length, $Entry.FullName)
+    }
+
+    Write-Host ""
+    Write-Host ("Файлів у пакеті: {0}" -f $Zip.Entries.Count)
 }
 finally {
     $Zip.Dispose()
