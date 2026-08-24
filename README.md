@@ -282,6 +282,37 @@ BRAVO-SYSTEM-REPORT-WIN
 
 Він виконує базову перевірку структури репозиторію.
 
+## Реліз
+
+Реліз публікується автоматично workflow-ом `.github/workflows/release.yml` при push-і тега `v*`:
+
+```powershell
+git checkout main
+git pull
+git tag v0.5.0
+git push origin v0.5.0
+```
+
+Що робить workflow:
+
+1. звіряє версію в `src\90-Main.ps1`, `CHANGELOG.md` і в самому тезі — розбіжність зупиняє реліз;
+2. збирає `dist` через `Build-BRAVO-SystemReport.ps1` і робить контрольний прогін профілю `Quick`;
+3. пакує реліз через `tools\New-ReleasePackage.ps1`;
+4. розпаковує готовий ZIP і перевіряє його: наявність runtime і `MANIFEST.txt`, збіг SHA512, parser check
+   і версію запакованого скрипта;
+5. створює GitHub Release із нотатками із секції відповідної версії `CHANGELOG.md` і вкладає
+   `BRAVO_SYSTEM_REPORT_v<version>.zip` та `.zip.sha256`.
+
+Ручний запуск (`workflow_dispatch`) виконує все те саме, але **без публікації релізу** — пакет
+доступний як workflow artifact. Це зручно для перевірки пакування перед тегом.
+
+Локально пакет збирається тим самим скриптом:
+
+```powershell
+.\Build-BRAVO-SystemReport.ps1 -CreateSha512
+.\tools\New-ReleasePackage.ps1
+```
+
 ## Вимоги
 
 - Windows PowerShell 5.1;
@@ -296,7 +327,8 @@ BRAVO-SYSTEM-REPORT-WIN
 BRAVO_SYSTEM_REPORT
 ├── .github/workflows/
 │   ├── local-windows-validation.yml
-│   └── powershell-static-check.yml
+│   ├── powershell-static-check.yml
+│   └── release.yml
 ├── dist/
 │   ├── Get-BravoSystemReport.ps1
 │   └── Get-BravoSystemReport.ps1.sha512
@@ -333,7 +365,8 @@ BRAVO_SYSTEM_REPORT
 │   ├── 90-Main.ps1
 │   └── BRAVO.build.json
 ├── tools/
-│   └── New-ReleasePackage.ps1
+│   ├── New-ReleasePackage.ps1
+│   └── Publish-ToGitHub.ps1
 ├── Build-BRAVO-SystemReport.ps1
 ├── BRAVO-SystemReport-Quick.bat
 ├── BRAVO-SystemReport-Full.bat
@@ -360,12 +393,11 @@ BRAVO_SYSTEM_REPORT
 
 Після аналізу репозиторію зафіксовано такі ключові напрями доробки:
 
-- release package має включати `dist\Get-BravoSystemReport.ps1` і SHA512, бо root wrapper запускає саме `dist`;
-- старий моноліт `src\Get-BravoSystemReport.ps1` потрібно прибрати з основного release flow або перенести в legacy;
+- старий моноліт `src\Get-BravoSystemReport.ps1` лишається в репозиторії як legacy: з release flow його прибрано, але файл ще потребує перенесення або видалення;
 - Health Score потрібно перераховувати після export-етапів або окремо враховувати export health;
 - потрібно реалізувати `-Sanitize` для безпечної передачі звітів третім сторонам;
 - потрібно уніфікувати network schema для `IPv4`, `PrimaryIPv4` і `PrimaryInterface`;
-- потрібно розширити Deep/Forensic профілі: TPM, Secure Boot, BitLocker, Pending Reboot, RDP/NLA, WinRM, SMBv1, TLS baseline, EventLog provider summary;
+- потрібно розширити Deep/Forensic профілі: TPM, Secure Boot, BitLocker, RDP/NLA, WinRM, SMBv1, TLS baseline, EventLog provider summary;
 - потрібно додати Markdown/TXT summary і розширити CI-перевірки.
 
 Детальний план впровадження описано у файлі:
@@ -403,7 +435,6 @@ $ErrorActionPreference = "Stop"
 
 Найближчі етапи:
 
-- стабілізувати release package;
 - прибрати legacy-конфлікт `src\Get-BravoSystemReport.ps1`;
 - додати `-Sanitize`, `-SkipPublicIP` і `-Offline`;
 - розширити hardware/storage/network/security/event log аудит;
