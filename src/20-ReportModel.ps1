@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.4.1'
+    SchemaVersion = '0.5.0'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -37,6 +37,7 @@ return [ordered]@{
             RAM = [ordered]@{ Title='RAM'; Value=''; Status='OK'; Details='' }
             Disk = [ordered]@{ Title='Disk'; Value=''; Status='OK'; Details='' }
             OS = [ordered]@{ Title='OS'; Value=''; Status='OK'; Details='' }
+            Updates = [ordered]@{ Title='Updates'; Value=''; Status='OK'; Details='' }
         }
         Tabs = [ordered]@{
             General = $true
@@ -46,6 +47,7 @@ return [ordered]@{
             Security = $true
             Services = $true
             Software = $true
+            Updates = $true
         }
     }
     Health = [ordered]@{
@@ -96,6 +98,46 @@ return [ordered]@{
     Services = [ordered]@{ Total=0; Running=0; AutomaticStopped=@() }
     EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0 }
     Software = [ordered]@{ Installed=@(); WindowsFeatures=@() }
+    Updates = [ordered]@{
+        OS = [ordered]@{
+            Product=''
+            DisplayVersion=''
+            RegistryDisplayVersion=''
+            UBR=''
+            FullBuild=''
+            Channel=''
+            SupportEndDate=''
+            DaysToEndOfSupport=$null
+            SupportStatus='Unknown'
+            LifecycleDataUpdatedAt=''
+        }
+        WindowsUpdate = [ordered]@{
+            ServiceStatus=''
+            ServiceStartType=''
+            AutoUpdateOption=''
+            LastDetectSuccess=''
+            LastInstallSuccess=''
+            DaysSinceLastDetect=$null
+            ManagedByWSUS=$false
+            WSUSServer=''
+        }
+        PendingReboot = [ordered]@{ Required=$false; Reasons=@() }
+        Search = [ordered]@{ Status='NotChecked'; Method=''; Error=''; CheckedAt=''; DurationSeconds=0 }
+        Pending = [ordered]@{
+            Total=0
+            Security=0
+            Critical=0
+            Driver=0
+            Definition=0
+            Other=0
+            Downloaded=0
+            TotalSizeMB=0
+            OldestReleasedOn=''
+            MaxAgeDays=$null
+            Items=@()
+        }
+        Installed = [ordered]@{ Total=0; LastInstalledOn=''; DaysSinceLastUpdate=$null; InstalledLast30Days=0; Recent=@() }
+    }
     USBDevices = @()
     CollectionErrors = @()
 }

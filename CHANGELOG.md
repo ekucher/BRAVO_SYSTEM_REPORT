@@ -1,4 +1,19 @@
-﻿## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
+﻿## Unreleased — аналіз ОС і оновлень Windows
+
+- Додано модуль `src\39-Collectors-Updates.ps1` з колектором `Get-BravoUpdatesAudit`.
+- Додано секцію `Updates` у модель звіту та підвищено `SchemaVersion` до `0.5.0`.
+- Додано аналіз життєвого циклу ОС: продукт, DisplayVersion, full build з UBR, канал, дата завершення підтримки і статус `Supported` / `EndingSoon` / `EndOfSupport`.
+- Додано пошук доступних оновлень через COM `Microsoft.Update.Session` з таймаутом і виконанням у фоновому job.
+- Додано зведення по оновленнях: total, security, critical, driver, definition, other, downloaded, розмір і вік найстарішого оновлення.
+- Додано збір стану Windows Update: служба `wuauserv`, політика `AUOptions`, WSUS, час останнього пошуку та встановлення.
+- Додано визначення pending reboot з переліком причин.
+- Додано збір встановлених оновлень через `Get-HotFix` з fallback на `Win32_QuickFixEngineering`.
+- Додано знахідки Health Score для ОС поза підтримкою, невстановлених оновлень безпеки, pending reboot і зупиненого циклу оновлень.
+- Додано метричну картку `Updates` і вкладку `Updates` у HTML-звіт із таблицями доступних і встановлених оновлень.
+- Додано поля оновлень у CSV-експорт.
+- Додано параметри `-SkipUpdateSearch` і `-UpdateSearchTimeoutSec`; профіль `Quick` онлайн-пошук не виконує.
+
+## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
 
 - Змінено профіль запуску за замовчуванням з `Full` на `Forensic`.
 - Увімкнено створення ZIP-архіву за замовчуванням.

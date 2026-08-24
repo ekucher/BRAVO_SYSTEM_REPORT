@@ -25,8 +25,10 @@ param(
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipUpdateSearch,
 
     [int]$EventLogDays = 0,
+    [int]$UpdateSearchTimeoutSec = 180,
 
     [string]$EmailTo,
     [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
@@ -63,6 +65,11 @@ if ($NoElevate)     { $ForwardParameters.NoElevate = $true }
 if ($NoPause)       { $ForwardParameters.NoPause = $true }
 if ($NoOpenFolder)  { $ForwardParameters.NoOpenFolder = $true }
 if ($SkipElevation) { $ForwardParameters.SkipElevation = $true }
+if ($SkipUpdateSearch) { $ForwardParameters.SkipUpdateSearch = $true }
+
+if ($UpdateSearchTimeoutSec -gt 0) {
+    $ForwardParameters.UpdateSearchTimeoutSec = $UpdateSearchTimeoutSec
+}
 
 if ($EventLogDays -gt 0) {
     $ForwardParameters.EventLogDays = $EventLogDays
