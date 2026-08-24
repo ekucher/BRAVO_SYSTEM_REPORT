@@ -15,6 +15,7 @@
     "src/36-Collectors-ProcessesServices.ps1",
     "src/37-Collectors-Events.ps1",
     "src/38-Collectors-Software.ps1",
+    "src/39-Collectors-Updates.ps1",
     "src/40-Health.ps1",
     "src/50-Export-Json.ps1",
     "src/51-Export-Html.ps1",

@@ -187,6 +187,99 @@ jobs:
 
           Write-Host "[OK] JSON validation passed"
 
+      - name: Full runtime test
+        run: |
+          Write-Host "=== FULL RUNTIME TEST ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports\ci-full"
+
+          if (Test-Path -LiteralPath $reportsDir) {
+            Remove-Item -LiteralPath $reportsDir -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\dist\Get-BravoSystemReport.ps1" -Profile Full -NoPause -NoOpenFolder -OutputPath $reportsDir
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Full runtime test failed with code $LASTEXITCODE"
+          }
+
+          Write-Host "[OK] Full runtime test passed"
+          Write-Host "[INFO] Reports dir: $reportsDir"
+
+      - name: Validate updates section
+        run: |
+          Write-Host "=== UPDATES SECTION VALIDATION ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports\ci-full"
+
+          if (-not (Test-Path -LiteralPath $reportsDir)) {
+            throw "Reports directory not found: $reportsDir"
+          }
+
+          $latestJson = Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.json" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (-not $latestJson) {
+            throw "No BravoSystemReport_*.json files found in $reportsDir"
+          }
+
+          $report = Get-Content -LiteralPath $latestJson.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+
+          Write-Host "[INFO] JSON: $($latestJson.Name)"
+          Write-Host "[INFO] Profile: $($report.Profile)"
+          Write-Host "[INFO] OS FullBuild: $($report.Updates.OS.FullBuild)"
+          Write-Host "[INFO] OS SupportStatus: $($report.Updates.OS.SupportStatus)"
+          Write-Host "[INFO] Search Status: $($report.Updates.Search.Status)"
+          Write-Host "[INFO] Search DurationSeconds: $($report.Updates.Search.DurationSeconds)"
+          Write-Host "[INFO] Pending Total: $($report.Updates.Pending.Total)"
+          Write-Host "[INFO] Pending Security: $($report.Updates.Pending.Security)"
+          Write-Host "[INFO] PendingReboot Required: $($report.Updates.PendingReboot.Required)"
+          Write-Host "[INFO] Installed Total: $($report.Updates.Installed.Total)"
+
+          if ($report.Profile -ne "Full") {
+            throw "Expected Profile=Full, got Profile=$($report.Profile)"
+          }
+
+          if (-not $report.Updates) {
+            throw "Updates section is missing in JSON report"
+          }
+
+          $allowedSearchStatus = @("OK", "Failed", "Timeout")
+
+          if ($allowedSearchStatus -notcontains $report.Updates.Search.Status) {
+            throw "Unexpected Updates.Search.Status: $($report.Updates.Search.Status)"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($report.Updates.OS.FullBuild)) {
+            throw "Updates.OS.FullBuild is empty"
+          }
+
+          if ([int]$report.Updates.Installed.Total -le 0) {
+            throw "Updates.Installed.Total is invalid: $($report.Updates.Installed.Total)"
+          }
+
+          if ($report.Updates.Search.Status -ne "OK") {
+            Write-Host "[INFO] Search Error: $($report.Updates.Search.Error)"
+
+            if ([int]$report.Updates.Pending.Total -ne 0) {
+              throw "Inconsistent state: Search.Status=$($report.Updates.Search.Status) but Pending.Total=$($report.Updates.Pending.Total)"
+            }
+          }
+
+          if (@($report.CollectionErrors).Count -ne 0) {
+            $report.CollectionErrors | ForEach-Object { Write-Host "[INFO] CollectionError: $($_.Section): $($_.Message)" }
+            throw "Expected CollectionErrors=0, got CollectionErrors=$(@($report.CollectionErrors).Count)"
+          }
+
+          Write-Host "[OK] Updates section validation passed"
+
       - name: Public IPv4 literal scan
         run: |
           Write-Host "=== PUBLIC IPv4 LITERAL SCAN ==="

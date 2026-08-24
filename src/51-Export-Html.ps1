@@ -142,12 +142,14 @@ function Export-BravoHtmlReport {
             $ramMetric = $dashboardMetrics.RAM
             $diskMetric = $dashboardMetrics.Disk
             $osMetric = $dashboardMetrics.OS
+            $updatesMetric = $dashboardMetrics.Updates
 
             $metricCardsHtml = @(
                 New-BravoMetricCardHtml -Icon '🧠' -Title $cpuMetric.Title -Value $cpuMetric.Value -Details $cpuMetric.Details -Status $cpuMetric.Status
                 New-BravoMetricCardHtml -Icon '💾' -Title $ramMetric.Title -Value $ramMetric.Value -Details $ramMetric.Details -Status $ramMetric.Status
                 New-BravoMetricCardHtml -Icon '💿' -Title $diskMetric.Title -Value $diskMetric.Value -Details $diskMetric.Details -Status $diskMetric.Status
                 New-BravoMetricCardHtml -Icon '🖥️' -Title $osMetric.Title -Value $osMetric.Value -Details $osMetric.Details -Status $osMetric.Status
+                New-BravoMetricCardHtml -Icon '🔄' -Title $updatesMetric.Title -Value $updatesMetric.Value -Details $updatesMetric.Details -Status $updatesMetric.Status
             ) -join "`n"
 
             $findingsRows = if ($script:Report.Health.Findings.Count -gt 0) {
@@ -177,6 +179,61 @@ function Export-BravoHtmlReport {
                 }) -join "`n"
             } else {
                 '<tr><td colspan="4" class="muted">Дані про встановлене ПЗ відсутні.</td></tr>'
+            }
+
+            $updatesSupportStatus = [string]$script:Report.Updates.OS.SupportStatus
+            $updatesSupportStatusClass = switch ($updatesSupportStatus) {
+                'EndOfSupport' { 'status-critical' }
+                'EndingSoon'   { 'status-warning' }
+                'Supported'    { 'status-ok' }
+                default        { 'status-unknown' }
+            }
+
+            $updatesSupportStatusText = switch ($updatesSupportStatus) {
+                'EndOfSupport' { 'Поза підтримкою' }
+                'EndingSoon'   { 'Підтримка завершується' }
+                'Supported'    { 'Підтримується' }
+                default        { 'Невідомо' }
+            }
+
+            $updatesSearchStatus = [string]$script:Report.Updates.Search.Status
+            $updatesSearchStatusText = switch ($updatesSearchStatus) {
+                'OK'         { 'Виконано' }
+                'Skipped'    { 'Пропущено' }
+                'Timeout'    { 'Таймаут' }
+                'Failed'     { 'Помилка' }
+                'NotChecked' { 'Не перевірялось' }
+                default      { $updatesSearchStatus }
+            }
+            if ($script:Report.Updates.Search.Error) {
+                $updatesSearchStatusText = "$updatesSearchStatusText — $($script:Report.Updates.Search.Error)"
+            }
+
+            $pendingRebootText = if ($script:Report.Updates.PendingReboot.Required) {
+                "Так: $((@($script:Report.Updates.PendingReboot.Reasons) | Where-Object { $_ }) -join '; ')"
+            } else {
+                'Ні'
+            }
+
+            $pendingUpdatesRows = if (@($script:Report.Updates.Pending.Items).Count -gt 0) {
+                (@($script:Report.Updates.Pending.Items) | ForEach-Object {
+                    $updateSeverityClass = if ($_.MsrcSeverity -eq 'Critical') { 'status-critical' } elseif ($_.MsrcSeverity) { 'status-warning' } else { 'status-unknown' }
+                    $updateSeverityText = if ($_.MsrcSeverity) { [string]$_.MsrcSeverity } else { '—' }
+                    $downloadedText = if ($_.IsDownloaded) { 'Так' } else { 'Ні' }
+                    "<tr><td>$(ConvertTo-BravoHtmlText $_.Title)</td><td>$(ConvertTo-BravoHtmlText $_.KB)</td><td>$(ConvertTo-BravoHtmlText $_.Categories)</td><td><span class=`"status-pill $updateSeverityClass`">$(ConvertTo-BravoHtmlText $updateSeverityText)</span></td><td>$(ConvertTo-BravoHtmlText $_.SizeMB)</td><td>$downloadedText</td><td>$(ConvertTo-BravoHtmlText $_.ReleasedOn)</td></tr>"
+                }) -join "`n"
+            } elseif ($updatesSearchStatus -eq 'OK') {
+                '<tr><td colspan="7" class="muted">Невстановлених оновлень не знайдено.</td></tr>'
+            } else {
+                '<tr><td colspan="7" class="muted">Пошук доступних оновлень не виконувався або завершився невдало.</td></tr>'
+            }
+
+            $installedUpdatesRows = if (@($script:Report.Updates.Installed.Recent).Count -gt 0) {
+                (@($script:Report.Updates.Installed.Recent) | ForEach-Object {
+                    "<tr><td>$(ConvertTo-BravoHtmlText $_.HotFixID)</td><td>$(ConvertTo-BravoHtmlText $_.Description)</td><td>$(ConvertTo-BravoHtmlText $_.InstalledBy)</td><td>$(ConvertTo-BravoHtmlText $_.InstalledOnText)</td></tr>"
+                }) -join "`n"
+            } else {
+                '<tr><td colspan="4" class="muted">Дані про встановлені оновлення відсутні.</td></tr>'
             }
 
             $serviceRows = if ($script:Report.Services.AutomaticStopped.Count -gt 0) {
@@ -313,6 +370,7 @@ function Export-BravoHtmlReport {
     <button type="button" class="tab-button" data-tab-target="tab-security" onclick="openTab(event, 'tab-security')" aria-controls="tab-security" aria-selected="false">Security</button>
     <button type="button" class="tab-button" data-tab-target="tab-services" onclick="openTab(event, 'tab-services')" aria-controls="tab-services" aria-selected="false">Services</button>
     <button type="button" class="tab-button" data-tab-target="tab-software" onclick="openTab(event, 'tab-software')" aria-controls="tab-software" aria-selected="false">Software</button>
+    <button type="button" class="tab-button" data-tab-target="tab-updates" onclick="openTab(event, 'tab-updates')" aria-controls="tab-updates" aria-selected="false">Updates</button>
     <button type="button" class="tab-button" data-tab-target="tab-findings" onclick="openTab(event, 'tab-findings')" aria-controls="tab-findings" aria-selected="false">Findings</button>
   </nav>
   <main class="content">
@@ -323,6 +381,7 @@ function Export-BravoHtmlReport {
     <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div></div></section>
     <section id="tab-services" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">⚙️</span>Services</h2><div class="grid"><div class="card"><h3>Service summary</h3>$(New-BravoInfoRowHtml 'Processes' $script:Report.Processes.Total)$(New-BravoInfoRowHtml 'Services running' "$($script:Report.Services.Running)/$($script:Report.Services.Total)")$(New-BravoInfoRowHtml 'Automatic stopped' $script:Report.Services.AutomaticStopped.Count)$(New-BravoInfoRowHtml "System errors ($EventLogDays дн.)" $script:Report.EventLogs.SystemErrors)$(New-BravoInfoRowHtml "System warnings ($EventLogDays дн.)" $script:Report.EventLogs.SystemWarnings)</div></div><h3>Automatic stopped services</h3>$(New-BravoTableToolbarHtml -TableId 'table-services-stopped' -Placeholder 'Пошук по службах...')<div class="table-scroll"><table id="table-services-stopped" class="data-table"><thead><tr><th>Name</th><th>DisplayName</th><th>StartType</th><th>Status</th></tr></thead><tbody>$serviceRows</tbody></table></div></section>
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>
+    <section id="tab-updates" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔄</span>Updates</h2><div class="grid"><div class="card"><h3>Життєвий цикл ОС</h3>$(New-BravoInfoRowHtml 'Продукт' $script:Report.Updates.OS.Product)$(New-BravoInfoRowHtml 'Версія' $script:Report.Updates.OS.DisplayVersion)$(New-BravoInfoRowHtml 'Версія з реєстру' $script:Report.Updates.OS.RegistryDisplayVersion)$(New-BravoInfoRowHtml 'Full build' $script:Report.Updates.OS.FullBuild)$(New-BravoInfoRowHtml 'Канал' $script:Report.Updates.OS.Channel)$(New-BravoInfoRowHtml 'EditionID' $script:Report.Updates.OS.EditionId)$(New-BravoInfoRowHtml 'Кінець підтримки' $script:Report.Updates.OS.SupportEndDate)$(New-BravoInfoRowHtml 'Днів до кінця підтримки' $script:Report.Updates.OS.DaysToEndOfSupport)<div class="info-row"><span class="info-label">Статус підтримки</span><span class="info-value"><span class="status-pill $updatesSupportStatusClass">$(ConvertTo-BravoHtmlText $updatesSupportStatusText)</span></span></div>$(New-BravoInfoRowHtml 'Дані lifecycle від' $script:Report.Updates.OS.LifecycleDataUpdatedAt)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Служба wuauserv' $script:Report.Updates.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Тип запуску' $script:Report.Updates.WindowsUpdate.ServiceStartType)$(New-BravoInfoRowHtml 'Політика оновлень' $script:Report.Updates.WindowsUpdate.AutoUpdateOption)$(New-BravoInfoRowHtml 'WSUS' $(if($script:Report.Updates.WindowsUpdate.ManagedByWSUS){$script:Report.Updates.WindowsUpdate.WSUSServer}else{'Ні'}))$(New-BravoInfoRowHtml 'Останній пошук' $script:Report.Updates.WindowsUpdate.LastDetectSuccess)$(New-BravoInfoRowHtml 'Остання установка' $script:Report.Updates.WindowsUpdate.LastInstallSuccess)$(New-BravoInfoRowHtml 'Потрібне перезавантаження' $pendingRebootText)$(New-BravoInfoRowHtml 'Статус пошуку' $updatesSearchStatusText)$(New-BravoInfoRowHtml 'Тривалість пошуку, сек' $script:Report.Updates.Search.DurationSeconds)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Потрібно встановити</div><div class="storage-summary-value">$($script:Report.Updates.Pending.Total)$(if($script:Report.Updates.Pending.IsTruncated){" <span class=`"risk risk-warning`">детально: $($script:Report.Updates.Pending.Detailed)</span>"})</div></div><div class="storage-summary-item"><div class="storage-summary-label">Security</div><div class="storage-summary-value"><span class="risk risk-critical">$($script:Report.Updates.Pending.Security)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Драйвери</div><div class="storage-summary-value"><span class="risk risk-warning">$($script:Report.Updates.Pending.Driver)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Завантажено</div><div class="storage-summary-value"><span class="risk risk-ok">$($script:Report.Updates.Pending.Downloaded)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Обсяг, MB</div><div class="storage-summary-value">$($script:Report.Updates.Pending.TotalSizeMB)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Встановлено оновлень</div><div class="storage-summary-value">$($script:Report.Updates.Installed.Total)</div></div></div><h3>Оновлення, які потрібно встановити</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-pending' -Placeholder 'Пошук по назві, KB, категорії...')<div class="table-scroll"><table id="table-updates-pending" class="data-table"><thead><tr><th>Title</th><th>KB</th><th>Categories</th><th>Severity</th><th>Size MB</th><th>Downloaded</th><th>Released</th></tr></thead><tbody>$pendingUpdatesRows</tbody></table></div><h3>Останні встановлені оновлення</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-installed' -Placeholder 'Пошук по KB, опису, користувачу...')<div class="table-scroll"><table id="table-updates-installed" class="data-table"><thead><tr><th>HotFixID</th><th>Description</th><th>Installed by</th><th>Installed on</th></tr></thead><tbody>$installedUpdatesRows</tbody></table></div></section>
     <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div></section>
   </main>
   <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $OutputDir</p></footer>

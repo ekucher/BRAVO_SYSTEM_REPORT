@@ -187,6 +187,8 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
+        if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
+        $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
         if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
         if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
@@ -277,6 +279,9 @@ Get-BravoEventLogsAudit
 
 # --- Програмне забезпечення ---
 Get-BravoSoftwareAudit
+
+# --- Оновлення ОС ---
+Get-BravoUpdatesAudit
 
 # --- Health score ---
 Update-BravoHealthScore

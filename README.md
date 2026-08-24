@@ -19,6 +19,7 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - процеси та служби;
 - події Windows Event Log;
 - встановлене ПЗ;
+- аналіз ОС і стан оновлень Windows: які оновлення потрібно встановити, pending reboot, життєвий цикл версії ОС;
 - health score, findings і collection errors.
 
 ## Поточний статус
@@ -82,6 +83,70 @@ BRAVO-SystemReport-Forensic.bat --nopause
 | `Full` | повний базовий аудит із розширеним збором |
 | `Deep` | глибокий аудит, включно зі Storage Deep Audit |
 | `Forensic` | максимально детальний режим збору для розслідування проблем |
+
+## Аналіз ОС і оновлень Windows
+
+Секція `Updates` у JSON і вкладка **Updates** у HTML-звіті відповідають на питання «що потрібно встановити».
+
+Що збирається:
+
+- **Життєвий цикл ОС** — продукт, `DisplayVersion` (наприклад `24H2`), full build з `UBR`, канал,
+  дата завершення підтримки, кількість днів до неї та статус
+  `Supported` / `EndingSoon` / `EndOfSupport` / `Unknown`. Дані беруться зі статичної таблиці життєвого циклу
+  всередині скрипта; дата її актуальності виводиться у полі `LifecycleDataUpdatedAt`.
+
+  Канал визначається за `Caption` ОС і має три значення з окремими датами:
+
+  | Канал | Редакції |
+  |---|---|
+  | `Consumer` | Home, Pro, Core |
+  | `Enterprise / Education` | Enterprise, Education, серверні редакції |
+  | `LTSC / LTSB` | Enterprise LTSC та LTSB |
+
+  LTSC/LTSB визначається за `EditionID` з реєстру (`EnterpriseS`, `EnterpriseSN`, `IoTEnterpriseS`),
+  бо `Caption` в Enterprise SAC і Enterprise LTSC однаковий; за відсутності `EditionID` використовується `Caption`.
+
+  Таблиця покриває всі випуски Windows від Windows 2000 до Windows 11 25H2 і від Windows 2000 Server
+  до Windows Server 2025, включно з усіма піврічними релізами Windows 10, LTSB/LTSC-редакціями і
+  Windows Server SAC. Клієнтські та серверні ОС з однаковим build (3790, 6002, 7601, 9200, 9600,
+  14393, 17763, 26100) розрізняються автоматично.
+
+  Свідомі виключення: IoT LTSC-редакції не виділені окремо; дати ESU не використовуються — показується
+  дата завершення звичайної підтримки (наприклад, Windows 7 SP1 — `2020-01-14`, а не `2023-01-10`);
+  Windows Server SAC 1809 пропущено через збіг build 17763 із Windows Server 2019.
+- **Доступні оновлення** — пошук через COM `Microsoft.Update.Session`
+  (`IsInstalled=0 and IsHidden=0`): назва, KB, категорії, `MsrcSeverity`, розмір, чи вже завантажено, дата випуску.
+  Зведення: `Total`, `Security`, `Critical`, `Driver`, `Definition`, `Other`, `Downloaded`, `TotalSizeMB`, `MaxAgeDays`.
+  Класифікація виконується за стабільними `CategoryID`, тому не залежить від мови інтерфейсу Windows.
+  Детально зберігається до 200 оновлень: якщо знайдено більше, `Pending.Total` показує реальну кількість,
+  `Pending.Detailed` — скільки збережено, а `Pending.IsTruncated` стає `true` і додається окрема знахідка.
+- **Стан Windows Update** — служба `wuauserv` і тип її запуску, політика `AUOptions`, WSUS-сервер,
+  час останнього успішного пошуку та встановлення оновлень.
+- **Pending reboot** — перевірка CBS, `WindowsUpdate\Auto Update\RebootRequired`,
+  `PendingFileRenameOperations` і запланованого перейменування машини, зі списком причин.
+- **Встановлені оновлення** — `Get-HotFix` (fallback `Win32_QuickFixEngineering`): загальна кількість,
+  дата останнього оновлення, кількість за 30 днів і список останніх записів.
+
+Знахідки, які потрапляють у Health Score:
+
+| Severity | Умова |
+|---|---|
+| `CRITICAL` | ОС поза підтримкою; є невстановлені security / critical оновлення |
+| `WARNING` | підтримка ОС завершується (<= 180 днів); є інші невстановлені оновлення; потрібне перезавантаження; `wuauserv` вимкнено; автооновлення вимкнено політикою; останній пошук > 30 днів тому; останнє оновлення встановлено > 60 днів тому |
+
+Параметри:
+
+| Параметр | Опис |
+|---|---|
+| `-SkipUpdateSearch` | не виконувати онлайн-пошук оновлень (локальні дані збираються завжди) |
+| `-UpdateSearchTimeoutSec` | ліміт часу онлайн-пошуку, за замовчуванням `180` сек |
+
+Особливості:
+
+- профіль `Quick` онлайн-пошук не виконує (`Search.Status = Skipped`);
+- пошук виконується у фоновому job із таймаутом, тому зависання агента Windows Update не блокує звіт;
+- для повного результату потрібні мережа (або доступний WSUS) і права адміністратора; без них секція
+  заповнюється локальними даними, а `Search.Status` отримує значення `Failed` або `Timeout`.
 
 ## Генеровані файли
 
@@ -257,6 +322,7 @@ BRAVO_SYSTEM_REPORT
 │   ├── 36-Collectors-ProcessesServices.ps1
 │   ├── 37-Collectors-Events.ps1
 │   ├── 38-Collectors-Software.ps1
+│   ├── 39-Collectors-Updates.ps1
 │   ├── 40-Health.ps1
 │   ├── 50-Export-Json.ps1
 │   ├── 51-Export-Html.ps1

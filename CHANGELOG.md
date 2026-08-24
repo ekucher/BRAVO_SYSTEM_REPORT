@@ -1,4 +1,36 @@
-﻿## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
+﻿## Unreleased — аналіз ОС і оновлень Windows
+
+- Додано модуль `src\39-Collectors-Updates.ps1` з колектором `Get-BravoUpdatesAudit`.
+- Додано секцію `Updates` у модель звіту та підвищено `SchemaVersion` до `0.5.0`.
+- Додано аналіз життєвого циклу ОС: продукт, DisplayVersion, full build з UBR, канал, дата завершення підтримки і статус `Supported` / `EndingSoon` / `EndOfSupport`.
+- Додано пошук доступних оновлень через COM `Microsoft.Update.Session` з таймаутом і виконанням у фоновому job.
+- Додано зведення по оновленнях: total, security, critical, driver, definition, other, downloaded, розмір і вік найстарішого оновлення.
+- Додано збір стану Windows Update: служба `wuauserv`, політика `AUOptions`, WSUS, час останнього пошуку та встановлення.
+- Додано визначення pending reboot з переліком причин.
+- Додано збір встановлених оновлень через `Get-HotFix` з fallback на `Win32_QuickFixEngineering`.
+- Додано знахідки Health Score для ОС поза підтримкою, невстановлених оновлень безпеки, pending reboot і зупиненого циклу оновлень.
+- Додано метричну картку `Updates` і вкладку `Updates` у HTML-звіт із таблицями доступних і встановлених оновлень.
+- Додано поля оновлень у CSV-експорт.
+- Додано параметри `-SkipUpdateSearch` і `-UpdateSearchTimeoutSec`; профіль `Quick` онлайн-пошук не виконує.
+- Додано дати завершення підтримки для Windows 11 25H2 (build 26200) у таблицю життєвого циклу.
+- Додано у local Windows validation кроки `Full runtime test` і `Validate updates section` для перевірки онлайн-пошуку оновлень.
+- Виправлено помилку `TryParse` з `[ref]` на неініціалізованих змінних, через яку успішний пошук оновлень позначався як `Failed`, а `MaxAgeDays` не обчислювався.
+- Захищено `Search.Status = OK` від перезапису помилкою пост-обробки.
+- Додано третій канал підтримки `LTSC / LTSB` з окремими датами замість змішування з Enterprise.
+- Розширено таблицю життєвого циклу до повного покриття: від Windows 2000 і Windows 2000 Server до Windows 11 25H2 і Windows Server 2025, включно з Windows 10 1511/1703/1709/1803/1903 і Windows Server SAC.
+- Посилено CI-перевірку секції `Updates`: неконсистентність `Search.Status`/`Pending.Total` і ненульові `CollectionErrors` тепер валять збірку.
+- Класифікацію оновлень переведено на стабільні `CategoryID` замість локалізованих назв категорій; англомовні назви лишились як fallback.
+- Додано `Pending.Detailed` і `Pending.IsTruncated`: якщо знайдено більше оновлень, ніж зберігається детально, це видно у звіті та у знахідці.
+- LTSC/LTSB тепер визначається за `EditionID` (`EnterpriseS`, `EnterpriseSN`, `IoTEnterpriseS`), а не лише за `Caption`; `EditionID` виводиться у звіті.
+- Додано перевірку політики `NoAutoUpdate=1`, яка має пріоритет над застарілим значенням `AUOptions`.
+- Статус життєвого циклу `Unknown` більше не дає зелену метрику Updates.
+- `-UpdateSearchTimeoutSec` зі значенням `0` або від'ємним більше не вимикає таймаут, а повертається до 180 сек.
+- Контрольна сума `dist` рахується на CRLF-варіанті файлу, як його бачить Windows після checkout.
+- Додано Windows Server 23H2 (build 25398) у таблицю життєвого циклу.
+- Pro Education і Pro for Workstations тепер обслуговуються за споживчим циклом, а не за Enterprise.
+- Метрика Updates стає CRITICAL і за наявності critical-оновлень, а не лише security.
+
+## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
 
 - Змінено профіль запуску за замовчуванням з `Full` на `Forensic`.
 - Увімкнено створення ZIP-архіву за замовчуванням.
