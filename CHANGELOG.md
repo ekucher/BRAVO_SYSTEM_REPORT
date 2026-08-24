@@ -1,4 +1,12 @@
-﻿## v0.5.0 — аналіз ОС і оновлень Windows
+## Unreleased — автоматизація релізу
+
+- Додано workflow `.github/workflows/release.yml`: реліз публікується при push-і тега `v*`.
+- Додано звірку версії між `src\90-Main.ps1`, `CHANGELOG.md` і тегом перед публікацією.
+- Додано перевірку зібраного пакета: збіг SHA512, parser check runtime і версія запакованого скрипта.
+- Додано вкладення `BRAVO_SYSTEM_REPORT_v<version>.zip` і `.zip.sha256` у GitHub Release.
+- Додано ручний dry run через `workflow_dispatch` без публікації релізу.
+
+## v0.5.0 — аналіз ОС і оновлень Windows
 
 ### реліз-пакет
 
@@ -7,6 +15,8 @@
 - Fallback визначення версії переведено з застарілого моноліту на `src\90-Main.ps1`.
 - `tools\New-ReleasePackage.ps1` зроблено кросплатформним і додано читабельний перелік вмісту пакета.
 - Нормалізовано переноси рядків у `dist\Get-BravoSystemReport.ps1` до CRLF.
+
+### колектор Updates
 
 - Додано модуль `src\39-Collectors-Updates.ps1` з колектором `Get-BravoUpdatesAudit`.
 - Додано секцію `Updates` у модель звіту та підвищено `SchemaVersion` до `0.5.0`.
