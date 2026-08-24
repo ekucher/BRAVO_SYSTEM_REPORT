@@ -27,10 +27,26 @@ function Get-BravoProcessesServicesAudit {
 
         if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
             try {
+                # Відомі trigger-start/опціональні служби Windows: WMI показує їх як
+                # StartMode='Auto', але вони штатно стоять Stopped, поки їх не розбудить
+                # тригер (подія/пристрій/попит) — це не ознака проблеми на машині.
+                # RemoteRegistry особливо: зупинена = добре (security best practice).
+                $bravoKnownTriggerStartServices = @(
+                    'edgeupdate', 'edgeupdatem', 'gupdate', 'gupdatem',
+                    'MapsBroker', 'sppsvc', 'WbioSrvc', 'RemoteRegistry'
+                )
+
                 $autoStopped = Get-CimInstance Win32_Service -Filter "StartMode='Auto' AND State<>'Running'" -ErrorAction Stop
                 $script:Report.Services.AutomaticStopped = @($autoStopped | Select-Object Name, DisplayName, State, StartMode, StartName)
-                if ($script:Report.Services.AutomaticStopped.Count -gt 0) {
-                    Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($script:Report.Services.AutomaticStopped.Count)." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
+
+                $noteworthyStopped = @($script:Report.Services.AutomaticStopped | Where-Object { $_.Name -notin $bravoKnownTriggerStartServices })
+
+                if ($noteworthyStopped.Count -gt 0) {
+                    $totalStoppedCount = $script:Report.Services.AutomaticStopped.Count
+                    $noiseCount = $totalStoppedCount - $noteworthyStopped.Count
+                    $noiseNote = if ($noiseCount -gt 0) { " (ще $noiseCount — відомі trigger-start/опціональні служби, не є ризиком)" } else { '' }
+
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($noteworthyStopped.Count)$noiseNote." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
                 }
             } catch {
                 Add-AuditError -Section 'Services.AutomaticStopped' -Message $_.Exception.Message
