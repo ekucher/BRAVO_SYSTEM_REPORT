@@ -103,6 +103,7 @@ return [ordered]@{
             Product=''
             DisplayVersion=''
             RegistryDisplayVersion=''
+            EditionId=''
             UBR=''
             FullBuild=''
             Channel=''
@@ -115,6 +116,7 @@ return [ordered]@{
             ServiceStatus=''
             ServiceStartType=''
             AutoUpdateOption=''
+            NoAutoUpdate=$false
             LastDetectSuccess=''
             LastInstallSuccess=''
             DaysSinceLastDetect=$null
@@ -125,6 +127,8 @@ return [ordered]@{
         Search = [ordered]@{ Status='NotChecked'; Method=''; Error=''; CheckedAt=''; DurationSeconds=0 }
         Pending = [ordered]@{
             Total=0
+            Detailed=0
+            IsTruncated=$false
             Security=0
             Critical=0
             Driver=0

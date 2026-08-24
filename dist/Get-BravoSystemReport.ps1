@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-24 17:21:53
+    GeneratedAt: 2026-08-24 17:25:59
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -523,6 +523,7 @@ return [ordered]@{
             Product=''
             DisplayVersion=''
             RegistryDisplayVersion=''
+            EditionId=''
             UBR=''
             FullBuild=''
             Channel=''
@@ -535,6 +536,7 @@ return [ordered]@{
             ServiceStatus=''
             ServiceStartType=''
             AutoUpdateOption=''
+            NoAutoUpdate=$false
             LastDetectSuccess=''
             LastInstallSuccess=''
             DaysSinceLastDetect=$null
@@ -545,6 +547,8 @@ return [ordered]@{
         Search = [ordered]@{ Status='NotChecked'; Method=''; Error=''; CheckedAt=''; DurationSeconds=0 }
         Pending = [ordered]@{
             Total=0
+            Detailed=0
+            IsTruncated=$false
             Security=0
             Critical=0
             Driver=0
@@ -1596,11 +1600,44 @@ function Get-BravoWindowsLifecycleTable {
     )
 }
 
+function Test-BravoUpdateClassification {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Update,
+        [ValidateSet('Security','Critical','Driver','Definition')]
+        [string]$Classification
+    )
+
+    if ($null -eq $Update) { return $false }
+
+    # Стабільні CategoryID класифікацій Windows Update (не залежать від мови інтерфейсу).
+    $classificationIds = @{
+        Security   = '0fa1201d-4330-4fa8-8ae9-b877473b6441'
+        Critical   = 'e6cf1350-c01b-414d-a61f-263d14d133b4'
+        Driver     = 'ebfc1fc5-71a4-4f7b-9aca-3b9a503104a0'
+        Definition = 'e0789628-ce08-4437-be74-2495b842f43b'
+    }
+
+    # Fallback на англомовні назви категорій, якщо CategoryID недоступний.
+    $classificationNames = @{
+        Security   = 'Security'
+        Critical   = 'Critical'
+        Driver     = 'Driver'
+        Definition = 'Definition'
+    }
+
+    $categoryIds = ([string]$Update.CategoryIds).ToLowerInvariant()
+    if ($categoryIds) { return ($categoryIds -like "*$($classificationIds[$Classification])*") }
+
+    return ([string]$Update.Categories -match $classificationNames[$Classification])
+}
+
 function Get-BravoOsSupportInfo {
     [CmdletBinding()]
     param(
         [string]$Caption,
-        [string]$Build
+        [string]$Build,
+        [string]$EditionId = ''
     )
 
     $result = [ordered]@{
@@ -1619,7 +1656,15 @@ function Get-BravoOsSupportInfo {
     $isServer = ($Caption -match 'Server')
 
     # Канал визначається у порядку LTSC/LTSB -> Enterprise/Education/Server -> Consumer.
-    $isLtscChannel = ($Caption -match 'LTSC|LTSB')
+    # LTSC визначається за EditionID (EnterpriseS, EnterpriseSN, IoTEnterpriseS), бо Caption
+    # на Enterprise/Education SAC не відрізняється від LTSC-редакції.
+    $isLtscChannel = $false
+    if ($EditionId) {
+        $isLtscChannel = ($EditionId -match '^(IoT)?EnterpriseS(N)?$')
+    } else {
+        $isLtscChannel = ($Caption -match 'LTSC|LTSB')
+    }
+
     $isEnterpriseChannel = ($Caption -match 'Enterprise|Education|Server')
 
     $result.Channel = if ($isLtscChannel) { 'LTSC / LTSB' } elseif ($isEnterpriseChannel) { 'Enterprise / Education' } else { 'Consumer' }
@@ -1702,6 +1747,7 @@ function Get-BravoWindowsUpdateAgentInfo {
         ServiceStatus = ''
         ServiceStartType = ''
         AutoUpdateOption = ''
+        NoAutoUpdate = $false
         LastDetectSuccess = ''
         LastInstallSuccess = ''
         DaysSinceLastDetect = $null
@@ -1730,7 +1776,12 @@ function Get-BravoWindowsUpdateAgentInfo {
     try {
         $autoUpdatePolicy = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -ErrorAction SilentlyContinue
         if ($autoUpdatePolicy) {
-            if ($null -ne $autoUpdatePolicy.AUOptions) {
+            # NoAutoUpdate=1 має пріоритет: політику "Configure Automatic Updates" вимкнено,
+            # а старе значення AUOptions при цьому може лишитись у реєстрі.
+            if ($autoUpdatePolicy.NoAutoUpdate -eq 1) {
+                $agent.NoAutoUpdate = $true
+                $agent.AutoUpdateOption = 'Автоматичні оновлення вимкнено політикою (NoAutoUpdate=1)'
+            } elseif ($null -ne $autoUpdatePolicy.AUOptions) {
                 $agent.AutoUpdateOption = switch ([int]$autoUpdatePolicy.AUOptions) {
                     1 { 'Автоматичні оновлення вимкнено політикою' }
                     2 { 'Повідомляти перед завантаженням' }
@@ -1839,10 +1890,12 @@ function Get-BravoPendingUpdatesSearchScriptBlock {
         param([int]$MaxItems)
 
         $searchResult = [ordered]@{
-            Status  = 'Failed'
-            Method  = 'Microsoft.Update.Session (COM)'
-            Error   = ''
-            Updates = @()
+            Status       = 'Failed'
+            Method       = 'Microsoft.Update.Session (COM)'
+            Error        = ''
+            Updates      = @()
+            TotalFound   = 0
+            IsTruncated  = $false
         }
 
         try {
@@ -1851,13 +1904,25 @@ function Get-BravoPendingUpdatesSearchScriptBlock {
             $searchOutput = $updateSearcher.Search('IsInstalled=0 and IsHidden=0')
 
             $collected = @()
-            $index = 0
+            $totalFound = 0
             foreach ($update in $searchOutput.Updates) {
-                if ($index -ge $MaxItems) { break }
-                $index++
+                $totalFound++
 
+                # Понад ліміт оновлення не зберігаються детально, але враховуються в TotalFound.
+                if ($totalFound -gt $MaxItems) { continue }
+
+                # Назви категорій локалізовані, тому для класифікації зберігаємо ще й стабільні CategoryID.
                 $categories = @()
-                try { $categories = @($update.Categories | ForEach-Object { [string]$_.Name }) } catch { $categories = @() }
+                $categoryIds = @()
+                try {
+                    foreach ($updateCategory in $update.Categories) {
+                        $categories += [string]$updateCategory.Name
+                        $categoryIds += ([string]$updateCategory.CategoryID).ToLowerInvariant()
+                    }
+                } catch {
+                    $categories = @()
+                    $categoryIds = @()
+                }
 
                 $kbList = @()
                 try { $kbList = @($update.KBArticleIDs | ForEach-Object { "KB$_" }) } catch { $kbList = @() }
@@ -1879,6 +1944,7 @@ function Get-BravoPendingUpdatesSearchScriptBlock {
                     Title          = [string]$update.Title
                     KB             = ($kbList -join ', ')
                     Categories     = ($categories -join ', ')
+                    CategoryIds    = ($categoryIds -join ', ')
                     MsrcSeverity   = [string]$update.MsrcSeverity
                     IsDownloaded   = [bool]$update.IsDownloaded
                     IsMandatory    = [bool]$update.IsMandatory
@@ -1890,6 +1956,8 @@ function Get-BravoPendingUpdatesSearchScriptBlock {
             }
 
             $searchResult.Updates = $collected
+            $searchResult.TotalFound = $totalFound
+            $searchResult.IsTruncated = ($totalFound -gt $MaxItems)
             $searchResult.Status = 'OK'
         } catch {
             $searchResult.Error = $_.Exception.Message
@@ -1909,7 +1977,10 @@ function Invoke-BravoPendingUpdatesSearch {
     $searchBlock = Get-BravoPendingUpdatesSearchScriptBlock
     $startedAt = Get-Date
 
-    $canUseJob = ($TimeoutSeconds -gt 0) -and ((Get-Command -Name 'Start-Job' -ErrorAction SilentlyContinue) -ne $null)
+    # Нуль або від'ємне значення не має вимикати таймаут: повертаємось до значення за замовчуванням.
+    if ($TimeoutSeconds -le 0) { $TimeoutSeconds = 180 }
+
+    $canUseJob = ((Get-Command -Name 'Start-Job' -ErrorAction SilentlyContinue) -ne $null)
 
     if (-not $canUseJob) {
         $inlineResult = & $searchBlock $MaxItems
@@ -1918,6 +1989,8 @@ function Invoke-BravoPendingUpdatesSearch {
             Method  = [string]$inlineResult.Method
             Error   = [string]$inlineResult.Error
             Updates = @($inlineResult.Updates)
+            TotalFound = [int]$inlineResult.TotalFound
+            IsTruncated = [bool]$inlineResult.IsTruncated
             DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
         }
     }
@@ -1934,6 +2007,8 @@ function Invoke-BravoPendingUpdatesSearch {
                 Method  = 'Microsoft.Update.Session (COM)'
                 Error   = "Пошук оновлень перевищив ліміт $TimeoutSeconds сек."
                 Updates = @()
+                TotalFound = 0
+                IsTruncated = $false
                 DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
             }
         }
@@ -1945,6 +2020,8 @@ function Invoke-BravoPendingUpdatesSearch {
                 Method  = 'Microsoft.Update.Session (COM)'
                 Error   = 'Пошук оновлень не повернув результат.'
                 Updates = @()
+                TotalFound = 0
+                IsTruncated = $false
                 DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
             }
         }
@@ -1954,6 +2031,8 @@ function Invoke-BravoPendingUpdatesSearch {
             Method  = [string]$jobResult.Method
             Error   = [string]$jobResult.Error
             Updates = @($jobResult.Updates)
+            TotalFound = [int]$jobResult.TotalFound
+            IsTruncated = [bool]$jobResult.IsTruncated
             DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
         }
     } catch {
@@ -1962,6 +2041,8 @@ function Invoke-BravoPendingUpdatesSearch {
             Method  = 'Microsoft.Update.Session (COM)'
             Error   = $_.Exception.Message
             Updates = @()
+            TotalFound = 0
+            IsTruncated = $false
             DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
         }
     } finally {
@@ -1975,7 +2056,17 @@ function Get-BravoUpdatesAudit {
 
     # --- Аналіз ОС і потрібних оновлень ---
     try {
-        $supportInfo = Get-BravoOsSupportInfo -Caption $script:Report.OS.Caption -Build $script:Report.OS.Build
+        $osEditionId = ''
+        try {
+            $editionKey = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name 'EditionID' -ErrorAction SilentlyContinue
+            if ($editionKey -and $editionKey.EditionID) { $osEditionId = [string]$editionKey.EditionID }
+        } catch {
+            Add-AuditError -Section 'Updates.Edition' -Message $_.Exception.Message
+        }
+
+        $script:Report.Updates.OS.EditionId = $osEditionId
+
+        $supportInfo = Get-BravoOsSupportInfo -Caption $script:Report.OS.Caption -Build $script:Report.OS.Build -EditionId $osEditionId
 
         $script:Report.Updates.OS.Product = $supportInfo.Product
         $script:Report.Updates.OS.DisplayVersion = $supportInfo.DisplayVersion
@@ -2079,21 +2170,32 @@ function Get-BravoUpdatesAudit {
             } else {
                 $pendingUpdates = @($searchResult.Updates)
 
-                $securityUpdates = @($pendingUpdates | Where-Object { $_.Categories -match 'Security' -or $_.MsrcSeverity })
-                $criticalUpdates = @($pendingUpdates | Where-Object { $_.Categories -match 'Critical' -or $_.MsrcSeverity -in @('Critical') })
-                $driverUpdates = @($pendingUpdates | Where-Object { $_.Categories -match 'Driver' })
-                $definitionUpdates = @($pendingUpdates | Where-Object { $_.Categories -match 'Definition' })
+                $securityUpdates = @($pendingUpdates | Where-Object { (Test-BravoUpdateClassification -Update $_ -Classification 'Security') -or $_.MsrcSeverity })
+                $criticalUpdates = @($pendingUpdates | Where-Object { (Test-BravoUpdateClassification -Update $_ -Classification 'Critical') -or $_.MsrcSeverity -eq 'Critical' })
+                $driverUpdates = @($pendingUpdates | Where-Object { Test-BravoUpdateClassification -Update $_ -Classification 'Driver' })
+                $definitionUpdates = @($pendingUpdates | Where-Object { Test-BravoUpdateClassification -Update $_ -Classification 'Definition' })
                 $downloadedUpdates = @($pendingUpdates | Where-Object { $_.IsDownloaded })
 
                 $totalSizeMb = 0
                 foreach ($pendingUpdate in $pendingUpdates) { $totalSizeMb += [double]$pendingUpdate.SizeMB }
 
-                $script:Report.Updates.Pending.Total = $pendingUpdates.Count
+                $totalFound = [int]$searchResult.TotalFound
+                if ($totalFound -lt $pendingUpdates.Count) { $totalFound = $pendingUpdates.Count }
+
+                $script:Report.Updates.Pending.Total = $totalFound
+                $script:Report.Updates.Pending.Detailed = $pendingUpdates.Count
+                $script:Report.Updates.Pending.IsTruncated = [bool]$searchResult.IsTruncated
                 $script:Report.Updates.Pending.Security = $securityUpdates.Count
                 $script:Report.Updates.Pending.Critical = $criticalUpdates.Count
                 $script:Report.Updates.Pending.Driver = $driverUpdates.Count
                 $script:Report.Updates.Pending.Definition = $definitionUpdates.Count
-                $classifiedUpdates = @($pendingUpdates | Where-Object { $_.Categories -match 'Security|Critical|Driver|Definition' -or $_.MsrcSeverity })
+                $classifiedUpdates = @($pendingUpdates | Where-Object {
+                    $_.MsrcSeverity -or
+                    (Test-BravoUpdateClassification -Update $_ -Classification 'Security') -or
+                    (Test-BravoUpdateClassification -Update $_ -Classification 'Critical') -or
+                    (Test-BravoUpdateClassification -Update $_ -Classification 'Driver') -or
+                    (Test-BravoUpdateClassification -Update $_ -Classification 'Definition')
+                })
                 $script:Report.Updates.Pending.Other = $pendingUpdates.Count - $classifiedUpdates.Count
                 $script:Report.Updates.Pending.Downloaded = $downloadedUpdates.Count
                 $script:Report.Updates.Pending.TotalSizeMB = [Math]::Round($totalSizeMb, 2)
@@ -2106,6 +2208,11 @@ function Get-BravoUpdatesAudit {
                         $script:Report.Updates.Pending.OldestReleasedOn = $oldestRelease[0].ReleasedOn
                         $script:Report.Updates.Pending.MaxAgeDays = [int][Math]::Floor(((Get-Date) - $oldestDate).TotalDays)
                     }
+                }
+
+                if ($script:Report.Updates.Pending.IsTruncated) {
+                    Write-Host "  $IconGear Оновлення: знайдено $totalFound, детально збережено $($pendingUpdates.Count)" -ForegroundColor Yellow
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Updates' -Message "Знайдено $totalFound оновлень; детальний список обмежено $($pendingUpdates.Count) записами" -Recommendation 'Категорії та обсяг пораховані лише за збереженими записами: перевірте машину вручну через Windows Update.'
                 }
 
                 if ($criticalUpdates.Count -gt 0 -or $securityUpdates.Count -gt 0) {
@@ -2150,7 +2257,7 @@ function Get-BravoUpdatesAudit {
 
         $updatesMetric.Status = if ($script:Report.Updates.OS.SupportStatus -eq 'EndOfSupport' -or $pendingSecurity -gt 0) {
             'CRITICAL'
-        } elseif ($pendingTotal -gt 0 -or $script:Report.Updates.PendingReboot.Required -or $script:Report.Updates.OS.SupportStatus -eq 'EndingSoon' -or $searchStatus -notin @('OK','Skipped')) {
+        } elseif ($pendingTotal -gt 0 -or $script:Report.Updates.PendingReboot.Required -or $script:Report.Updates.OS.SupportStatus -in @('EndingSoon','Unknown') -or $searchStatus -notin @('OK','Skipped')) {
             'WARNING'
         } else {
             'OK'
@@ -2628,7 +2735,7 @@ function Export-BravoHtmlReport {
     <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div></div></section>
     <section id="tab-services" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">⚙️</span>Services</h2><div class="grid"><div class="card"><h3>Service summary</h3>$(New-BravoInfoRowHtml 'Processes' $script:Report.Processes.Total)$(New-BravoInfoRowHtml 'Services running' "$($script:Report.Services.Running)/$($script:Report.Services.Total)")$(New-BravoInfoRowHtml 'Automatic stopped' $script:Report.Services.AutomaticStopped.Count)$(New-BravoInfoRowHtml "System errors ($EventLogDays дн.)" $script:Report.EventLogs.SystemErrors)$(New-BravoInfoRowHtml "System warnings ($EventLogDays дн.)" $script:Report.EventLogs.SystemWarnings)</div></div><h3>Automatic stopped services</h3>$(New-BravoTableToolbarHtml -TableId 'table-services-stopped' -Placeholder 'Пошук по службах...')<div class="table-scroll"><table id="table-services-stopped" class="data-table"><thead><tr><th>Name</th><th>DisplayName</th><th>StartType</th><th>Status</th></tr></thead><tbody>$serviceRows</tbody></table></div></section>
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>
-    <section id="tab-updates" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔄</span>Updates</h2><div class="grid"><div class="card"><h3>Життєвий цикл ОС</h3>$(New-BravoInfoRowHtml 'Продукт' $script:Report.Updates.OS.Product)$(New-BravoInfoRowHtml 'Версія' $script:Report.Updates.OS.DisplayVersion)$(New-BravoInfoRowHtml 'Версія з реєстру' $script:Report.Updates.OS.RegistryDisplayVersion)$(New-BravoInfoRowHtml 'Full build' $script:Report.Updates.OS.FullBuild)$(New-BravoInfoRowHtml 'Канал' $script:Report.Updates.OS.Channel)$(New-BravoInfoRowHtml 'Кінець підтримки' $script:Report.Updates.OS.SupportEndDate)$(New-BravoInfoRowHtml 'Днів до кінця підтримки' $script:Report.Updates.OS.DaysToEndOfSupport)<div class="info-row"><span class="info-label">Статус підтримки</span><span class="info-value"><span class="status-pill $updatesSupportStatusClass">$(ConvertTo-BravoHtmlText $updatesSupportStatusText)</span></span></div>$(New-BravoInfoRowHtml 'Дані lifecycle від' $script:Report.Updates.OS.LifecycleDataUpdatedAt)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Служба wuauserv' $script:Report.Updates.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Тип запуску' $script:Report.Updates.WindowsUpdate.ServiceStartType)$(New-BravoInfoRowHtml 'Політика оновлень' $script:Report.Updates.WindowsUpdate.AutoUpdateOption)$(New-BravoInfoRowHtml 'WSUS' $(if($script:Report.Updates.WindowsUpdate.ManagedByWSUS){$script:Report.Updates.WindowsUpdate.WSUSServer}else{'Ні'}))$(New-BravoInfoRowHtml 'Останній пошук' $script:Report.Updates.WindowsUpdate.LastDetectSuccess)$(New-BravoInfoRowHtml 'Остання установка' $script:Report.Updates.WindowsUpdate.LastInstallSuccess)$(New-BravoInfoRowHtml 'Потрібне перезавантаження' $pendingRebootText)$(New-BravoInfoRowHtml 'Статус пошуку' $updatesSearchStatusText)$(New-BravoInfoRowHtml 'Тривалість пошуку, сек' $script:Report.Updates.Search.DurationSeconds)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Потрібно встановити</div><div class="storage-summary-value">$($script:Report.Updates.Pending.Total)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Security</div><div class="storage-summary-value"><span class="risk risk-critical">$($script:Report.Updates.Pending.Security)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Драйвери</div><div class="storage-summary-value"><span class="risk risk-warning">$($script:Report.Updates.Pending.Driver)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Завантажено</div><div class="storage-summary-value"><span class="risk risk-ok">$($script:Report.Updates.Pending.Downloaded)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Обсяг, MB</div><div class="storage-summary-value">$($script:Report.Updates.Pending.TotalSizeMB)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Встановлено оновлень</div><div class="storage-summary-value">$($script:Report.Updates.Installed.Total)</div></div></div><h3>Оновлення, які потрібно встановити</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-pending' -Placeholder 'Пошук по назві, KB, категорії...')<div class="table-scroll"><table id="table-updates-pending" class="data-table"><thead><tr><th>Title</th><th>KB</th><th>Categories</th><th>Severity</th><th>Size MB</th><th>Downloaded</th><th>Released</th></tr></thead><tbody>$pendingUpdatesRows</tbody></table></div><h3>Останні встановлені оновлення</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-installed' -Placeholder 'Пошук по KB, опису, користувачу...')<div class="table-scroll"><table id="table-updates-installed" class="data-table"><thead><tr><th>HotFixID</th><th>Description</th><th>Installed by</th><th>Installed on</th></tr></thead><tbody>$installedUpdatesRows</tbody></table></div></section>
+    <section id="tab-updates" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔄</span>Updates</h2><div class="grid"><div class="card"><h3>Життєвий цикл ОС</h3>$(New-BravoInfoRowHtml 'Продукт' $script:Report.Updates.OS.Product)$(New-BravoInfoRowHtml 'Версія' $script:Report.Updates.OS.DisplayVersion)$(New-BravoInfoRowHtml 'Версія з реєстру' $script:Report.Updates.OS.RegistryDisplayVersion)$(New-BravoInfoRowHtml 'Full build' $script:Report.Updates.OS.FullBuild)$(New-BravoInfoRowHtml 'Канал' $script:Report.Updates.OS.Channel)$(New-BravoInfoRowHtml 'EditionID' $script:Report.Updates.OS.EditionId)$(New-BravoInfoRowHtml 'Кінець підтримки' $script:Report.Updates.OS.SupportEndDate)$(New-BravoInfoRowHtml 'Днів до кінця підтримки' $script:Report.Updates.OS.DaysToEndOfSupport)<div class="info-row"><span class="info-label">Статус підтримки</span><span class="info-value"><span class="status-pill $updatesSupportStatusClass">$(ConvertTo-BravoHtmlText $updatesSupportStatusText)</span></span></div>$(New-BravoInfoRowHtml 'Дані lifecycle від' $script:Report.Updates.OS.LifecycleDataUpdatedAt)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Служба wuauserv' $script:Report.Updates.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Тип запуску' $script:Report.Updates.WindowsUpdate.ServiceStartType)$(New-BravoInfoRowHtml 'Політика оновлень' $script:Report.Updates.WindowsUpdate.AutoUpdateOption)$(New-BravoInfoRowHtml 'WSUS' $(if($script:Report.Updates.WindowsUpdate.ManagedByWSUS){$script:Report.Updates.WindowsUpdate.WSUSServer}else{'Ні'}))$(New-BravoInfoRowHtml 'Останній пошук' $script:Report.Updates.WindowsUpdate.LastDetectSuccess)$(New-BravoInfoRowHtml 'Остання установка' $script:Report.Updates.WindowsUpdate.LastInstallSuccess)$(New-BravoInfoRowHtml 'Потрібне перезавантаження' $pendingRebootText)$(New-BravoInfoRowHtml 'Статус пошуку' $updatesSearchStatusText)$(New-BravoInfoRowHtml 'Тривалість пошуку, сек' $script:Report.Updates.Search.DurationSeconds)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Потрібно встановити</div><div class="storage-summary-value">$($script:Report.Updates.Pending.Total)$(if($script:Report.Updates.Pending.IsTruncated){" <span class=`"risk risk-warning`">детально: $($script:Report.Updates.Pending.Detailed)</span>"})</div></div><div class="storage-summary-item"><div class="storage-summary-label">Security</div><div class="storage-summary-value"><span class="risk risk-critical">$($script:Report.Updates.Pending.Security)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Драйвери</div><div class="storage-summary-value"><span class="risk risk-warning">$($script:Report.Updates.Pending.Driver)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Завантажено</div><div class="storage-summary-value"><span class="risk risk-ok">$($script:Report.Updates.Pending.Downloaded)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Обсяг, MB</div><div class="storage-summary-value">$($script:Report.Updates.Pending.TotalSizeMB)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Встановлено оновлень</div><div class="storage-summary-value">$($script:Report.Updates.Installed.Total)</div></div></div><h3>Оновлення, які потрібно встановити</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-pending' -Placeholder 'Пошук по назві, KB, категорії...')<div class="table-scroll"><table id="table-updates-pending" class="data-table"><thead><tr><th>Title</th><th>KB</th><th>Categories</th><th>Severity</th><th>Size MB</th><th>Downloaded</th><th>Released</th></tr></thead><tbody>$pendingUpdatesRows</tbody></table></div><h3>Останні встановлені оновлення</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-installed' -Placeholder 'Пошук по KB, опису, користувачу...')<div class="table-scroll"><table id="table-updates-installed" class="data-table"><thead><tr><th>HotFixID</th><th>Description</th><th>Installed by</th><th>Installed on</th></tr></thead><tbody>$installedUpdatesRows</tbody></table></div></section>
     <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div></section>
   </main>
   <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $OutputDir</p></footer>

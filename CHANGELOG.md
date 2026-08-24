@@ -19,6 +19,13 @@
 - Додано третій канал підтримки `LTSC / LTSB` з окремими датами замість змішування з Enterprise.
 - Розширено таблицю життєвого циклу до повного покриття: від Windows 2000 і Windows 2000 Server до Windows 11 25H2 і Windows Server 2025, включно з Windows 10 1511/1703/1709/1803/1903 і Windows Server SAC.
 - Посилено CI-перевірку секції `Updates`: неконсистентність `Search.Status`/`Pending.Total` і ненульові `CollectionErrors` тепер валять збірку.
+- Класифікацію оновлень переведено на стабільні `CategoryID` замість локалізованих назв категорій; англомовні назви лишились як fallback.
+- Додано `Pending.Detailed` і `Pending.IsTruncated`: якщо знайдено більше оновлень, ніж зберігається детально, це видно у звіті та у знахідці.
+- LTSC/LTSB тепер визначається за `EditionID` (`EnterpriseS`, `EnterpriseSN`, `IoTEnterpriseS`), а не лише за `Caption`; `EditionID` виводиться у звіті.
+- Додано перевірку політики `NoAutoUpdate=1`, яка має пріоритет над застарілим значенням `AUOptions`.
+- Статус життєвого циклу `Unknown` більше не дає зелену метрику Updates.
+- `-UpdateSearchTimeoutSec` зі значенням `0` або від'ємним більше не вимикає таймаут, а повертається до 180 сек.
+- Контрольна сума `dist` рахується на CRLF-варіанті файлу, як його бачить Windows після checkout.
 
 ## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
 

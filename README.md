@@ -103,6 +103,9 @@ BRAVO-SystemReport-Forensic.bat --nopause
   | `Enterprise / Education` | Enterprise, Education, серверні редакції |
   | `LTSC / LTSB` | Enterprise LTSC та LTSB |
 
+  LTSC/LTSB визначається за `EditionID` з реєстру (`EnterpriseS`, `EnterpriseSN`, `IoTEnterpriseS`),
+  бо `Caption` в Enterprise SAC і Enterprise LTSC однаковий; за відсутності `EditionID` використовується `Caption`.
+
   Таблиця покриває всі випуски Windows від Windows 2000 до Windows 11 25H2 і від Windows 2000 Server
   до Windows Server 2025, включно з усіма піврічними релізами Windows 10, LTSB/LTSC-редакціями і
   Windows Server SAC. Клієнтські та серверні ОС з однаковим build (3790, 6002, 7601, 9200, 9600,
@@ -114,6 +117,9 @@ BRAVO-SystemReport-Forensic.bat --nopause
 - **Доступні оновлення** — пошук через COM `Microsoft.Update.Session`
   (`IsInstalled=0 and IsHidden=0`): назва, KB, категорії, `MsrcSeverity`, розмір, чи вже завантажено, дата випуску.
   Зведення: `Total`, `Security`, `Critical`, `Driver`, `Definition`, `Other`, `Downloaded`, `TotalSizeMB`, `MaxAgeDays`.
+  Класифікація виконується за стабільними `CategoryID`, тому не залежить від мови інтерфейсу Windows.
+  Детально зберігається до 200 оновлень: якщо знайдено більше, `Pending.Total` показує реальну кількість,
+  `Pending.Detailed` — скільки збережено, а `Pending.IsTruncated` стає `true` і додається окрема знахідка.
 - **Стан Windows Update** — служба `wuauserv` і тип її запуску, політика `AUOptions`, WSUS-сервер,
   час останнього успішного пошуку та встановлення оновлень.
 - **Pending reboot** — перевірка CBS, `WindowsUpdate\Auto Update\RebootRequired`,
