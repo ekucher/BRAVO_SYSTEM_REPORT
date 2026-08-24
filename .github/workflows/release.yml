@@ -58,7 +58,7 @@ jobs:
             throw "Version mismatch: src\90-Main.ps1=$scriptVersion, CHANGELOG.md=$changelogVersion"
           }
 
-          # Для push тега версія має збігатися з тегом, інакше реліз описував би інший код.
+          # For tag pushes the version must match the tag, otherwise the release would describe different code.
           if ($env:GITHUB_REF -like 'refs/tags/*') {
             $tagName = $env:GITHUB_REF -replace '^refs/tags/', ''
 
@@ -225,7 +225,7 @@ jobs:
             throw "Release $env:RELEASE_TAG already exists: $($existingRelease.html_url)"
           }
 
-          # Нотатки релізу — секція поточної версії з CHANGELOG.md.
+          # Release notes are taken from the matching version section of CHANGELOG.md.
           $changelog = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "CHANGELOG.md") -Raw -Encoding UTF8
           $notesMatch = [regex]::Match(
             $changelog,
@@ -276,6 +276,6 @@ jobs:
         if: github.event_name != 'push'
         run: |
           Write-Host "=== DRY RUN ==="
-          Write-Host "[INFO] Реліз не публікується: workflow запущено вручну."
-          Write-Host "[INFO] Пакет зібрано і доданий як workflow artifact."
-          Write-Host "[INFO] Для публікації створіть тег: git tag v$env:PACKAGE_VERSION; git push origin v$env:PACKAGE_VERSION"
+          Write-Host "[INFO] Release is not published: workflow was started manually."
+          Write-Host "[INFO] Package was built and uploaded as a workflow artifact."
+          Write-Host "[INFO] To publish, create a tag: git tag v$env:PACKAGE_VERSION; git push origin v$env:PACKAGE_VERSION"

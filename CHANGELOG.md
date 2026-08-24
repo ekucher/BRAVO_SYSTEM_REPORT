@@ -5,6 +5,7 @@
 - Додано перевірку зібраного пакета: збіг SHA512, parser check runtime і версія запакованого скрипта.
 - Додано вкладення `BRAVO_SYSTEM_REPORT_v<version>.zip` і `.zip.sha256` у GitHub Release.
 - Додано ручний dry run через `workflow_dispatch` без публікації релізу.
+- Виправлено кодування у кроках workflow: не-ASCII текст усередині `run:` ламав консольний вивід, бо Windows PowerShell 5.1 читає тіло кроку як ANSI.
 
 ## v0.5.0 — аналіз ОС і оновлень Windows
 
