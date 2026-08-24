@@ -1,4 +1,8 @@
-﻿## Unreleased — виправлено false positive CRITICAL для CD-ROM томів
+﻿## Unreleased — ScriptVersion 0.4.1
+
+- `ScriptVersion` (`src/90-Main.ps1`) піднято `0.4.0` → `0.4.1` — версія релізу інструмента, що друкується в банері консолі та в JSON (`ScriptVersion`), відображає накопичені зміни цього PR (Windows Update collector, privacy public IP, health score, CD-ROM fix тощо). Відрізняється від `SchemaVersion` (`0.5.0`), яка версіонує лише структуру JSON-контракту.
+
+## Unreleased — виправлено false positive CRITICAL для CD-ROM томів
 
 - Виправлено `32-Collectors-Storage.ps1`: томи з `DriveType='CD-ROM'` більше не потрапляють у CRITICAL/WARNING знахідки Storage Risk через "0% вільно" (оптичні носії read-only, поняття вільного місця до них не застосовне). Такі томи тепер класифікуються як `HealthyVolumes`.
 - Знайдено під час валідації PR на Windows Server 2016: CD-ROM том з ISO показував `Health.Score` штучно нижчим через хибну CRITICAL-знахідку.

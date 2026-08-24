@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-24 23:54:11
+    GeneratedAt: 2026-08-25 00:01:10
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -2346,7 +2346,7 @@ function Send-BravoEmailReport {
 #>
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = "0.4.0"
+$ScriptVersion = "0.4.1"
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
