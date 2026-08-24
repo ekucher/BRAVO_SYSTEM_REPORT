@@ -57,6 +57,7 @@ function Get-BravoWindowsLifecycleTable {
 
         # --- Серверні випуски ---
         [PSCustomObject]@{ Build = 26100; IsServer = $true ; Product = 'Windows Server 2025'           ; DisplayVersion = '24H2'                ; SupportEndConsumer = '2034-10-10'; SupportEndEnterprise = '2034-10-10'; SupportEndLtsc = '' }
+        [PSCustomObject]@{ Build = 25398; IsServer = $true ; Product = 'Windows Server 23H2'          ; DisplayVersion = '23H2'                ; SupportEndConsumer = '2025-10-24'; SupportEndEnterprise = '2025-10-24'; SupportEndLtsc = '' }
         [PSCustomObject]@{ Build = 20348; IsServer = $true ; Product = 'Windows Server 2022'           ; DisplayVersion = '21H2'                ; SupportEndConsumer = '2031-10-14'; SupportEndEnterprise = '2031-10-14'; SupportEndLtsc = '' }
         [PSCustomObject]@{ Build = 19042; IsServer = $true ; Product = 'Windows Server SAC'            ; DisplayVersion = '20H2'                ; SupportEndConsumer = '2022-08-09'; SupportEndEnterprise = '2022-08-09'; SupportEndLtsc = '' }
         [PSCustomObject]@{ Build = 19041; IsServer = $true ; Product = 'Windows Server SAC'            ; DisplayVersion = '2004'                ; SupportEndConsumer = '2021-12-14'; SupportEndEnterprise = '2021-12-14'; SupportEndLtsc = '' }
@@ -142,7 +143,16 @@ function Get-BravoOsSupportInfo {
         $isLtscChannel = ($Caption -match 'LTSC|LTSB')
     }
 
-    $isEnterpriseChannel = ($Caption -match 'Enterprise|Education|Server')
+    # Pro Education і Pro for Workstations містять у Caption слово Education/Pro,
+    # але обслуговуються за споживчим циклом Home/Pro.
+    $isConsumerProEdition = $false
+    if ($EditionId) {
+        $isConsumerProEdition = ($EditionId -match '^Professional')
+    } else {
+        $isConsumerProEdition = ($Caption -match 'Pro Education|Pro for Workstations')
+    }
+
+    $isEnterpriseChannel = (-not $isConsumerProEdition) -and ($Caption -match 'Enterprise|Education|Server')
 
     $result.Channel = if ($isLtscChannel) { 'LTSC / LTSB' } elseif ($isEnterpriseChannel) { 'Enterprise / Education' } else { 'Consumer' }
 
@@ -728,11 +738,14 @@ function Get-BravoUpdatesAudit {
         $updatesDetails = @()
         if ($script:Report.Updates.OS.DisplayVersion) { $updatesDetails += "$($script:Report.Updates.OS.Product) $($script:Report.Updates.OS.DisplayVersion)" }
         if ($searchStatus -eq 'OK' -and $pendingSecurity -gt 0) { $updatesDetails += "security: $pendingSecurity" }
+        if ($searchStatus -eq 'OK' -and [int]$script:Report.Updates.Pending.Critical -gt 0) { $updatesDetails += "critical: $($script:Report.Updates.Pending.Critical)" }
         if ($script:Report.Updates.Installed.LastInstalledOn) { $updatesDetails += "останнє: $($script:Report.Updates.Installed.LastInstalledOn)" }
         if ($script:Report.Updates.PendingReboot.Required) { $updatesDetails += 'потрібне перезавантаження' }
         $updatesMetric.Details = ($updatesDetails -join ', ')
 
-        $updatesMetric.Status = if ($script:Report.Updates.OS.SupportStatus -eq 'EndOfSupport' -or $pendingSecurity -gt 0) {
+        $pendingCritical = [int]$script:Report.Updates.Pending.Critical
+
+        $updatesMetric.Status = if ($script:Report.Updates.OS.SupportStatus -eq 'EndOfSupport' -or $pendingSecurity -gt 0 -or $pendingCritical -gt 0) {
             'CRITICAL'
         } elseif ($pendingTotal -gt 0 -or $script:Report.Updates.PendingReboot.Required -or $script:Report.Updates.OS.SupportStatus -in @('EndingSoon','Unknown') -or $searchStatus -notin @('OK','Skipped')) {
             'WARNING'

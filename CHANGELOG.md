@@ -26,6 +26,9 @@
 - Статус життєвого циклу `Unknown` більше не дає зелену метрику Updates.
 - `-UpdateSearchTimeoutSec` зі значенням `0` або від'ємним більше не вимикає таймаут, а повертається до 180 сек.
 - Контрольна сума `dist` рахується на CRLF-варіанті файлу, як його бачить Windows після checkout.
+- Додано Windows Server 23H2 (build 25398) у таблицю життєвого циклу.
+- Pro Education і Pro for Workstations тепер обслуговуються за споживчим циклом, а не за Enterprise.
+- Метрика Updates стає CRITICAL і за наявності critical-оновлень, а не лише security.
 
 ## Unreleased — Forensic ZIP default та Storage Deep Inventory v2
 
