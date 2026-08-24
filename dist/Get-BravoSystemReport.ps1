@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-24 23:27:18
+    GeneratedAt: 2026-08-24 23:54:11
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -920,6 +920,13 @@ function Get-BravoStorageRiskSummary {
         }
 
         if ($null -eq $freePercent) {
+            continue
+        }
+
+        # CD-ROM/оптичні носії — read-only, "вільне місце" не є показником ризику
+        # (наприклад ISO-образ примонтований як том завжди показує 0% вільно).
+        if ([string]$volume.DriveType -eq 'CD-ROM') {
+            $risk.HealthyVolumes += $volumeRisk
             continue
         }
 

@@ -246,6 +246,13 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
+        # CD-ROM/оптичні носії — read-only, "вільне місце" не є показником ризику
+        # (наприклад ISO-образ примонтований як том завжди показує 0% вільно).
+        if ([string]$volume.DriveType -eq 'CD-ROM') {
+            $risk.HealthyVolumes += $volumeRisk
+            continue
+        }
+
         if ($freePercent -lt $criticalThreshold) {
             $risk.CriticalVolumes += $volumeRisk
 
