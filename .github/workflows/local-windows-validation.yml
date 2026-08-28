@@ -227,8 +227,8 @@ jobs:
           Write-Host "[INFO] CPU: $($report.Hardware.CPU.Cores) / $($report.Hardware.CPU.LogicalProcessors)"
           Write-Host "[INFO] RAM UsedPercent: $($report.Hardware.RAM.UsedPercent)"
           Write-Host "[INFO] Disk FreePercent: $($report.Hardware.Disks.FreePercent)"
-          Write-Host "[INFO] PrimaryIPv4: $($report.Network.PrimaryIPv4)"
-          Write-Host "[INFO] PublicIPv4Status: $($report.Network.PublicIPv4Status)"
+          Write-Host "[INFO] PrimaryIPv4: $($report.Network.IP.PrimaryIPv4)"
+          Write-Host "[INFO] PublicIPv4Status: $($report.Network.IP.PublicIPv4Status)"
           Write-Host "[INFO] Public IPv4 value is intentionally not printed."
           Write-Host "[INFO] CollectionErrors: $(@($report.CollectionErrors).Count)"
 
@@ -252,8 +252,8 @@ jobs:
             throw "Hardware.Disks.FreePercent is invalid: $($report.Hardware.Disks.FreePercent)"
           }
 
-          if ([string]::IsNullOrWhiteSpace($report.Network.PrimaryIPv4)) {
-            throw "Network.PrimaryIPv4 is empty"
+          if ([string]::IsNullOrWhiteSpace($report.Network.IP.PrimaryIPv4)) {
+            throw "Network.IP.PrimaryIPv4 is empty"
           }
 
           if (@($report.CollectionErrors).Count -ne 0) {

@@ -193,7 +193,12 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         # емпірично, дає ParameterArgumentTransformationError). Тому вимкнення
         # ZIP форвардиться через окремий default-false switch -NoZip, за тим
         # самим патерном, що й -NoPause/-NoEmoji/-NoOpenFolder нижче.
-        if ($NoZip) { $arguments += '-NoZip' }
+        # Перевіряємо ЕФЕКТИВНЕ значення $Zip (уже враховує і -NoZip, і
+        # прямий -Zip:$false — обидва застосовані вище, до elevation-блоку),
+        # а не сам прапорець -NoZip, — інакше користувач, що викликав
+        # -Zip:$false напряму (старий, задокументований в CHANGELOG спосіб),
+        # так само втратить вимкнення ZIP при relaunch під адміном.
+        if (-not $Zip) { $arguments += '-NoZip' }
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
@@ -326,15 +331,12 @@ $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object 
 # ZIP
 Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
 
-# Email
-Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
-
 # Перерахунок і повторний експорт — лише якщо ЯКИЙСЬ з export-етапів вище
-# (JSON/HTML/CSV/ZIP/Email) додав нові помилки до CollectionErrors (вони
-# впливають на Health Score). Перевірка навмисно стоїть ПІСЛЯ ZIP/Email, а не
-# одразу після CSV — інакше помилки саме ZIP/Email-етапів (наприклад,
-# заблокований антивірусом файл, невдалий SMTP) ніколи не потрапляли б у
-# збережені JSON/HTML, і Health Score на диску розходився б з реальним станом.
+# (JSON/HTML/CSV/ZIP) додав нові помилки до CollectionErrors (вони впливають
+# на Health Score). Перевірка навмисно стоїть ПІСЛЯ ZIP, а не одразу після CSV
+# — інакше помилки саме ZIP-етапу (наприклад, заблокований антивірусом файл)
+# ніколи не потрапляли б у збережені JSON/HTML, і Health Score на диску
+# розходився б з реальним станом.
 if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
     Update-BravoHealthScore
     Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
@@ -349,6 +351,13 @@ if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
     }
 }
 $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+
+# Email — навмисно ОСТАННІЙ export-етап, після гейту перерахунку вище. Тіло
+# листа читає $script:Report.Health.Score/Status напряму з пам'яті, а вкладення
+# беруться з файлів на диску (GeneratedFiles) — якщо лист відправити до гейту,
+# він піде зі старим Score і застарілими JSON/HTML, навіть якщо ZIP-етап вище
+# щойно виявив нову помилку й викликав перерахунок.
+Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)

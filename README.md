@@ -103,7 +103,7 @@ BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.csv
 BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.zip
 ```
 
-CSV і ZIP створюються при використанні відповідних параметрів `-CSV` і `-Zip`.
+CSV створюється при використанні `-CSV`. ZIP створюється за замовчуванням (`-Zip` увімкнено за замовчуванням) — вимкнути можна через `-NoZip` (рекомендовано) або `-Zip:$false` (обидва способи коректно форвардяться навіть при автоматичному підвищенні прав до адміністратора).
 
 ## Storage Deep Audit
 

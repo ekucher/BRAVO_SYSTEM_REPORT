@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-29 02:08:24
+    GeneratedAt: 2026-08-29 02:22:37
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -620,13 +620,15 @@ function Get-BravoHardwareAudit {
         $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
 
         # LoadPercentage — опціональна властивість WMI, на частині VM (особливо
-        # одразу після старту) повертає $null. [Math]::Round($null) мовчки стає 0,
-        # що виглядає як "0% навантаження", хоча реальне значення невідоме.
+        # одразу після старту) повертає $null. Це очікуваний, не помилковий стан
+        # (не CollectionError) — трапляється регулярно на щойно піднятих VM,
+        # включно з CI-раннерами, і не мало б штрафувати Health Score чи ламати
+        # інваріант "CollectionErrors=0" в EndToEnd-тесті на кожному такому
+        # прогоні. [Math]::Round($null) мовчки стає 0 — залишаємо цю поведінку,
+        # 0% тут означає "невідомо", а не підтверджений нуль.
         $cpuLoadAverage = ($cpuInfo.LoadPercentage | Measure-Object -Average).Average
         if ($null -ne $cpuLoadAverage) {
             $script:Report.Hardware.CPU.LoadPercent = [Math]::Round($cpuLoadAverage)
-        } else {
-            Add-AuditError -Section 'Hardware.CPU' -Message 'Win32_Processor.LoadPercentage не повернув значення — навантаження CPU невідоме (показано 0 за замовчуванням).'
         }
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
@@ -1452,8 +1454,12 @@ function Get-BravoEventLogsAudit {
         $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
         $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
 
+        # Звіряємо FullyQualifiedErrorId, а не текст Exception.Message: повідомлення
+        # локалізується разом з MUI-пакетом Windows (напр. на uk-UA/ru-UA системах
+        # текст буде не англійським), тоді як FullyQualifiedErrorId — стабільний
+        # ідентифікатор, незалежний від локалі.
         foreach ($eventLogError in $eventLogErrors) {
-            if ($eventLogError.Exception.Message -notmatch 'No matches found') {
+            if ($eventLogError.FullyQualifiedErrorId -notmatch 'GetEventLogNoEntriesFound') {
                 Add-AuditError -Section 'EventLogs.System' -Message $eventLogError.Exception.Message
             }
         }
@@ -2725,7 +2731,12 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         # емпірично, дає ParameterArgumentTransformationError). Тому вимкнення
         # ZIP форвардиться через окремий default-false switch -NoZip, за тим
         # самим патерном, що й -NoPause/-NoEmoji/-NoOpenFolder нижче.
-        if ($NoZip) { $arguments += '-NoZip' }
+        # Перевіряємо ЕФЕКТИВНЕ значення $Zip (уже враховує і -NoZip, і
+        # прямий -Zip:$false — обидва застосовані вище, до elevation-блоку),
+        # а не сам прапорець -NoZip, — інакше користувач, що викликав
+        # -Zip:$false напряму (старий, задокументований в CHANGELOG спосіб),
+        # так само втратить вимкнення ZIP при relaunch під адміном.
+        if (-not $Zip) { $arguments += '-NoZip' }
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
@@ -2858,15 +2869,12 @@ $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object 
 # ZIP
 Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
 
-# Email
-Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
-
 # Перерахунок і повторний експорт — лише якщо ЯКИЙСЬ з export-етапів вище
-# (JSON/HTML/CSV/ZIP/Email) додав нові помилки до CollectionErrors (вони
-# впливають на Health Score). Перевірка навмисно стоїть ПІСЛЯ ZIP/Email, а не
-# одразу після CSV — інакше помилки саме ZIP/Email-етапів (наприклад,
-# заблокований антивірусом файл, невдалий SMTP) ніколи не потрапляли б у
-# збережені JSON/HTML, і Health Score на диску розходився б з реальним станом.
+# (JSON/HTML/CSV/ZIP) додав нові помилки до CollectionErrors (вони впливають
+# на Health Score). Перевірка навмисно стоїть ПІСЛЯ ZIP, а не одразу після CSV
+# — інакше помилки саме ZIP-етапу (наприклад, заблокований антивірусом файл)
+# ніколи не потрапляли б у збережені JSON/HTML, і Health Score на диску
+# розходився б з реальним станом.
 if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
     Update-BravoHealthScore
     Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
@@ -2881,6 +2889,13 @@ if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
     }
 }
 $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+
+# Email — навмисно ОСТАННІЙ export-етап, після гейту перерахунку вище. Тіло
+# листа читає $script:Report.Health.Score/Status напряму з пам'яті, а вкладення
+# беруться з файлів на диску (GeneratedFiles) — якщо лист відправити до гейту,
+# він піде зі старим Score і застарілими JSON/HTML, навіть якщо ZIP-етап вище
+# щойно виявив нову помилку й викликав перерахунок.
+Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)

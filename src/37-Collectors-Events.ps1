@@ -22,8 +22,12 @@ function Get-BravoEventLogsAudit {
         $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
         $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
 
+        # Звіряємо FullyQualifiedErrorId, а не текст Exception.Message: повідомлення
+        # локалізується разом з MUI-пакетом Windows (напр. на uk-UA/ru-UA системах
+        # текст буде не англійським), тоді як FullyQualifiedErrorId — стабільний
+        # ідентифікатор, незалежний від локалі.
         foreach ($eventLogError in $eventLogErrors) {
-            if ($eventLogError.Exception.Message -notmatch 'No matches found') {
+            if ($eventLogError.FullyQualifiedErrorId -notmatch 'GetEventLogNoEntriesFound') {
                 Add-AuditError -Section 'EventLogs.System' -Message $eventLogError.Exception.Message
             }
         }
