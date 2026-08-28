@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-29 01:16:33
+    GeneratedAt: 2026-08-29 01:46:21
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1667,8 +1667,23 @@ function Get-BravoRuntimeAudit {
 
     # --- .NET Framework 4.x ---
     try {
-        $latestKnownReleaseKey = 533320 # .NET Framework 4.8.1
-        $script:Report.DotNet.LatestKnownVersion = '4.8.1'
+        # .NET Framework 4.8.1 підтримується лише на Windows 11 22H2+ (build 22621+)
+        # та Windows Server 2022 23H2/Annual Channel+ (build 25398+, теж >= 22621).
+        # На старіших ОС (Windows 7 SP1–10, Server 2012–2022 LTSC) 4.8.1 не існує
+        # як окремий пакет — інсталятор там блокується "не підтримується цією ОС",
+        # тож максимум, який можна рекомендувати, — 4.8.
+        $osBuildNumber = 0
+        $osBuildParsed = [int]::TryParse([string]$script:Report.OS.Build, [ref]$osBuildNumber)
+        $supports481 = $osBuildParsed -and ($osBuildNumber -ge 22621)
+
+        if ($supports481) {
+            $maxCompatibleVersion = '4.8.1'
+            $maxCompatibleReleaseKey = 533320
+        } else {
+            $maxCompatibleVersion = '4.8'
+            $maxCompatibleReleaseKey = 528040
+        }
+        $script:Report.DotNet.LatestKnownVersion = $maxCompatibleVersion
 
         if (Test-Path 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full') {
             $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release
@@ -1681,10 +1696,14 @@ function Get-BravoRuntimeAudit {
                 elseif ($release -ge 461808) { $script:Report.DotNet.v4 = '4.7.2+' }
                 else { $script:Report.DotNet.v4 = "Release $release" }
 
-                $script:Report.DotNet.UpdateAvailable = ($release -lt $latestKnownReleaseKey)
+                $script:Report.DotNet.UpdateAvailable = ($release -lt $maxCompatibleReleaseKey)
 
                 if ($script:Report.DotNet.UpdateAvailable) {
-                    Add-AuditFinding -Severity 'WARNING' -Category 'DotNet' -Message ".NET Framework застарів: $($script:Report.DotNet.v4) (найновіша відома версія: 4.8.1)" -Recommendation 'Встановіть .NET Framework 4.8.1 через Windows Update або офлайн-інсталятор.'
+                    if ($supports481) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'DotNet' -Message ".NET Framework застарів: $($script:Report.DotNet.v4) (максимальна сумісна версія для цієї ОС: 4.8.1)" -Recommendation 'Встановіть оновлення через Windows Update (.NET Framework 4.8.1 постачається як компонент ОС) або офлайн-інсталятор із microsoft.com/net/download/dotnet-framework/net481, якщо Windows Update недоступний.'
+                    } else {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'DotNet' -Message ".NET Framework застарів: $($script:Report.DotNet.v4) (максимальна сумісна версія для цієї ОС: 4.8; 4.8.1 на цій версії Windows НЕ підтримується)" -Recommendation 'Встановіть .NET Framework 4.8 (максимум, підтримуваний цією ОС) через Windows Update або офлайн-інсталятор. Не намагайтесь ставити 4.8.1 — інсталятор заблокує встановлення як несумісне з цією ОС.'
+                    }
                 }
             }
         }

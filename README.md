@@ -23,7 +23,9 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 
 ## Поточний статус
 
-Поточна стабільна версія: **v0.4.0**.
+Поточна стабільна версія: **ScriptVersion 0.4.1** (контракт JSON-звіту: **SchemaVersion 0.5.2**).
+
+`ScriptVersion` версіонує реліз інструмента (`src/90-Main.ps1`), `SchemaVersion` — структуру JSON-контракту (`src/20-ReportModel.ps1`); вони змінюються незалежно.
 
 Стабільні етапи:
 
@@ -33,7 +35,8 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - **v0.3.3** — HTML-таблиці Storage Deep / Storage Critical Findings;
 - **v0.3.4** — виправлено BAT `--nopause`;
 - **v0.3.5** — актуалізація README / документації;
-- **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у `src`-модулі.
+- **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у `src`-модулі;
+- **v0.4.1** — Windows Update collector, privacy-гейтинг публічного IP (`-SkipPublicIP`), подвійний перерахунок Health Score після export-етапів, перевірка можливості оновлення .NET Framework/PowerShell, Catalog-посилання для pending updates.
 
 ## Швидкий запуск
 
@@ -235,6 +238,7 @@ BRAVO_SYSTEM_REPORT
 │   ├── Get-BravoSystemReport.ps1
 │   └── Get-BravoSystemReport.ps1.sha512
 ├── docs/
+│   ├── AI_RULES.md
 │   ├── ARCHITECTURE.md
 │   ├── IMPLEMENTATION_PLAN.md
 │   ├── PROJECT_RULES.md
@@ -243,6 +247,10 @@ BRAVO_SYSTEM_REPORT
 ├── examples/
 ├── patch/
 ├── review/
+├── tests/
+│   ├── Core.Tests.ps1
+│   ├── Manifest.Tests.ps1
+│   └── EndToEnd.Tests.ps1
 ├── src/
 │   ├── 00-Header.ps1
 │   ├── 05-Params.ps1
@@ -257,6 +265,8 @@ BRAVO_SYSTEM_REPORT
 │   ├── 36-Collectors-ProcessesServices.ps1
 │   ├── 37-Collectors-Events.ps1
 │   ├── 38-Collectors-Software.ps1
+│   ├── 39-Collectors-Updates.ps1
+│   ├── 39b-Collectors-Runtime.ps1
 │   ├── 40-Health.ps1
 │   ├── 50-Export-Json.ps1
 │   ├── 51-Export-Html.ps1
@@ -266,7 +276,8 @@ BRAVO_SYSTEM_REPORT
 │   ├── 90-Main.ps1
 │   └── BRAVO.build.json
 ├── tools/
-│   └── New-ReleasePackage.ps1
+│   ├── New-ReleasePackage.ps1
+│   └── Publish-ToGitHub.ps1
 ├── Build-BRAVO-SystemReport.ps1
 ├── BRAVO-SystemReport-Quick.bat
 ├── BRAVO-SystemReport-Full.bat
@@ -287,15 +298,14 @@ BRAVO_SYSTEM_REPORT
 - `docs/ROADMAP.md` — актуальний backlog і етапи розвитку;
 - `docs/IMPLEMENTATION_PLAN.md` — практичний план впровадження наступних доробок;
 - `docs/SECURITY.md` — правила безпечної роботи зі звітами;
-- `docs/PROJECT_RULES.md` — правила мови, стилю, git workflow і console contract.
+- `docs/PROJECT_RULES.md` — правила мови, стилю, git workflow і console contract;
+- `docs/AI_RULES.md` — правила роботи з AI-асистентами в цьому проєкті.
 
 ## Відомі технічні борги
 
 Після аналізу репозиторію зафіксовано такі ключові напрями доробки:
 
 - release package має включати `dist\Get-BravoSystemReport.ps1` і SHA512, бо root wrapper запускає саме `dist`;
-- старий моноліт `src\Get-BravoSystemReport.ps1` потрібно прибрати з основного release flow або перенести в legacy;
-- Health Score потрібно перераховувати після export-етапів або окремо враховувати export health;
 - потрібно реалізувати `-Sanitize` для безпечної передачі звітів третім сторонам;
 - потрібно уніфікувати network schema для `IPv4`, `PrimaryIPv4` і `PrimaryInterface`;
 - потрібно розширити Deep/Forensic профілі: TPM, Secure Boot, BitLocker, Pending Reboot, RDP/NLA, WinRM, SMBv1, TLS baseline, EventLog provider summary;
@@ -337,11 +347,10 @@ $ErrorActionPreference = "Stop"
 Найближчі етапи:
 
 - стабілізувати release package;
-- прибрати legacy-конфлікт `src\Get-BravoSystemReport.ps1`;
-- додати `-Sanitize`, `-SkipPublicIP` і `-Offline`;
+- додати `-Sanitize` та `-Offline` (`-SkipPublicIP` вже реалізовано);
 - розширити hardware/storage/network/security/event log аудит;
 - додати Markdown/TXT summary;
-- розширити Local Windows Validation для Full/Deep/Forensic, BAT і release package тестів.
+- розширити Local Windows Validation для Full/Forensic, BAT і release package тестів (Quick і Deep вже покриті).
 
 Актуальний деталізований план ведеться у:
 

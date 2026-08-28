@@ -1,4 +1,16 @@
-﻿## Unreleased — перевірка оновлень .NET Framework/PowerShell, Catalog-посилання для pending updates
+﻿## Unreleased — ревю проєкту: OS-aware .NET-сумісність, прибирання legacy, CI-гварди, Pester-тести
+
+- **[Bugfix]** `39b-Collectors-Runtime.ps1`: `Get-BravoRuntimeAudit` більше не радить сліпо ставити .NET Framework 4.8.1 — тепер визначає максимальну сумісну версію за `OS.Build` (Windows 11 22H2+/Server 2022 23H2+, build ≥ 22621 → 4.8.1; старіші ОС, включно з Windows Server 2019, → 4.8). Раніше на Windows Server 2019 рекомендація "встановіть 4.8.1" блокувалась інсталятором з повідомленням "не підтримується цією операційною системою" — підтверджено реальним прогоном на Server 2019 (build 17763), тепер коректно показує `4.8`.
+- Видалено застарілий монолітний `src/Get-BravoSystemReport.ps1` (не редагувався з моменту переходу на модульну архітектуру; вводив в оману щодо "основного" скрипта, зокрема в `powershell-static-check.yml`).
+- Видалено `BRAVO_SYSTEM_REPORT.git.bundle` (орфанний бекап-артефакт у корені репо, ніде не використовувався).
+- `.github/workflows/powershell-static-check.yml`: перевірка структури репозиторію оновлена під реальну модульну архітектуру (замість застарілого моноліту — `src/90-Main.ps1`, `src/BRAVO.build.json`, `dist/Get-BravoSystemReport.ps1`).
+- `.github/workflows/local-windows-validation.yml`: додано звірку `dist/Get-BravoSystemReport.ps1.sha512` з реальним хешем після build; додано гвард, що вимагає підняття `SchemaVersion` і запису в `CHANGELOG.md` разом зі зміною `src/20-ReportModel.ps1`; додано крок `Invoke-Pester tests/`; додано `Deep`-прогін з `-CSV -Zip`, що перевіряє реальне виконання Windows Update COM-пошуку (`WindowsUpdate.SearchStatus -ne 'Skipped'`).
+- Додано `tests/` — базовий Pester 5.x набір: `Core.Tests.ps1` (чисті IPv4-хелпери з `10-Core.ps1`), `Manifest.Tests.ps1` (консистентність `BRAVO.build.json` ↔ фактичні файли `src/*.ps1` — ловить клас багів "забув зареєструвати новий модуль"), `EndToEnd.Tests.ps1` (наскрізний прогін `dist` у профілі Quick, локально запускається через `Invoke-Pester tests/`).
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/IMPLEMENTATION_PLAN.md`: синхронізовано з фактичним станом коду (версії `ScriptVersion 0.4.1`/`SchemaVersion 0.5.2`, дерево структури проєкту, виконані пункти backlog позначені `[x]`, прибрано згадки видаленого моноліту).
+- `docs/AI_RULES.md`: усунуто протиріччя між п.6 (обов'язковий бамп `SchemaVersion` при зміні контракту) і п.9 (заборона змінювати `SchemaVersion` без явного запиту) — уточнено, що п.9 стосується довільних бампів, не пов'язаних із поточним запитом.
+- `patch/v0.2.0-stabilization.*` свідомо залишено без змін — історичний артефакт міграції, не заважає поточній роботі.
+
+## Unreleased — перевірка оновлень .NET Framework/PowerShell, Catalog-посилання для pending updates
 
 - Додано модуль `39b-Collectors-Runtime.ps1` (`Get-BravoRuntimeAudit`): офлайн-перевірка можливості оновлення .NET Framework 4.x (порівняння release-key з еталоном 4.8.1) та Windows PowerShell/PowerShell 7 (Core) (порівняння з еталоном 7.4, виявлення встановлення через `HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions`). Генерує WARNING/INFO-знахідки через `Add-AuditFinding` — раніше версія .NET лише відображалась, ніяк не впливаючи на Health Score.
 - `20-ReportModel.ps1`: нові поля `DotNet.ReleaseKey`, `DotNet.LatestKnownVersion`, `DotNet.UpdateAvailable`, `PowerShell.Core7Installed`, `PowerShell.Core7Version`, `PowerShell.Core7LatestKnown`, `PowerShell.Core7UpdateAvailable`.
