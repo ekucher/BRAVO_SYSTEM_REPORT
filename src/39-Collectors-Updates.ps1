@@ -24,17 +24,19 @@ function Get-BravoWindowsUpdateAudit {
 
         $script:Report.WindowsUpdate.InstalledHotFixCount = @($hotFixes).Count
 
-        foreach ($hotFix in $hotFixes) {
+        # Накопичення через конвеєр замість += у циклі — уникає O(n^2)
+        # перевиділення масиву на кожній ітерації при великій історії hotfix'ів.
+        $script:Report.WindowsUpdate.InstalledHotFixes = @($hotFixes | ForEach-Object {
             $installedOn = ''
-            if ($hotFix.InstalledOn) { $installedOn = $hotFix.InstalledOn.ToString('yyyy-MM-dd') }
+            if ($_.InstalledOn) { $installedOn = $_.InstalledOn.ToString('yyyy-MM-dd') }
 
-            $script:Report.WindowsUpdate.InstalledHotFixes += [PSCustomObject]@{
-                HotFixID    = $hotFix.HotFixID
-                Description = $hotFix.Description
+            [PSCustomObject]@{
+                HotFixID    = $_.HotFixID
+                Description = $_.Description
                 InstalledOn = $installedOn
-                InstalledBy = $hotFix.InstalledBy
+                InstalledBy = $_.InstalledBy
             }
-        }
+        })
 
         $lastHotFix = $hotFixes | Where-Object { $_.InstalledOn } | Select-Object -First 1
         if ($lastHotFix) {
@@ -99,26 +101,32 @@ function Get-BravoWindowsUpdateAudit {
         $pendingCriticalCount = 0
         $pendingSecurityCount = 0
 
-        foreach ($update in $searchResult.Updates) {
-            $kbList = @()
-            foreach ($kbArticleId in $update.KBArticleIDs) { $kbList += "KB$kbArticleId" }
-
-            $categoryNames = @()
-            foreach ($updateCategory in $update.Categories) { $categoryNames += $updateCategory.Name }
+        # Накопичення через конвеєр замість += у циклі — уникає O(n^2)
+        # перевиділення масиву при великій кількості pending updates.
+        $script:Report.WindowsUpdate.PendingUpdates = @($searchResult.Updates | ForEach-Object {
+            $update = $_
+            $kbList = @($update.KBArticleIDs | ForEach-Object { "KB$_" })
+            $categoryNames = @($update.Categories | ForEach-Object { $_.Name })
 
             $severity = [string]$update.MsrcSeverity
             if ($severity -eq 'Critical') { $pendingCriticalCount++ }
             if (($categoryNames -join ' ') -match 'Security') { $pendingSecurityCount++ }
 
-            $script:Report.WindowsUpdate.PendingUpdates += [PSCustomObject]@{
+            $catalogUrl = ''
+            if ($kbList.Count -gt 0) {
+                $catalogUrl = "https://www.catalog.update.microsoft.com/Search.aspx?q=$([Uri]::EscapeDataString($kbList[0]))"
+            }
+
+            [PSCustomObject]@{
                 Title        = $update.Title
                 KB           = ($kbList -join ', ')
                 Severity     = $severity
                 Categories   = ($categoryNames -join ', ')
                 IsDownloaded = [bool]$update.IsDownloaded
                 SizeMB       = [Math]::Round($update.MaxDownloadSize / 1MB, 1)
+                CatalogUrl   = $catalogUrl
             }
-        }
+        })
 
         $script:Report.WindowsUpdate.PendingCount = @($script:Report.WindowsUpdate.PendingUpdates).Count
         $script:Report.WindowsUpdate.PendingCritical = $pendingCriticalCount

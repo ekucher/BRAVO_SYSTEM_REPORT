@@ -1,4 +1,13 @@
-﻿## Unreleased — менше шуму в findings: trigger-start служби, деталі помилок System log
+﻿## Unreleased — перевірка оновлень .NET Framework/PowerShell, Catalog-посилання для pending updates
+
+- Додано модуль `39b-Collectors-Runtime.ps1` (`Get-BravoRuntimeAudit`): офлайн-перевірка можливості оновлення .NET Framework 4.x (порівняння release-key з еталоном 4.8.1) та Windows PowerShell/PowerShell 7 (Core) (порівняння з еталоном 7.4, виявлення встановлення через `HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions`). Генерує WARNING/INFO-знахідки через `Add-AuditFinding` — раніше версія .NET лише відображалась, ніяк не впливаючи на Health Score.
+- `20-ReportModel.ps1`: нові поля `DotNet.ReleaseKey`, `DotNet.LatestKnownVersion`, `DotNet.UpdateAvailable`, `PowerShell.Core7Installed`, `PowerShell.Core7Version`, `PowerShell.Core7LatestKnown`, `PowerShell.Core7UpdateAvailable`.
+- `39-Collectors-Updates.ps1`: до кожного запису `WindowsUpdate.PendingUpdates` додано `CatalogUrl` — пряме посилання на Microsoft Update Catalog для відповідного KB.
+- `51-Export-Html.ps1`: картка "Runtime" показує статус оновлень .NET/PowerShell 7; таблиця "Pending Windows Updates" отримала клікабельну колонку "Посилання" на Catalog.
+- `90-Main.ps1`: inline-блок визначення версії .NET Framework замінено викликом `Get-BravoRuntimeAudit`.
+- `SchemaVersion` піднято `0.5.1` → `0.5.2` (нові поля `DotNet.*`, `PowerShell.Core7*`, `WindowsUpdate.PendingUpdates[].CatalogUrl`).
+
+## Unreleased — менше шуму в findings: trigger-start служби, деталі помилок System log
 
 - `36-Collectors-ProcessesServices.ps1`: додано whitelist відомих trigger-start/опціональних служб (`edgeupdate`, `edgeupdatem`, `gupdate`, `gupdatem`, `MapsBroker`, `sppsvc`, `WbioSrvc`, `RemoteRegistry`) — вони більше не рахуються у WARNING-знахідці "Автоматичних служб не запущено" (лишаються видимими в `Services.AutomaticStopped` для прозорості, просто не впливають на severity/score).
 - `37-Collectors-Events.ps1`: додано `EventLogs.TopErrorSources` — топ-10 джерел помилок System log (Source, Count, останнє повідомлення) за період, замість самого лише лічильника. Знахідка тепер містить топ-3 джерела прямо в тексті.

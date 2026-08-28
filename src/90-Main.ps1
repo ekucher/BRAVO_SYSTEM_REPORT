@@ -235,18 +235,8 @@ Get-BravoOperatingSystemAudit
 # --- Windows Update ---
 Get-BravoWindowsUpdateAudit
 
-# --- .NET ---
-try {
-    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full') {
-        $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release
-        if ($release -ge 533320) { $script:Report.DotNet.v4 = '4.8.1+' }
-        elseif ($release -ge 528040) { $script:Report.DotNet.v4 = '4.8' }
-        elseif ($release -ge 461808) { $script:Report.DotNet.v4 = '4.7.2+' }
-        elseif ($release) { $script:Report.DotNet.v4 = "Release $release" }
-    }
-} catch {
-    Add-AuditError -Section 'DotNet' -Message $_.Exception.Message
-}
+# --- .NET / PowerShell (перевірка можливості оновлення) ---
+Get-BravoRuntimeAudit
 
 # --- Апаратне забезпечення ---
 Get-BravoHardwareAudit
@@ -288,10 +278,12 @@ Update-BravoHealthScore
 # ============================================================
 # ЗБЕРЕЖЕННЯ ЗВІТІВ
 # ============================================================
-# Примітка: Health Score рахується ще раз ПІСЛЯ export-етапів (нижче),
-# бо самі export-функції можуть додати помилки в CollectionErrors
-# (наприклад, невдалий ZIP). JSON перезаписується з фінальною оцінкою,
-# щоб файл на диску був авторитетним джерелом, а не застарілим знімком.
+# Примітка: JSON і HTML перегенеровуються ПІСЛЯ export-етапів (нижче) лише
+# якщо ці етапи самі додали нові помилки в CollectionErrors (наприклад,
+# невдалий запис CSV) — тоді Health Score змінюється і файли на диску
+# перезаписуються, щоб бути авторитетним джерелом, а не застарілим знімком,
+# і щоб JSON та HTML не розсинхронізувались. Якщо нових помилок немає,
+# повторний (дорогий для HTML) експорт пропускається.
 
 try {
     $outputDir = Resolve-AuditOutputPath -RequestedPath $OutputPath -DefaultPath $ScriptDirectory
@@ -308,6 +300,8 @@ Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
 Write-Host ''
 Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
+$errorCountBeforeExport = @($script:Report.CollectionErrors).Count
+
 # JSON
 Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
@@ -317,10 +311,13 @@ Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOn
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
-# Фінальний перерахунок Health Score — враховує помилки з export-етапів вище,
-# після чого JSON перезаписується, щоб бути авторитетним джерелом для ZIP.
-Update-BravoHealthScore
-Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+# Перерахунок і повторний експорт — лише якщо export-етапи вище додали нові
+# помилки до CollectionErrors (вони впливають на Health Score).
+if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
+    Update-BravoHealthScore
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+}
 $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # ZIP

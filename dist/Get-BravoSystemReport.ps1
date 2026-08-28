@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-25 00:17:25
+    GeneratedAt: 2026-08-29 01:16:33
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -430,7 +430,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.5.1'
+    SchemaVersion = '0.5.2'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -478,8 +478,11 @@ return [ordered]@{
         Findings = @()
     }
     OS = [ordered]@{ Caption=''; Version=''; Build=''; Architecture=''; InstallDate=''; LastBootUpTime=''; UptimeDays=0; UptimeHours=0 }
-    PowerShell = [ordered]@{ Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString() }
-    DotNet = [ordered]@{ v4='Not Installed' }
+    PowerShell = [ordered]@{
+        Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString()
+        Core7Installed=$false; Core7Version=''; Core7LatestKnown='7.4'; Core7UpdateAvailable=$false
+    }
+    DotNet = [ordered]@{ v4='Not Installed'; ReleaseKey=0; LatestKnownVersion='4.8.1'; UpdateAvailable=$false }
     WindowsUpdate = [ordered]@{
         ServiceStatus = ''
         InstalledHotFixCount = 0
@@ -1524,17 +1527,19 @@ function Get-BravoWindowsUpdateAudit {
 
         $script:Report.WindowsUpdate.InstalledHotFixCount = @($hotFixes).Count
 
-        foreach ($hotFix in $hotFixes) {
+        # Накопичення через конвеєр замість += у циклі — уникає O(n^2)
+        # перевиділення масиву на кожній ітерації при великій історії hotfix'ів.
+        $script:Report.WindowsUpdate.InstalledHotFixes = @($hotFixes | ForEach-Object {
             $installedOn = ''
-            if ($hotFix.InstalledOn) { $installedOn = $hotFix.InstalledOn.ToString('yyyy-MM-dd') }
+            if ($_.InstalledOn) { $installedOn = $_.InstalledOn.ToString('yyyy-MM-dd') }
 
-            $script:Report.WindowsUpdate.InstalledHotFixes += [PSCustomObject]@{
-                HotFixID    = $hotFix.HotFixID
-                Description = $hotFix.Description
+            [PSCustomObject]@{
+                HotFixID    = $_.HotFixID
+                Description = $_.Description
                 InstalledOn = $installedOn
-                InstalledBy = $hotFix.InstalledBy
+                InstalledBy = $_.InstalledBy
             }
-        }
+        })
 
         $lastHotFix = $hotFixes | Where-Object { $_.InstalledOn } | Select-Object -First 1
         if ($lastHotFix) {
@@ -1599,26 +1604,32 @@ function Get-BravoWindowsUpdateAudit {
         $pendingCriticalCount = 0
         $pendingSecurityCount = 0
 
-        foreach ($update in $searchResult.Updates) {
-            $kbList = @()
-            foreach ($kbArticleId in $update.KBArticleIDs) { $kbList += "KB$kbArticleId" }
-
-            $categoryNames = @()
-            foreach ($updateCategory in $update.Categories) { $categoryNames += $updateCategory.Name }
+        # Накопичення через конвеєр замість += у циклі — уникає O(n^2)
+        # перевиділення масиву при великій кількості pending updates.
+        $script:Report.WindowsUpdate.PendingUpdates = @($searchResult.Updates | ForEach-Object {
+            $update = $_
+            $kbList = @($update.KBArticleIDs | ForEach-Object { "KB$_" })
+            $categoryNames = @($update.Categories | ForEach-Object { $_.Name })
 
             $severity = [string]$update.MsrcSeverity
             if ($severity -eq 'Critical') { $pendingCriticalCount++ }
             if (($categoryNames -join ' ') -match 'Security') { $pendingSecurityCount++ }
 
-            $script:Report.WindowsUpdate.PendingUpdates += [PSCustomObject]@{
+            $catalogUrl = ''
+            if ($kbList.Count -gt 0) {
+                $catalogUrl = "https://www.catalog.update.microsoft.com/Search.aspx?q=$([Uri]::EscapeDataString($kbList[0]))"
+            }
+
+            [PSCustomObject]@{
                 Title        = $update.Title
                 KB           = ($kbList -join ', ')
                 Severity     = $severity
                 Categories   = ($categoryNames -join ', ')
                 IsDownloaded = [bool]$update.IsDownloaded
                 SizeMB       = [Math]::Round($update.MaxDownloadSize / 1MB, 1)
+                CatalogUrl   = $catalogUrl
             }
-        }
+        })
 
         $script:Report.WindowsUpdate.PendingCount = @($script:Report.WindowsUpdate.PendingUpdates).Count
         $script:Report.WindowsUpdate.PendingCritical = $pendingCriticalCount
@@ -1637,6 +1648,99 @@ function Get-BravoWindowsUpdateAudit {
         $script:Report.WindowsUpdate.SearchError = $_.Exception.Message
         Add-AuditError -Section 'WindowsUpdate.Search' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка пошуку оновлень: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+
+# ============================================================
+# MODULE: src/39b-Collectors-Runtime.ps1
+# ============================================================
+
+# MODULE: 39b-Collectors-Runtime.ps1
+# Перевірка можливості оновлення .NET Framework (4.x) та PowerShell.
+# Працює повністю офлайн: "найновіша відома версія" — константи в коді,
+# без звернень в інтернет. Періодично варто оновлювати ці константи.
+
+function Get-BravoRuntimeAudit {
+    [CmdletBinding()]
+    param()
+
+    # --- .NET Framework 4.x ---
+    try {
+        $latestKnownReleaseKey = 533320 # .NET Framework 4.8.1
+        $script:Report.DotNet.LatestKnownVersion = '4.8.1'
+
+        if (Test-Path 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full') {
+            $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release
+
+            if ($release) {
+                $script:Report.DotNet.ReleaseKey = $release
+
+                if ($release -ge 533320) { $script:Report.DotNet.v4 = '4.8.1+' }
+                elseif ($release -ge 528040) { $script:Report.DotNet.v4 = '4.8' }
+                elseif ($release -ge 461808) { $script:Report.DotNet.v4 = '4.7.2+' }
+                else { $script:Report.DotNet.v4 = "Release $release" }
+
+                $script:Report.DotNet.UpdateAvailable = ($release -lt $latestKnownReleaseKey)
+
+                if ($script:Report.DotNet.UpdateAvailable) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'DotNet' -Message ".NET Framework застарів: $($script:Report.DotNet.v4) (найновіша відома версія: 4.8.1)" -Recommendation 'Встановіть .NET Framework 4.8.1 через Windows Update або офлайн-інсталятор.'
+                }
+            }
+        }
+
+        Write-Host "  $IconOk .NET Framework: $($script:Report.DotNet.v4)" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Runtime.DotNet' -Message $_.Exception.Message
+    }
+
+    # --- Windows PowerShell (Desktop edition) ---
+    try {
+        $psVersion = $PSVersionTable.PSVersion
+        $currentPSEdition = $PSVersionTable.PSEdition
+
+        if ($currentPSEdition -eq 'Desktop' -and $psVersion.Major -lt 5) {
+            Add-AuditFinding -Severity 'WARNING' -Category 'PowerShell' -Message "Застаріла версія Windows PowerShell: $psVersion" -Recommendation 'Оновіть до Windows PowerShell 5.1 (Windows Management Framework 5.1) — це остання версія Desktop-редакції.'
+        }
+    } catch {
+        Add-AuditError -Section 'Runtime.PowerShell' -Message $_.Exception.Message
+    }
+
+    # --- PowerShell 7 (Core), встановлений поруч ---
+    try {
+        $latestKnownCore7 = '7.4'
+        $script:Report.PowerShell.Core7LatestKnown = $latestKnownCore7
+
+        $core7InstallsPath = 'HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions'
+        if (Test-Path $core7InstallsPath) {
+            $core7Install = Get-ChildItem -LiteralPath $core7InstallsPath -ErrorAction SilentlyContinue |
+                ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue } |
+                Where-Object { $_.SemanticVersion } |
+                Sort-Object { [version]($_.SemanticVersion -replace '-.*$','') } -Descending |
+                Select-Object -First 1
+
+            if ($core7Install) {
+                $script:Report.PowerShell.Core7Installed = $true
+                $script:Report.PowerShell.Core7Version = $core7Install.SemanticVersion
+
+                $core7VersionParsed = [version]($core7Install.SemanticVersion -replace '-.*$','')
+                $latestKnownParsed = [version]$latestKnownCore7
+
+                if (($core7VersionParsed.Major -lt $latestKnownParsed.Major) -or
+                    ($core7VersionParsed.Major -eq $latestKnownParsed.Major -and $core7VersionParsed.Minor -lt $latestKnownParsed.Minor)) {
+                    $script:Report.PowerShell.Core7UpdateAvailable = $true
+                    Add-AuditFinding -Severity 'WARNING' -Category 'PowerShell' -Message "PowerShell 7 застарів: $($script:Report.PowerShell.Core7Version) (найновіша відома версія: $latestKnownCore7)" -Recommendation 'Оновіть PowerShell 7 через winget (winget upgrade Microsoft.PowerShell) або MSI з github.com/PowerShell/PowerShell.'
+                }
+            }
+        }
+
+        if (-not $script:Report.PowerShell.Core7Installed -and $PSVersionTable.PSEdition -eq 'Desktop' -and $PSVersionTable.PSVersion.Major -ge 5) {
+            Add-AuditFinding -Severity 'INFO' -Category 'PowerShell' -Message 'PowerShell 7 (Core) не встановлено' -Recommendation 'За потреби встановіть сучасний PowerShell 7 для розширеної функціональності та кросплатформної сумісності.'
+        }
+
+        Write-Host "  $IconOk PowerShell 7 (Core): $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'не встановлено'})" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Runtime.PowerShellCore' -Message $_.Exception.Message
     }
 }
 
@@ -1990,10 +2094,11 @@ function Export-BravoHtmlReport {
                         'Low'       { 'risk-ok' }
                         default     { 'risk-unknown' }
                     }
-                    "<tr><td>$(ConvertTo-BravoHtmlText $pendingUpdate.KB)</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Title)</td><td><span class=`"risk $severityClass`">$(ConvertTo-BravoHtmlText $severityText)</span></td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Categories)</td><td>$(if($pendingUpdate.IsDownloaded){'Так'}else{'Ні'})</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.SizeMB)</td></tr>"
+                    $catalogLinkHtml = if ([string]::IsNullOrWhiteSpace([string]$pendingUpdate.CatalogUrl)) { '' } else { "<a href=`"$(ConvertTo-BravoHtmlText $pendingUpdate.CatalogUrl)`" target=`"_blank`" rel=`"noopener noreferrer`">Catalog ↗</a>" }
+                    "<tr><td>$(ConvertTo-BravoHtmlText $pendingUpdate.KB)</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Title)</td><td><span class=`"risk $severityClass`">$(ConvertTo-BravoHtmlText $severityText)</span></td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Categories)</td><td>$(if($pendingUpdate.IsDownloaded){'Так'}else{'Ні'})</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.SizeMB)</td><td>$catalogLinkHtml</td></tr>"
                 }) -join "`n"
             } else {
-                '<tr><td colspan="6" class="muted">Відсутні оновлення не виявлені, пошук пропущено або завершився з помилкою (див. Search status).</td></tr>'
+                '<tr><td colspan="7" class="muted">Відсутні оновлення не виявлені, пошук пропущено або завершився з помилкою (див. Search status).</td></tr>'
             }
 
             $computerNameHtml = ConvertTo-BravoHtmlText $script:Report.ComputerName
@@ -2070,7 +2175,7 @@ function Export-BravoHtmlReport {
   </nav>
   <main class="content">
     <section id="tab-general" class="tab-panel active"><h2 class="tab-panel-title"><span class="section-icon">📌</span>General Dashboard</h2><div class="metrics-grid">$metricCardsHtml</div><div class="grid"><div class="card"><h3>Підсумок</h3>$(New-BravoInfoRowHtml 'Health Score' "$($script:Report.Health.Score)/100")$(New-BravoInfoRowHtml 'Status' $script:Report.Status)$(New-BravoInfoRowHtml 'Status reason' $script:Report.StatusReason)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)$(New-BravoInfoRowHtml 'Collection errors' $script:Report.CollectionErrors.Count)</div><div class="card"><h3>Ключова мережа</h3>$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div></div></section>
-    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Service' $script:Report.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Installed hotfixes' $script:Report.WindowsUpdate.InstalledHotFixCount)$(New-BravoInfoRowHtml 'Last hotfix' "$($script:Report.WindowsUpdate.LastInstalledHotFix) ($($script:Report.WindowsUpdate.LastInstallDate))")$(New-BravoInfoRowHtml 'Pending reboot' $(if($script:Report.WindowsUpdate.PendingRebootRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Pending updates' $script:Report.WindowsUpdate.PendingCount)$(New-BravoInfoRowHtml 'Pending critical / security' "$($script:Report.WindowsUpdate.PendingCritical) / $($script:Report.WindowsUpdate.PendingSecurity)")$(New-BravoInfoRowHtml 'Search status' $script:Report.WindowsUpdate.SearchStatus)</div></div><h3>Pending Windows Updates</h3>$(New-BravoTableToolbarHtml -TableId 'table-pending-updates' -Placeholder 'Пошук по KB, назві, severity...')<div class="table-scroll"><table id="table-pending-updates" class="data-table"><thead><tr><th>KB</th><th>Назва</th><th>Severity</th><th>Категорії</th><th>Завантажено</th><th>Size MB</th></tr></thead><tbody>$updatesPendingRows</tbody></table></div></section>
+    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml '.NET оновлення' $(if($script:Report.DotNet.UpdateAvailable){"Доступне (найновіша: $($script:Report.DotNet.LatestKnownVersion))"}else{'Немає'}))$(New-BravoInfoRowHtml 'PowerShell 7 (Core)' $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'Не встановлено'}))$(New-BravoInfoRowHtml 'PowerShell 7 оновлення' $(if($script:Report.PowerShell.Core7UpdateAvailable){"Доступне (найновіша: $($script:Report.PowerShell.Core7LatestKnown))"}else{'Немає'}))$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Service' $script:Report.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Installed hotfixes' $script:Report.WindowsUpdate.InstalledHotFixCount)$(New-BravoInfoRowHtml 'Last hotfix' "$($script:Report.WindowsUpdate.LastInstalledHotFix) ($($script:Report.WindowsUpdate.LastInstallDate))")$(New-BravoInfoRowHtml 'Pending reboot' $(if($script:Report.WindowsUpdate.PendingRebootRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Pending updates' $script:Report.WindowsUpdate.PendingCount)$(New-BravoInfoRowHtml 'Pending critical / security' "$($script:Report.WindowsUpdate.PendingCritical) / $($script:Report.WindowsUpdate.PendingSecurity)")$(New-BravoInfoRowHtml 'Search status' $script:Report.WindowsUpdate.SearchStatus)</div></div><h3>Pending Windows Updates</h3>$(New-BravoTableToolbarHtml -TableId 'table-pending-updates' -Placeholder 'Пошук по KB, назві, severity...')<div class="table-scroll"><table id="table-pending-updates" class="data-table"><thead><tr><th>KB</th><th>Назва</th><th>Severity</th><th>Категорії</th><th>Завантажено</th><th>Size MB</th><th>Посилання</th></tr></thead><tbody>$updatesPendingRows</tbody></table></div></section>
     <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.CPU.LoadPercent)%">$($script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.RAM.UsedPercent)%">$($script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.Disks.FreePercent)%">$($script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div></section>
     <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th></tr></thead><tbody>$adapterRows</tbody></table></div></section>
     <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div></div></section>
@@ -2593,18 +2698,8 @@ Get-BravoOperatingSystemAudit
 # --- Windows Update ---
 Get-BravoWindowsUpdateAudit
 
-# --- .NET ---
-try {
-    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full') {
-        $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release
-        if ($release -ge 533320) { $script:Report.DotNet.v4 = '4.8.1+' }
-        elseif ($release -ge 528040) { $script:Report.DotNet.v4 = '4.8' }
-        elseif ($release -ge 461808) { $script:Report.DotNet.v4 = '4.7.2+' }
-        elseif ($release) { $script:Report.DotNet.v4 = "Release $release" }
-    }
-} catch {
-    Add-AuditError -Section 'DotNet' -Message $_.Exception.Message
-}
+# --- .NET / PowerShell (перевірка можливості оновлення) ---
+Get-BravoRuntimeAudit
 
 # --- Апаратне забезпечення ---
 Get-BravoHardwareAudit
@@ -2646,10 +2741,12 @@ Update-BravoHealthScore
 # ============================================================
 # ЗБЕРЕЖЕННЯ ЗВІТІВ
 # ============================================================
-# Примітка: Health Score рахується ще раз ПІСЛЯ export-етапів (нижче),
-# бо самі export-функції можуть додати помилки в CollectionErrors
-# (наприклад, невдалий ZIP). JSON перезаписується з фінальною оцінкою,
-# щоб файл на диску був авторитетним джерелом, а не застарілим знімком.
+# Примітка: JSON і HTML перегенеровуються ПІСЛЯ export-етапів (нижче) лише
+# якщо ці етапи самі додали нові помилки в CollectionErrors (наприклад,
+# невдалий запис CSV) — тоді Health Score змінюється і файли на диску
+# перезаписуються, щоб бути авторитетним джерелом, а не застарілим знімком,
+# і щоб JSON та HTML не розсинхронізувались. Якщо нових помилок немає,
+# повторний (дорогий для HTML) експорт пропускається.
 
 try {
     $outputDir = Resolve-AuditOutputPath -RequestedPath $OutputPath -DefaultPath $ScriptDirectory
@@ -2666,6 +2763,8 @@ Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
 Write-Host ''
 Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
+$errorCountBeforeExport = @($script:Report.CollectionErrors).Count
+
 # JSON
 Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
@@ -2675,10 +2774,13 @@ Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOn
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
-# Фінальний перерахунок Health Score — враховує помилки з export-етапів вище,
-# після чого JSON перезаписується, щоб бути авторитетним джерелом для ZIP.
-Update-BravoHealthScore
-Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+# Перерахунок і повторний експорт — лише якщо export-етапи вище додали нові
+# помилки до CollectionErrors (вони впливають на Health Score).
+if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
+    Update-BravoHealthScore
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+}
 $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # ZIP
