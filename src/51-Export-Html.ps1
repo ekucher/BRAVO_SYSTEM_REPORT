@@ -263,7 +263,10 @@ function Export-BravoHtmlReport {
                         'Low'       { 'risk-ok' }
                         default     { 'risk-unknown' }
                     }
-                    $catalogLinkHtml = if ([string]::IsNullOrWhiteSpace([string]$pendingUpdate.CatalogUrl)) { '' } else { "<a href=`"$(ConvertTo-BravoHtmlText $pendingUpdate.CatalogUrl)`" target=`"_blank`" rel=`"noopener noreferrer`">Catalog ↗</a>" }
+                    # Allow-list схеми перед вставкою в href: HTML-encode сам собою
+                    # не блокує javascript:/data:-URI, лише екранує спецсимволи.
+                    $catalogUrlValue = [string]$pendingUpdate.CatalogUrl
+                    $catalogLinkHtml = if ([string]::IsNullOrWhiteSpace($catalogUrlValue) -or $catalogUrlValue -notmatch '^https://') { '' } else { "<a href=`"$(ConvertTo-BravoHtmlText $catalogUrlValue)`" target=`"_blank`" rel=`"noopener noreferrer`">Catalog ↗</a>" }
                     "<tr><td>$(ConvertTo-BravoHtmlText $pendingUpdate.KB)</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Title)</td><td><span class=`"risk $severityClass`">$(ConvertTo-BravoHtmlText $severityText)</span></td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Categories)</td><td>$(if($pendingUpdate.IsDownloaded){'Так'}else{'Ні'})</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.SizeMB)</td><td>$catalogLinkHtml</td></tr>"
                 }) -join "`n"
             } else {
@@ -280,8 +283,6 @@ function Export-BravoHtmlReport {
             $primaryIpv4Html = ConvertTo-BravoHtmlText $script:Report.Network.IP.PrimaryIPv4
             $publicIpv4StatusForReport = if (-not [string]::IsNullOrWhiteSpace([string]$script:Report.Network.IP.PublicIPv4)) {
                 [string]$script:Report.Network.IP.PublicIPv4
-            } elseif (-not [string]::IsNullOrWhiteSpace([string]$script:Report.Network.PublicIPv4)) {
-                [string]$script:Report.Network.PublicIPv4
             } else {
                 [string]$script:Report.Network.IP.PublicIPv4Status
             }
@@ -352,7 +353,7 @@ function Export-BravoHtmlReport {
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>
     <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div></section>
   </main>
-  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $OutputDir</p></footer>
+  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $(ConvertTo-BravoHtmlText $OutputDir)</p></footer>
 </div>
 <script>
 (function(){

@@ -7,18 +7,30 @@ function Get-BravoSecurityAudit {
 
     # --- Безпека ---
     try {
+        # Важливо: WARNING/INFO-знахідки нижче генеруються лише якщо ключ реєстру
+        # реально вдалось прочитати. Якщо $uac/$rdp -eq $null (немає прав, GPO,
+        # Server Core), стан невідомий — це НЕ те саме, що "підтверджено вимкнено",
+        # і не повинно ставати хибним WARNING на дефолтному значенні моделі.
         $uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
-        if ($uac) { $script:Report.Security.UAC.Enabled = ($uac.EnableLUA -eq 1) }
+        if ($uac) {
+            $script:Report.Security.UAC.Enabled = ($uac.EnableLUA -eq 1)
 
-        if (-not $script:Report.Security.UAC.Enabled) {
-            Add-AuditFinding -Severity 'WARNING' -Category 'Security' -Message 'UAC вимкнено.' -Recommendation 'Увімкніть UAC, якщо немає обґрунтованого винятку.'
+            if (-not $script:Report.Security.UAC.Enabled) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Security' -Message 'UAC вимкнено.' -Recommendation 'Увімкніть UAC, якщо немає обґрунтованого винятку.'
+            }
+        } else {
+            Add-AuditError -Section 'Security.UAC' -Message 'Не вдалося прочитати ключ реєстру EnableLUA — стан UAC невідомий.'
         }
 
         $rdp = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -ErrorAction SilentlyContinue
-        if ($rdp) { $script:Report.Security.RemoteAccess.RDPEnabled = ($rdp.fDenyTSConnections -eq 0) }
+        if ($rdp) {
+            $script:Report.Security.RemoteAccess.RDPEnabled = ($rdp.fDenyTSConnections -eq 0)
 
-        if ($script:Report.Security.RemoteAccess.RDPEnabled) {
-            Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Перевірте NLA, firewall scope і список дозволених користувачів.'
+            if ($script:Report.Security.RemoteAccess.RDPEnabled) {
+                Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Перевірте NLA, firewall scope і список дозволених користувачів.'
+            }
+        } else {
+            Add-AuditError -Section 'Security.RemoteAccess' -Message 'Не вдалося прочитати ключ реєстру fDenyTSConnections — стан RDP невідомий.'
         }
 
         try {

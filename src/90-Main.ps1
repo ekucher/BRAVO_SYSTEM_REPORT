@@ -166,6 +166,10 @@ if ($EventLogDays -le 0) {
     }
 }
 
+# -NoZip явно вимикає ZIP (переопределяє default=$true у -Zip). Див. коментар
+# нижче біля forwarding у $arguments — CLI не підтримує -Zip:$false напряму.
+if ($NoZip) { $Zip = $false }
+
 $ScriptDirectory = Get-ScriptDirectory
 
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -183,7 +187,13 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($OutputPath) { $arguments += "-OutputPath `"$OutputPath`"" }
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
-        if ($Zip) { $arguments += '-Zip' }
+        # $Zip не форвардиться напряму: powershell.exe -File не підтримує
+        # синтаксис -Zip:$false для switch-параметрів з рядка команди (це
+        # PowerShell-мовна конструкція, а не CLI-конвенція — перевірено
+        # емпірично, дає ParameterArgumentTransformationError). Тому вимкнення
+        # ZIP форвардиться через окремий default-false switch -NoZip, за тим
+        # самим патерном, що й -NoPause/-NoEmoji/-NoOpenFolder нижче.
+        if ($NoZip) { $arguments += '-NoZip' }
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
@@ -311,13 +321,6 @@ Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOn
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
-# Перерахунок і повторний експорт — лише якщо export-етапи вище додали нові
-# помилки до CollectionErrors (вони впливають на Health Score).
-if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
-    Update-BravoHealthScore
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
-    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
-}
 $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # ZIP
@@ -325,6 +328,27 @@ Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zi
 
 # Email
 Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+
+# Перерахунок і повторний експорт — лише якщо ЯКИЙСЬ з export-етапів вище
+# (JSON/HTML/CSV/ZIP/Email) додав нові помилки до CollectionErrors (вони
+# впливають на Health Score). Перевірка навмисно стоїть ПІСЛЯ ZIP/Email, а не
+# одразу після CSV — інакше помилки саме ZIP/Email-етапів (наприклад,
+# заблокований антивірусом файл, невдалий SMTP) ніколи не потрапляли б у
+# збережені JSON/HTML, і Health Score на диску розходився б з реальним станом.
+if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
+    Update-BravoHealthScore
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+
+    # ZIP пакує вже наявні файли на диску (Export-BravoZipReport читає
+    # GeneratedFiles) — якщо він уже відпрацював вище, його треба перезібрати,
+    # інакше архів міститиме застарілі JSON/HTML з дореозрахунковим Score.
+    if ($Zip) {
+        $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+        Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    }
+}
+$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)

@@ -69,7 +69,7 @@ function Get-BravoRuntimeAudit {
 
     # --- PowerShell 7 (Core), встановлений поруч ---
     try {
-        $latestKnownCore7 = '7.4'
+        $latestKnownCore7 = '7.6' # оновлено 2026-08, звірити при наступному ревю
         $script:Report.PowerShell.Core7LatestKnown = $latestKnownCore7
 
         $core7InstallsPath = 'HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions'

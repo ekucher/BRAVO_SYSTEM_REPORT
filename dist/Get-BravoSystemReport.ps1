@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-29 01:46:21
+    GeneratedAt: 2026-08-29 02:08:24
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -33,6 +33,7 @@ param(
     [switch]$JSONOnly,
     [switch]$CSV,
     [switch]$Zip = $true,
+    [switch]$NoZip,
     [switch]$NoEmoji,
     [switch]$NoElevate,
     [switch]$NoPause,
@@ -617,7 +618,16 @@ function Get-BravoHardwareAudit {
         $script:Report.Hardware.CPU.Cores = $cpuInfo.NumberOfCores
         $script:Report.Hardware.CPU.LogicalProcessors = $cpuInfo.NumberOfLogicalProcessors
         $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
-        $script:Report.Hardware.CPU.LoadPercent = [Math]::Round(($cpuInfo.LoadPercentage | Measure-Object -Average).Average)
+
+        # LoadPercentage — опціональна властивість WMI, на частині VM (особливо
+        # одразу після старту) повертає $null. [Math]::Round($null) мовчки стає 0,
+        # що виглядає як "0% навантаження", хоча реальне значення невідоме.
+        $cpuLoadAverage = ($cpuInfo.LoadPercentage | Measure-Object -Average).Average
+        if ($null -ne $cpuLoadAverage) {
+            $script:Report.Hardware.CPU.LoadPercent = [Math]::Round($cpuLoadAverage)
+        } else {
+            Add-AuditError -Section 'Hardware.CPU' -Message 'Win32_Processor.LoadPercentage не повернув значення — навантаження CPU невідоме (показано 0 за замовчуванням).'
+        }
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
         $script:Report.Hardware.RAM.TotalGB = $totalPhysicalMemoryGB
@@ -1231,18 +1241,30 @@ function Get-BravoSecurityAudit {
 
     # --- Безпека ---
     try {
+        # Важливо: WARNING/INFO-знахідки нижче генеруються лише якщо ключ реєстру
+        # реально вдалось прочитати. Якщо $uac/$rdp -eq $null (немає прав, GPO,
+        # Server Core), стан невідомий — це НЕ те саме, що "підтверджено вимкнено",
+        # і не повинно ставати хибним WARNING на дефолтному значенні моделі.
         $uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
-        if ($uac) { $script:Report.Security.UAC.Enabled = ($uac.EnableLUA -eq 1) }
+        if ($uac) {
+            $script:Report.Security.UAC.Enabled = ($uac.EnableLUA -eq 1)
 
-        if (-not $script:Report.Security.UAC.Enabled) {
-            Add-AuditFinding -Severity 'WARNING' -Category 'Security' -Message 'UAC вимкнено.' -Recommendation 'Увімкніть UAC, якщо немає обґрунтованого винятку.'
+            if (-not $script:Report.Security.UAC.Enabled) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Security' -Message 'UAC вимкнено.' -Recommendation 'Увімкніть UAC, якщо немає обґрунтованого винятку.'
+            }
+        } else {
+            Add-AuditError -Section 'Security.UAC' -Message 'Не вдалося прочитати ключ реєстру EnableLUA — стан UAC невідомий.'
         }
 
         $rdp = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -ErrorAction SilentlyContinue
-        if ($rdp) { $script:Report.Security.RemoteAccess.RDPEnabled = ($rdp.fDenyTSConnections -eq 0) }
+        if ($rdp) {
+            $script:Report.Security.RemoteAccess.RDPEnabled = ($rdp.fDenyTSConnections -eq 0)
 
-        if ($script:Report.Security.RemoteAccess.RDPEnabled) {
-            Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Перевірте NLA, firewall scope і список дозволених користувачів.'
+            if ($script:Report.Security.RemoteAccess.RDPEnabled) {
+                Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Перевірте NLA, firewall scope і список дозволених користувачів.'
+            }
+        } else {
+            Add-AuditError -Section 'Security.RemoteAccess' -Message 'Не вдалося прочитати ключ реєстру fDenyTSConnections — стан RDP невідомий.'
         }
 
         try {
@@ -1418,10 +1440,23 @@ function Get-BravoEventLogsAudit {
         $lastDay = (Get-Date).AddDays(-1)
         $eventLogStart = (Get-Date).AddDays(-1 * $EventLogDays)
 
-        $systemErrors24h = Get-EventLog -LogName System -EntryType Error -After $lastDay -ErrorAction SilentlyContinue
-        $systemWarnings24h = Get-EventLog -LogName System -EntryType Warning -After $lastDay -ErrorAction SilentlyContinue
-        $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue
-        $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue
+        # -ErrorAction SilentlyContinue сам собою нічого не пише в CollectionErrors.
+        # "No matches found" — очікуваний benign-результат, коли за період справді
+        # немає жодного запису (не помилка збору). Будь-яка ІНША помилка
+        # (лог очищено/недоступний, немає прав) реєструється явно, щоб
+        # SystemErrors=0 не видавали себе за "перевірено й чисто", коли збір
+        # насправді провалився.
+        $eventLogErrors = @()
+        $systemErrors24h = Get-EventLog -LogName System -EntryType Error -After $lastDay -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+        $systemWarnings24h = Get-EventLog -LogName System -EntryType Warning -After $lastDay -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+        $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+        $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+
+        foreach ($eventLogError in $eventLogErrors) {
+            if ($eventLogError.Exception.Message -notmatch 'No matches found') {
+                Add-AuditError -Section 'EventLogs.System' -Message $eventLogError.Exception.Message
+            }
+        }
 
         $script:Report.EventLogs.SystemErrors24h = @($systemErrors24h).Count
         $script:Report.EventLogs.SystemWarnings24h = @($systemWarnings24h).Count
@@ -1727,7 +1762,7 @@ function Get-BravoRuntimeAudit {
 
     # --- PowerShell 7 (Core), встановлений поруч ---
     try {
-        $latestKnownCore7 = '7.4'
+        $latestKnownCore7 = '7.6' # оновлено 2026-08, звірити при наступному ревю
         $script:Report.PowerShell.Core7LatestKnown = $latestKnownCore7
 
         $core7InstallsPath = 'HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions'
@@ -1798,7 +1833,16 @@ function Update-BravoHealthScore {
             $script:Report.Dashboard.Header.GeneratedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 
             if ($script:Report.Hardware -and $script:Report.Hardware.Disks) {
-                $diskStatus = if ($script:Report.Hardware.Disks.FreePercent -lt 10) { 'CRITICAL' } elseif ($script:Report.Hardware.Disks.FreePercent -lt 20) { 'WARNING' } else { 'OK' }
+                # Статус dashboard-плитки рахуємо по НАЙГІРШОМУ тому (тим самим
+                # порогом 10/20%, що й per-volume findings у 32-Collectors-Storage.ps1),
+                # а не по агрегованому FreePercent по всіх дисках разом. Інакше
+                # один майже заповнений диск ховається за великим вільним місцем
+                # на інших, і dashboard показує "OK" одночасно з CRITICAL-знахідкою
+                # для того самого тому.
+                $volumeFreePercents = @($script:Report.Hardware.Disks.Volumes | Where-Object { $null -ne $_.FreePercent } | ForEach-Object { $_.FreePercent })
+                $worstFreePercent = if ($volumeFreePercents.Count -gt 0) { ($volumeFreePercents | Measure-Object -Minimum).Minimum } else { $script:Report.Hardware.Disks.FreePercent }
+
+                $diskStatus = if ($worstFreePercent -lt 10) { 'CRITICAL' } elseif ($worstFreePercent -lt 20) { 'WARNING' } else { 'OK' }
                 $script:Report.Dashboard.Metrics.Disk.Value = "$($script:Report.Hardware.Disks.FreePercent)% free"
                 $script:Report.Dashboard.Metrics.Disk.Details = "$($script:Report.Hardware.Disks.FreeGB) GB free з $($script:Report.Hardware.Disks.TotalGB) GB"
                 $script:Report.Dashboard.Metrics.Disk.Status = $diskStatus
@@ -1834,7 +1878,12 @@ function Export-BravoJsonReport {
     # JSON
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
-        ConvertTo-Json $script:Report -Depth 12 | Out-File $jsonPath -Encoding utf8
+        $jsonContent = ConvertTo-Json $script:Report -Depth 12
+        # Out-File -Encoding utf8 у Windows PowerShell 5.1 завжди додає BOM,
+        # що ламає суворі JSON-парсери (RFC 8259 не допускає BOM) у зовнішніх
+        # CI/monitoring-пайплайнах, які читають цей файл. Пишемо через
+        # .NET напряму з UTF8Encoding($false) — без BOM.
+        [System.IO.File]::WriteAllText($jsonPath, $jsonContent, (New-Object System.Text.UTF8Encoding($false)))
         $script:Report.GeneratedFiles += $jsonPath
         Write-Host "  $IconJson JSON: $BaseFileName.json" -ForegroundColor Green
     } catch {
@@ -2113,7 +2162,10 @@ function Export-BravoHtmlReport {
                         'Low'       { 'risk-ok' }
                         default     { 'risk-unknown' }
                     }
-                    $catalogLinkHtml = if ([string]::IsNullOrWhiteSpace([string]$pendingUpdate.CatalogUrl)) { '' } else { "<a href=`"$(ConvertTo-BravoHtmlText $pendingUpdate.CatalogUrl)`" target=`"_blank`" rel=`"noopener noreferrer`">Catalog ↗</a>" }
+                    # Allow-list схеми перед вставкою в href: HTML-encode сам собою
+                    # не блокує javascript:/data:-URI, лише екранує спецсимволи.
+                    $catalogUrlValue = [string]$pendingUpdate.CatalogUrl
+                    $catalogLinkHtml = if ([string]::IsNullOrWhiteSpace($catalogUrlValue) -or $catalogUrlValue -notmatch '^https://') { '' } else { "<a href=`"$(ConvertTo-BravoHtmlText $catalogUrlValue)`" target=`"_blank`" rel=`"noopener noreferrer`">Catalog ↗</a>" }
                     "<tr><td>$(ConvertTo-BravoHtmlText $pendingUpdate.KB)</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Title)</td><td><span class=`"risk $severityClass`">$(ConvertTo-BravoHtmlText $severityText)</span></td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Categories)</td><td>$(if($pendingUpdate.IsDownloaded){'Так'}else{'Ні'})</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.SizeMB)</td><td>$catalogLinkHtml</td></tr>"
                 }) -join "`n"
             } else {
@@ -2130,8 +2182,6 @@ function Export-BravoHtmlReport {
             $primaryIpv4Html = ConvertTo-BravoHtmlText $script:Report.Network.IP.PrimaryIPv4
             $publicIpv4StatusForReport = if (-not [string]::IsNullOrWhiteSpace([string]$script:Report.Network.IP.PublicIPv4)) {
                 [string]$script:Report.Network.IP.PublicIPv4
-            } elseif (-not [string]::IsNullOrWhiteSpace([string]$script:Report.Network.PublicIPv4)) {
-                [string]$script:Report.Network.PublicIPv4
             } else {
                 [string]$script:Report.Network.IP.PublicIPv4Status
             }
@@ -2202,7 +2252,7 @@ function Export-BravoHtmlReport {
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>
     <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div></section>
   </main>
-  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $OutputDir</p></footer>
+  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $(ConvertTo-BravoHtmlText $OutputDir)</p></footer>
 </div>
 <script>
 (function(){
@@ -2648,6 +2698,10 @@ if ($EventLogDays -le 0) {
     }
 }
 
+# -NoZip явно вимикає ZIP (переопределяє default=$true у -Zip). Див. коментар
+# нижче біля forwarding у $arguments — CLI не підтримує -Zip:$false напряму.
+if ($NoZip) { $Zip = $false }
+
 $ScriptDirectory = Get-ScriptDirectory
 
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -2665,7 +2719,13 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($OutputPath) { $arguments += "-OutputPath `"$OutputPath`"" }
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
-        if ($Zip) { $arguments += '-Zip' }
+        # $Zip не форвардиться напряму: powershell.exe -File не підтримує
+        # синтаксис -Zip:$false для switch-параметрів з рядка команди (це
+        # PowerShell-мовна конструкція, а не CLI-конвенція — перевірено
+        # емпірично, дає ParameterArgumentTransformationError). Тому вимкнення
+        # ZIP форвардиться через окремий default-false switch -NoZip, за тим
+        # самим патерном, що й -NoPause/-NoEmoji/-NoOpenFolder нижче.
+        if ($NoZip) { $arguments += '-NoZip' }
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
@@ -2793,13 +2853,6 @@ Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOn
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
-# Перерахунок і повторний експорт — лише якщо export-етапи вище додали нові
-# помилки до CollectionErrors (вони впливають на Health Score).
-if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
-    Update-BravoHealthScore
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
-    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
-}
 $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # ZIP
@@ -2807,6 +2860,27 @@ Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zi
 
 # Email
 Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+
+# Перерахунок і повторний експорт — лише якщо ЯКИЙСЬ з export-етапів вище
+# (JSON/HTML/CSV/ZIP/Email) додав нові помилки до CollectionErrors (вони
+# впливають на Health Score). Перевірка навмисно стоїть ПІСЛЯ ZIP/Email, а не
+# одразу після CSV — інакше помилки саме ZIP/Email-етапів (наприклад,
+# заблокований антивірусом файл, невдалий SMTP) ніколи не потрапляли б у
+# збережені JSON/HTML, і Health Score на диску розходився б з реальним станом.
+if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
+    Update-BravoHealthScore
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+
+    # ZIP пакує вже наявні файли на диску (Export-BravoZipReport читає
+    # GeneratedFiles) — якщо він уже відпрацював вище, його треба перезібрати,
+    # інакше архів міститиме застарілі JSON/HTML з дореозрахунковим Score.
+    if ($Zip) {
+        $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+        Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    }
+}
+$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)

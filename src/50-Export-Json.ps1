@@ -16,7 +16,12 @@ function Export-BravoJsonReport {
     # JSON
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
-        ConvertTo-Json $script:Report -Depth 12 | Out-File $jsonPath -Encoding utf8
+        $jsonContent = ConvertTo-Json $script:Report -Depth 12
+        # Out-File -Encoding utf8 у Windows PowerShell 5.1 завжди додає BOM,
+        # що ламає суворі JSON-парсери (RFC 8259 не допускає BOM) у зовнішніх
+        # CI/monitoring-пайплайнах, які читають цей файл. Пишемо через
+        # .NET напряму з UTF8Encoding($false) — без BOM.
+        [System.IO.File]::WriteAllText($jsonPath, $jsonContent, (New-Object System.Text.UTF8Encoding($false)))
         $script:Report.GeneratedFiles += $jsonPath
         Write-Host "  $IconJson JSON: $BaseFileName.json" -ForegroundColor Green
     } catch {

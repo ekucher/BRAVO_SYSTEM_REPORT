@@ -1,4 +1,4 @@
-# MODULE: 31-Collectors-Hardware.ps1
+﻿# MODULE: 31-Collectors-Hardware.ps1
 # Збір базової інформації про апаратне забезпечення.
 
 function Get-BravoHardwareAudit {
@@ -20,7 +20,16 @@ function Get-BravoHardwareAudit {
         $script:Report.Hardware.CPU.Cores = $cpuInfo.NumberOfCores
         $script:Report.Hardware.CPU.LogicalProcessors = $cpuInfo.NumberOfLogicalProcessors
         $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
-        $script:Report.Hardware.CPU.LoadPercent = [Math]::Round(($cpuInfo.LoadPercentage | Measure-Object -Average).Average)
+
+        # LoadPercentage — опціональна властивість WMI, на частині VM (особливо
+        # одразу після старту) повертає $null. [Math]::Round($null) мовчки стає 0,
+        # що виглядає як "0% навантаження", хоча реальне значення невідоме.
+        $cpuLoadAverage = ($cpuInfo.LoadPercentage | Measure-Object -Average).Average
+        if ($null -ne $cpuLoadAverage) {
+            $script:Report.Hardware.CPU.LoadPercent = [Math]::Round($cpuLoadAverage)
+        } else {
+            Add-AuditError -Section 'Hardware.CPU' -Message 'Win32_Processor.LoadPercentage не повернув значення — навантаження CPU невідоме (показано 0 за замовчуванням).'
+        }
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
         $script:Report.Hardware.RAM.TotalGB = $totalPhysicalMemoryGB
