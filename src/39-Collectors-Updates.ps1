@@ -107,10 +107,18 @@ function Get-BravoWindowsUpdateAudit {
             $update = $_
             $kbList = @($update.KBArticleIDs | ForEach-Object { "KB$_" })
             $categoryNames = @($update.Categories | ForEach-Object { $_.Name })
+            # CategoryID — стабільний, локале-незалежний GUID від WUA API.
+            # $_.Name — локалізована назва категорії ("Security Updates" /
+            # "Оновлення для системи безпеки" / інше на не-EN Windows),
+            # тож звірка з англійським літералом "Security" (як робилося
+            # раніше) на локалізованих ОС завжди провалювалась би.
+            # 0FA1201D-4330-4FA8-8AE9-B877473B6441 = офіційний WUA CategoryID
+            # для "Security Updates" (постійний, документований Microsoft).
+            $categoryIds = @($update.Categories | ForEach-Object { $_.CategoryID })
 
             $severity = [string]$update.MsrcSeverity
             if ($severity -eq 'Critical') { $pendingCriticalCount++ }
-            if (($categoryNames -join ' ') -match 'Security') { $pendingSecurityCount++ }
+            if ($categoryIds -contains '0fa1201d-4330-4fa8-8ae9-b877473b6441') { $pendingSecurityCount++ }
 
             $catalogUrl = ''
             if ($kbList.Count -gt 0) {

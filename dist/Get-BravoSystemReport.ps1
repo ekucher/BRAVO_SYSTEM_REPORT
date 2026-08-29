@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-29 03:13:22
+    GeneratedAt: 2026-08-29 03:27:12
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1346,14 +1346,27 @@ function Get-LocalAdministratorsSafe {
     try {
         $raw = net localgroup "$adminGroupName" 2>$null
         if ($raw) {
+            # Завершальний рядок "The command completed successfully." (net.exe)
+            # локалізується разом з MUI-пакетом Windows — раніше тут матчився
+            # текст лише для en/uk, на інших локалях (ru/de/pl/...) фальшивий
+            # службовий рядок потрапляв у список адмінів. net localgroup
+            # структурно ЗАВЖДИ завершує вивід рівно одним таким рядком
+            # одразу після переліку членів, тому замість тексту-матчингу
+            # просто відкидаємо останній непорожній рядок після роздільника
+            # "----" — це локале-незалежно.
             $capture = $false
+            $capturedLines = New-Object System.Collections.Generic.List[string]
             foreach ($line in $raw) {
                 $text = ($line | Out-String).Trim()
                 if (-not $text) { continue }
                 if ($text -match '^-{3,}$') { $capture = $true; continue }
-                if ($text -match 'command completed|Команда виконана|completed successfully') { break }
-                if ($capture) { $members += $text }
+                if ($capture) { $capturedLines.Add($text) }
             }
+            if ($capturedLines.Count -gt 0) {
+                # Останній рядок — завжди статус-повідомлення net.exe, не ім'я.
+                $capturedLines.RemoveAt($capturedLines.Count - 1)
+            }
+            $members = @($capturedLines)
         }
     } catch {
         Add-AuditError -Section 'Users.LocalAdmins.NetLocalGroup' -Message $_.Exception.Message
@@ -1391,9 +1404,33 @@ function Get-BravoProcessesServicesAudit {
         $processInfo = Get-Process -ErrorAction Stop
         $script:Report.Processes.Total = $processInfo.Count
         if ($Profile -in @('Full','Deep','Forensic')) {
-            $script:Report.Processes.TopMemory = $processInfo |
-                Sort-Object -Property WorkingSet64 -Descending |
-                Select-Object -First 10 @{Name='ProcessName';Expression={$_.ProcessName}}, Id, @{Name='MemoryMB';Expression={[Math]::Round($_.WorkingSet64 / 1MB, 2)}}
+            try {
+                # WorkingSet64 обчислюється лениво при першому зверненні (потребує
+                # handle до процесу), а не кешується в момент Get-Process — якщо
+                # короткоживучий процес завершується між Get-Process і Sort-Object,
+                # звернення до .WorkingSet64 усередині сортування кидає виняток
+                # "process has exited" і валить весь TopMemory разом з рештою
+                # процесів. Тому знімаємо WorkingSet64 у власному try/catch на
+                # кожен процес окремо — процес, що встиг завершитись, просто
+                # пропускається, решта топ-10 все одно рахується.
+                $processSnapshot = New-Object System.Collections.Generic.List[object]
+                foreach ($proc in $processInfo) {
+                    try {
+                        $processSnapshot.Add([PSCustomObject]@{
+                            ProcessName = $proc.ProcessName
+                            Id          = $proc.Id
+                            MemoryMB    = [Math]::Round($proc.WorkingSet64 / 1MB, 2)
+                        })
+                    } catch {
+                        # Свідомо ігноруємо: процес завершився між Get-Process і
+                        # зверненням до WorkingSet64 — не переривляємо збір топ-10
+                        # через один короткоживучий процес.
+                    }
+                }
+                $script:Report.Processes.TopMemory = @($processSnapshot | Sort-Object -Property MemoryMB -Descending | Select-Object -First 10)
+            } catch {
+                Add-AuditError -Section 'Processes.TopMemory' -Message $_.Exception.Message
+            }
         }
         Write-Host "  $IconService Процеси: $($script:Report.Processes.Total)" -ForegroundColor Green
     } catch {
@@ -1664,10 +1701,18 @@ function Get-BravoWindowsUpdateAudit {
             $update = $_
             $kbList = @($update.KBArticleIDs | ForEach-Object { "KB$_" })
             $categoryNames = @($update.Categories | ForEach-Object { $_.Name })
+            # CategoryID — стабільний, локале-незалежний GUID від WUA API.
+            # $_.Name — локалізована назва категорії ("Security Updates" /
+            # "Оновлення для системи безпеки" / інше на не-EN Windows),
+            # тож звірка з англійським літералом "Security" (як робилося
+            # раніше) на локалізованих ОС завжди провалювалась би.
+            # 0FA1201D-4330-4FA8-8AE9-B877473B6441 = офіційний WUA CategoryID
+            # для "Security Updates" (постійний, документований Microsoft).
+            $categoryIds = @($update.Categories | ForEach-Object { $_.CategoryID })
 
             $severity = [string]$update.MsrcSeverity
             if ($severity -eq 'Critical') { $pendingCriticalCount++ }
-            if (($categoryNames -join ' ') -match 'Security') { $pendingSecurityCount++ }
+            if ($categoryIds -contains '0fa1201d-4330-4fa8-8ae9-b877473b6441') { $pendingSecurityCount++ }
 
             $catalogUrl = ''
             if ($kbList.Count -gt 0) {

@@ -10,9 +10,33 @@ function Get-BravoProcessesServicesAudit {
         $processInfo = Get-Process -ErrorAction Stop
         $script:Report.Processes.Total = $processInfo.Count
         if ($Profile -in @('Full','Deep','Forensic')) {
-            $script:Report.Processes.TopMemory = $processInfo |
-                Sort-Object -Property WorkingSet64 -Descending |
-                Select-Object -First 10 @{Name='ProcessName';Expression={$_.ProcessName}}, Id, @{Name='MemoryMB';Expression={[Math]::Round($_.WorkingSet64 / 1MB, 2)}}
+            try {
+                # WorkingSet64 обчислюється лениво при першому зверненні (потребує
+                # handle до процесу), а не кешується в момент Get-Process — якщо
+                # короткоживучий процес завершується між Get-Process і Sort-Object,
+                # звернення до .WorkingSet64 усередині сортування кидає виняток
+                # "process has exited" і валить весь TopMemory разом з рештою
+                # процесів. Тому знімаємо WorkingSet64 у власному try/catch на
+                # кожен процес окремо — процес, що встиг завершитись, просто
+                # пропускається, решта топ-10 все одно рахується.
+                $processSnapshot = New-Object System.Collections.Generic.List[object]
+                foreach ($proc in $processInfo) {
+                    try {
+                        $processSnapshot.Add([PSCustomObject]@{
+                            ProcessName = $proc.ProcessName
+                            Id          = $proc.Id
+                            MemoryMB    = [Math]::Round($proc.WorkingSet64 / 1MB, 2)
+                        })
+                    } catch {
+                        # Свідомо ігноруємо: процес завершився між Get-Process і
+                        # зверненням до WorkingSet64 — не переривляємо збір топ-10
+                        # через один короткоживучий процес.
+                    }
+                }
+                $script:Report.Processes.TopMemory = @($processSnapshot | Sort-Object -Property MemoryMB -Descending | Select-Object -First 10)
+            } catch {
+                Add-AuditError -Section 'Processes.TopMemory' -Message $_.Exception.Message
+            }
         }
         Write-Host "  $IconService Процеси: $($script:Report.Processes.Total)" -ForegroundColor Green
     } catch {
