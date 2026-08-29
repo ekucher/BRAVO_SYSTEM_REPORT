@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - developer
       - bravo/integration/modular-build
   workflow_dispatch:
 
