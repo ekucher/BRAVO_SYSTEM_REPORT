@@ -23,7 +23,7 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 
 ## Поточний статус
 
-Поточна стабільна версія: **ScriptVersion 0.4.1** (контракт JSON-звіту: **SchemaVersion 0.5.2**).
+Поточна стабільна версія: **ScriptVersion 0.5.0** (контракт JSON-звіту: **SchemaVersion 0.6.0**).
 
 `ScriptVersion` версіонує реліз інструмента (`src/90-Main.ps1`), `SchemaVersion` — структуру JSON-контракту (`src/20-ReportModel.ps1`); вони змінюються незалежно.
 
@@ -36,7 +36,8 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - **v0.3.4** — виправлено BAT `--nopause`;
 - **v0.3.5** — актуалізація README / документації;
 - **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у `src`-модулі;
-- **v0.4.1** — Windows Update collector, privacy-гейтинг публічного IP (`-SkipPublicIP`), подвійний перерахунок Health Score після export-етапів, перевірка можливості оновлення .NET Framework/PowerShell, Catalog-посилання для pending updates.
+- **v0.4.1** — Windows Update collector, privacy-гейтинг публічного IP (`-SkipPublicIP`), подвійний перерахунок Health Score після export-етапів, перевірка можливості оновлення .NET Framework/PowerShell, Catalog-посилання для pending updates;
+- **v0.5.0** — Stabilization P0: єдиний execution contract між root wrapper і `dist` (усунено дублювання дефолтів параметрів), розділення `CollectionErrors`/`ExportErrors`, детермінований exit code contract (0/1/2/3), спрощений export-pipeline (Health Score рахується один раз).
 
 ## Швидкий запуск
 
@@ -168,6 +169,21 @@ risk-warning
 risk-ok
 risk-unknown
 ```
+
+## Exit code contract
+
+Скрипт завершується з детермінованим exit code, придатним для перевірки в CI/автоматизації:
+
+| Code | Значення |
+|------|----------|
+| `0` | Аудит успішно завершено, без помилок збору чи експорту |
+| `1` | Аудит завершено, але були помилки збору (`CollectionErrors`) і/або запису звітів (`ExportErrors`) |
+| `2` | Фатальна неопрацьована помилка виконання (баг/runtime-збій) |
+| `3` | Обов'язковий вихідний файл (JSON) не згенеровано |
+
+`Health.Status` (`OK`/`WARNING`/`CRITICAL`) **не впливає** на exit code — це властивість аудитованої машини (наскільки вона здорова), а не ознака збою самого інструмента BRAVO SYSTEM REPORT. `CollectionErrors` (помилки WMI/CIM/реєстру) і `ExportErrors` (помилки запису JSON/HTML/CSV/ZIP/email) розділені в JSON-звіті — перші впливають на `Health.Score`, другі — ні, обидва впливають на exit code.
+
+При автоматичному підвищенні прав (UAC) батьківський процес чекає завершення елевованого дочірнього процесу й повертає його реальний exit code.
 
 ## BAT-запускачі
 

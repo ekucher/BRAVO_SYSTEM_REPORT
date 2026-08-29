@@ -362,3 +362,47 @@ jobs:
           }
 
           Write-Host "[OK] Deep runtime test (CSV + Zip) passed"
+
+      - name: Exit code contract test (forced export error -> exit 1)
+        run: |
+          Write-Host "=== EXIT CODE CONTRACT TEST ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports\ci-exitcode"
+
+          if (Test-Path -LiteralPath $reportsDir) {
+            Remove-Item -LiteralPath $reportsDir -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
+
+          # Навмисно невалідний SMTP-сервер -> Export.Email додає ExportError,
+          # не CollectionError (P0.4) -> exit code має бути 1, не 0 (P0.5).
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\dist\Get-BravoSystemReport.ps1" `
+            -Profile Quick -NoZip -NoPause -NoOpenFolder `
+            -EmailTo "test@example.com" -SmtpServer "nonexistent.invalid.smtp.local" `
+            -OutputPath $reportsDir
+
+          if ($LASTEXITCODE -ne 1) {
+            throw "Expected exit code 1 (export error, no collection error), got $LASTEXITCODE"
+          }
+
+          $latestJson = Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.json" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $latestJson) { throw "No BravoSystemReport_*.json files found in $reportsDir" }
+
+          $report = Get-Content -LiteralPath $latestJson.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+
+          Write-Host "[INFO] CollectionErrors: $(@($report.CollectionErrors).Count)"
+          Write-Host "[INFO] ExportErrors: $(@($report.ExportErrors).Count)"
+
+          if (@($report.CollectionErrors).Count -ne 0) {
+            throw "Expected CollectionErrors=0 (export error must not leak into collection errors), got $(@($report.CollectionErrors).Count)"
+          }
+
+          if (@($report.ExportErrors).Count -eq 0) {
+            throw "Expected ExportErrors>0 (forced SMTP failure must be captured), got 0"
+          }
+
+          Write-Host "[OK] Exit code contract test passed"

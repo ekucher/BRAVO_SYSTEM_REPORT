@@ -441,7 +441,7 @@ function Export-BravoHtmlReport {
             $script:Report.GeneratedFiles += $htmlPath
             Write-Host "  $IconHtml HTML: $BaseFileName.html" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Html' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Html' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка HTML: $($_.Exception.Message)" -ForegroundColor Red
         }
     }

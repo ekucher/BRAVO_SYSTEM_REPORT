@@ -2,7 +2,21 @@
 
 ## Поточний статус
 
-Поточна стабільна версія: **ScriptVersion 0.4.1** (SchemaVersion 0.5.2).
+Поточна стабільна версія: **ScriptVersion 0.5.0** (SchemaVersion 0.6.0).
+
+## Stabilization milestone (зовнішнє ТЗ P0-P3)
+
+За результатами зовнішнього технічного завдання на стабілізацію реалізовано **P0** (execution contract, exit codes, розділення CollectionErrors/ExportErrors) — деталі в `CHANGELOG.md` ("Stabilization P0"). Статус решти пунктів ТЗ:
+
+- [x] P0.1 Уніфікувати execution contract (root wrapper мав власний, розбіжний з `dist` param-блок — переписано на transparent passthrough).
+- [x] P0.2 `-Zip:$false`/`-NoZip` коректно форвардяться через обидва хопи (wrapper→dist, dist→elevation).
+- [x] P0.3 Єдиний default `Profile` (`Forensic`, лише в `src/05-Params.ps1`).
+- [x] P0.4 CollectionErrors/ExportErrors розділені, export-pipeline спрощено (Health Score рахується один раз).
+- [x] P0.5 Детермінований exit code contract (0/1/2/3), elevation прокидає реальний exit code дочірнього процесу.
+- [ ] **P0.6/P0.7 Windows Lifecycle dataset (EOL-дати Win11/Server)** — свідомо відкладено в окремий PR: цієї функції в коді немає взагалі (не фікс, а повноцінний новий collector+dataset), що суперечить власному принципу ТЗ "нові collectors не пріоритет" для стабілізаційного етапу.
+- [ ] P1 (централізовані storage thresholds, collector/analyzer розділення, CPU/RAM findings, `-Offline`, `-SkipGeoIP`, `-SanitizeLevel`, розширення Pester/CI) — окремі майбутні PR.
+- [ ] P2 (cleanup, dead parameters, `.editorconfig`/`.gitattributes` — частину вже закрито попередніми раундами код-ревю цієї сесії, гл. `CHANGELOG.md`).
+- [ ] P3 (Deep Security: TPM/Secure Boot/BitLocker, повноцінний Forensic profile) — явно поза межами stabilization-етапу, окремі майбутні PR.
 
 Проєкт перейшов на модульну архітектуру:
 

@@ -2,8 +2,17 @@
 .SYNOPSIS
     Точка запуску BRAVO SYSTEM REPORT.
 .DESCRIPTION
-    Запускає основний скрипт із каталогу src.
-    Відносний OutputPath рахується від кореня репозиторію, а не від src.
+    Запускає основний скрипт із каталогу dist.
+    Відносний OutputPath рахується від кореня репозиторію, а не від dist.
+
+    Єдине джерело істини для дефолтних значень параметрів — src/05-Params.ps1
+    (компілюється в dist/Get-BravoSystemReport.ps1). Цей wrapper НЕ дублює
+    дефолти самостійно: параметр форвардиться в dist лише якщо користувач
+    явно його передав ($PSBoundParameters), інакше застосовується єдиний
+    дефолт з dist. Так само форвардинг через `& $ScriptPath @ForwardParameters`
+    (splat, in-process виклик) коректно передає -Zip:$false — на відміну від
+    forwarding через elevation-relaunch у dist (там серіалізація в CLI-текст,
+    інше обмеження, вирішене окремо через -NoZip).
 .NOTES
     Консольний вивід і документація проекту ведуться українською мовою.
     У службовому PowerShell-виводі не використовуються emoji.
@@ -13,30 +22,32 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Quick','Full','Deep','Forensic')]
-    [string]$Profile = 'Full',
+    [string]$Profile,
 
     [string]$OutputPath = '',
 
     [switch]$JSONOnly,
     [switch]$CSV,
     [switch]$Zip,
+    [switch]$NoZip,
     [switch]$NoEmoji,
     [switch]$NoElevate,
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipPublicIP,
 
     [int]$EventLogDays = 0,
 
     [string]$EmailTo,
-    [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
-    [string]$SmtpServer = ''
+    [string]$EmailFrom,
+    [string]$SmtpServer
 )
 
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = $PSScriptRoot
-$ScriptPath = Join-Path $RepoRoot 'dist\\Get-BravoSystemReport.ps1'
+$ScriptPath = Join-Path $RepoRoot 'dist\Get-BravoSystemReport.ps1'
 
 if (-not (Test-Path -LiteralPath $ScriptPath)) {
     throw "Не знайдено основний скрипт: $ScriptPath"
@@ -50,34 +61,15 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $ResolvedOutputPath = Join-Path $RepoRoot $OutputPath
 }
 
-$ForwardParameters = @{
-    Profile    = $Profile
-    OutputPath = $ResolvedOutputPath
+# Транспарентний passthrough: форвардиться лише те, що користувач ЯВНО
+# передав. OutputPath — виняток, рахується окремо (base = корінь репо,
+# не dist), тому завжди форвардиться з уже resolved-значенням.
+$ForwardParameters = @{}
+foreach ($key in $PSBoundParameters.Keys) {
+    if ($key -eq 'OutputPath') { continue }
+    $ForwardParameters[$key] = $PSBoundParameters[$key]
 }
-
-if ($JSONOnly)      { $ForwardParameters.JSONOnly = $true }
-if ($CSV)           { $ForwardParameters.CSV = $true }
-if ($Zip)           { $ForwardParameters.Zip = $true }
-if ($NoEmoji)       { $ForwardParameters.NoEmoji = $true }
-if ($NoElevate)     { $ForwardParameters.NoElevate = $true }
-if ($NoPause)       { $ForwardParameters.NoPause = $true }
-if ($NoOpenFolder)  { $ForwardParameters.NoOpenFolder = $true }
-if ($SkipElevation) { $ForwardParameters.SkipElevation = $true }
-
-if ($EventLogDays -gt 0) {
-    $ForwardParameters.EventLogDays = $EventLogDays
-}
-
-if (-not [string]::IsNullOrWhiteSpace($EmailTo)) {
-    $ForwardParameters.EmailTo = $EmailTo
-}
-
-if (-not [string]::IsNullOrWhiteSpace($EmailFrom)) {
-    $ForwardParameters.EmailFrom = $EmailFrom
-}
-
-if (-not [string]::IsNullOrWhiteSpace($SmtpServer)) {
-    $ForwardParameters.SmtpServer = $SmtpServer
-}
+$ForwardParameters['OutputPath'] = $ResolvedOutputPath
 
 & $ScriptPath @ForwardParameters
+exit $LASTEXITCODE

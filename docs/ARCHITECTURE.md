@@ -4,30 +4,39 @@
 
 Скрипт побудований як набір незалежних collector-модулів у `src/`, кожен з яких заповнює свою секцію спільного `$script:Report` і не зупиняє весь аудит через власну помилку. Генерація звітів (JSON/HTML/CSV/ZIP) відокремлена від збору даних: export-модулі лише читають вже заповнений `$script:Report`.
 
-`src/*.ps1` конкатенуються build-скриптом (`Build-BRAVO-SystemReport.ps1`, за порядком у `src/BRAVO.build.json`) в один монолітний runtime-файл `dist/Get-BravoSystemReport.ps1` — саме він виконується кінцевим користувачем (через `Get-BravoSystemReport.ps1`-wrapper у корені або `.bat`-лаунчери).
+`src/*.ps1` конкатенуються build-скриптом (`Build-BRAVO-SystemReport.ps1`, за порядком у `src/BRAVO.build.json`) в один монолітний runtime-файл `dist/Get-BravoSystemReport.ps1`.
+
+Кінцевий користувач викликає кореневий `Get-BravoSystemReport.ps1` (або `.bat`-лаунчери, які його викликають) — **тонкий transparent-passthrough wrapper**: він резолвить `OutputPath` (база — корінь репо, не `dist`) і форвардить `& dist\Get-BravoSystemReport.ps1 @ForwardParameters`, де `$ForwardParameters` будується з `$PSBoundParameters` (лише параметри, які користувач ЯВНО передав). Wrapper **не визначає власних дефолтів** для жодного параметра — єдине джерело дефолтів (`Profile`, `Zip` тощо) це `src/05-Params.ps1`. Це навмисний архітектурний принцип після стабілізаційного рефакторингу: wrapper і `dist` довго мали незалежні, вручну продубльовані `param()`-блоки, які розійшлись (різні дефолти `Profile`, втрачений forwarding `-Zip:$false`) — детально в `CHANGELOG.md` ("Stabilization P0").
 
 ## Потік виконання (`90-Main.ps1`)
 
 ```text
-Parameters (05-Params.ps1)
+Parameters (05-Params.ps1) — єдине джерело дефолтів
     ↓
-Elevation / self-relaunch as admin
+Elevation / self-relaunch as admin (форвардить ЕФЕКТИВНІ значення; після
+    завершення елевованого процесу батьківський чекає його і прокидає
+    реальний exit code, не завжди 0)
     ↓
 $script:Report = New-BravoReportModel (20-ReportModel.ps1)
     ↓
 Get-Bravo<Область>Audit  ×N  (30-39-* collector-и, заповнюють $script:Report.<Секція>)
     ↓
-Update-BravoHealthScore (40-Health.ps1) — попередній розрахунок
+Update-BravoHealthScore (40-Health.ps1) — РІВНО ОДИН РАЗ, одразу після
+    колекторів. Залежить лише від CollectionErrors + Findings — властивостей
+    аудитованої машини, тому export-етапи нижче більше не можуть його змінити
+    заднім числом (повторний перерахунок і self-zip-race, що існували через
+    змішування CollectionErrors/ExportErrors, прибрані)
     ↓
-Export-BravoJsonReport / Export-BravoHtmlReport / Export-BravoCsvReport (50-54-*)
+Export-BravoJsonReport (перший запис — щоб потрапити в ZIP)
     ↓
-Update-BravoHealthScore — фінальний перерахунок (враховує помилки export-етапів)
+Export-BravoHtmlReport / Export-BravoCsvReport / Export-BravoZipReport /
+    Send-BravoEmailReport — помилки цих кроків пишуться в ExportErrors,
+    НЕ в CollectionErrors, і НЕ впливають на Health Score
     ↓
-Export-BravoJsonReport / Export-BravoHtmlReport — перегенерація з фінальною оцінкою
+Export-BravoJsonReport (повторний запис, лише якщо ExportErrors змінились —
+    щоб файл на диску відображав фінальний стан)
     ↓
-Export-BravoZipReport, Send-BravoEmailReport
-    ↓
-Підсумок у консоль, ExitCode
+Підсумок у консоль, детермінований exit code (0/1/2/3)
 ```
 
 ## Конвенція collector-а
@@ -64,7 +73,8 @@ $script:Report = [ordered]@{
     EventLogs = [ordered]@{}
     Software = [ordered]@{}
     USBDevices = @()
-    CollectionErrors = @()
+    CollectionErrors = @()   # помилки ЗБОРУ (WMI/CIM/реєстр) — впливають на Health Score
+    ExportErrors = @()       # помилки ЗАПИСУ звітів (JSON/HTML/CSV/ZIP/Email) — НЕ впливають на Health Score, впливають на exit code
 }
 ```
 
@@ -79,3 +89,5 @@ $script:Report = [ordered]@{
 - Для старих Windows — fallback WMI, для нових — CIM.
 - Скрипт лишається **read-only аудитом**: не пише в registry/служби/файли поза `OutputPath` (`docs/AI_RULES.md` п.8).
 - Маскування чутливих даних через `-Sanitize` — заплановане, ще не реалізоване (див. `docs/ROADMAP.md`).
+- **Помилки збору vs помилки експорту**: `Add-AuditError` — для помилок колекторів (WMI/CIM/реєстр недоступні тощо), пише в `CollectionErrors`, впливає на Health Score. `Add-ExportError` — для помилок export-функцій (не вдалось записати JSON/HTML/CSV/ZIP, відправити email), пише в `ExportErrors`, НЕ впливає на Health Score (це проблема інструмента, не аудитованої машини), але впливає на exit code.
+- **Exit code contract**: `0` — успіх, без помилок; `1` — завершено, але були `CollectionErrors`/`ExportErrors`; `2` — фатальна неопрацьована помилка (top-level `trap` у `90-Main.ps1`); `3` — обов'язковий JSON не згенеровано. Health Status (WARNING/CRITICAL) НЕ впливає на exit code — Health описує стан аудитованої машини, а не збій самого інструмента.

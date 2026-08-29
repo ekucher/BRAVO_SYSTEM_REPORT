@@ -53,7 +53,7 @@ function Export-BravoCsvReport {
             $script:Report.GeneratedFiles += $csvPath
             Write-Host "  $IconCsv CSV: $BaseFileName.csv" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Csv' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Csv' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка CSV: $($_.Exception.Message)" -ForegroundColor Red
         }
     }

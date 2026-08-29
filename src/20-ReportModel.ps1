@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.5.2'
+    SchemaVersion = '0.6.0'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -118,6 +118,11 @@ return [ordered]@{
     # масив у звіті, не помилка збору.
     Software = [ordered]@{ Installed=@(); WindowsFeatures=@() }
     USBDevices = @()
+    # CollectionErrors — помилки ЗБОРУ даних (WMI/CIM/реєстр недоступні тощо):
+    # властивість аудитованої машини, впливає на Health Score.
+    # ExportErrors — помилки ЗАПИСУ звітів (JSON/HTML/CSV/ZIP/Email): проблема
+    # самого інструмента, НЕ впливає на Health Score, але впливає на exit code.
     CollectionErrors = @()
+    ExportErrors = @()
 }
 }
