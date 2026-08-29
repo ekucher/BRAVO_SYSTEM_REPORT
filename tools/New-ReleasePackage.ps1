@@ -37,24 +37,26 @@ function Resolve-PackageVersion {
         [string]$RepoPath
     )
 
-    $ChangelogPath = Join-Path $RepoPath "CHANGELOG.md"
-    if (Test-Path -LiteralPath $ChangelogPath) {
-        $Changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
-        $ChangelogMatch = [regex]::Match($Changelog, '(?m)^##\s+v?(?<Version>\d+\.\d+\.\d+)')
-        if ($ChangelogMatch.Success) {
-            return $ChangelogMatch.Groups["Version"].Value
-        }
-    }
-
-    # src\Get-BravoSystemReport.ps1 (застарілий моноліт) видалено — актуальний
-    # runtime це dist\Get-BravoSystemReport.ps1, зібраний з модулів src\*.ps1
-    # через Build-BRAVO-SystemReport.ps1. ScriptVersion читаємо з src\90-Main.ps1.
+    # src\90-Main.ps1 — основне, завжди актуальне джерело версії (ScriptVersion).
+    # CHANGELOG.md — fallback: у поточному форматі заголовки мають вигляд
+    # "## Unreleased — ..." (не "## vX.Y.Z"), тому регекс нижче зазвичай не
+    # спрацьовує — це очікувано, не помилка; спрацює лише якщо колись
+    # з'явиться заголовок конкретного релізу в форматі "## vX.Y.Z".
     $MainScript = Join-Path $RepoPath "src\90-Main.ps1"
     if (Test-Path -LiteralPath $MainScript) {
         $MainContent = Get-Content -LiteralPath $MainScript -Raw -Encoding UTF8
         $ScriptVersionMatch = [regex]::Match($MainContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
         if ($ScriptVersionMatch.Success) {
             return $ScriptVersionMatch.Groups["Version"].Value
+        }
+    }
+
+    $ChangelogPath = Join-Path $RepoPath "CHANGELOG.md"
+    if (Test-Path -LiteralPath $ChangelogPath) {
+        $Changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
+        $ChangelogMatch = [regex]::Match($Changelog, '(?m)^##\s+v?(?<Version>\d+\.\d+\.\d+)')
+        if ($ChangelogMatch.Success) {
+            return $ChangelogMatch.Groups["Version"].Value
         }
     }
 

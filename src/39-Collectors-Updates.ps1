@@ -145,5 +145,16 @@ function Get-BravoWindowsUpdateAudit {
         $script:Report.WindowsUpdate.SearchError = $_.Exception.Message
         Add-AuditError -Section 'WindowsUpdate.Search' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка пошуку оновлень: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+        # Явно звільняємо WUA COM-об'єкти (RCW), а не покладаємось лише на
+        # завершення процесу — не критично для одноразового запуску скрипта,
+        # але страхує від накопичення незвільнених посилань, якщо цю функцію
+        # колись почнуть викликати кілька разів у межах одного процесу
+        # (наприклад, тест-раннер, що імпортує модулі й дергає колектори в циклі).
+        foreach ($comObject in @($searchResult, $updateSearcher, $updateSession)) {
+            if ($comObject) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($comObject) | Out-Null } catch {}
+            }
+        }
     }
 }

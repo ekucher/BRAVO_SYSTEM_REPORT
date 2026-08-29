@@ -113,6 +113,9 @@ return [ordered]@{
     Processes = [ordered]@{ Total=0; TopMemory=@() }
     Services = [ordered]@{ Total=0; Running=0; AutomaticStopped=@() }
     EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0; TopErrorSources=@() }
+    # Software.WindowsFeatures та USBDevices: заплановані, ще не реалізовані
+    # колектори (жоден src/*.ps1 їх наразі не заповнює) — завжди порожній
+    # масив у звіті, не помилка збору.
     Software = [ordered]@{ Installed=@(); WindowsFeatures=@() }
     USBDevices = @()
     CollectionErrors = @()
