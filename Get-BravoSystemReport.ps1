@@ -36,8 +36,10 @@ param(
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
     [switch]$SkipPublicIP,
+    [switch]$SkipUpdateSearch,
 
     [int]$EventLogDays = 0,
+    [int]$UpdateSearchTimeoutSec,
 
     [string]$EmailTo,
     [string]$EmailFrom,
@@ -63,7 +65,12 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 
 # Транспарентний passthrough: форвардиться лише те, що користувач ЯВНО
 # передав. OutputPath — виняток, рахується окремо (base = корінь репо,
-# не dist), тому завжди форвардиться з уже resolved-значенням.
+# не dist), тому завжди форвардиться з уже resolved-значенням. Це замінює
+# ручний список `if ($X) { $ForwardParameters.X = $true }` на кожен
+# параметр — саме такий ручний список і був причиною P0.1-P0.3 (дрейф
+# дефолтів/забуті параметри між wrapper і dist), тому нові параметри
+# (SkipUpdateSearch, UpdateSearchTimeoutSec тощо) форвардяться автоматично
+# і не потребують окремого рядка тут.
 $ForwardParameters = @{}
 foreach ($key in $PSBoundParameters.Keys) {
     if ($key -eq 'OutputPath') { continue }

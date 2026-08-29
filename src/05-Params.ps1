@@ -21,6 +21,9 @@ param(
 
     [int]$EventLogDays = 0,
 
+    [switch]$SkipUpdateSearch,
+    [int]$UpdateSearchTimeoutSec = 180,
+
     [string]$EmailTo,
     [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
     [string]$SmtpServer = ''

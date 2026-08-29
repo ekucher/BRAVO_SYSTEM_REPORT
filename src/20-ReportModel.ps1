@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.0'
+    SchemaVersion = '0.6.1'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -37,6 +37,7 @@ return [ordered]@{
             RAM = [ordered]@{ Title='RAM'; Value=''; Status='OK'; Details='' }
             Disk = [ordered]@{ Title='Disk'; Value=''; Status='OK'; Details='' }
             OS = [ordered]@{ Title='OS'; Value=''; Status='OK'; Details='' }
+            Updates = [ordered]@{ Title='Updates'; Value=''; Status='OK'; Details='' }
         }
         Tabs = [ordered]@{
             General = $true
@@ -46,6 +47,7 @@ return [ordered]@{
             Security = $true
             Services = $true
             Software = $true
+            Updates = $true
         }
     }
     Health = [ordered]@{
@@ -117,6 +119,50 @@ return [ordered]@{
     # колектори (жоден src/*.ps1 їх наразі не заповнює) — завжди порожній
     # масив у звіті, не помилка збору.
     Software = [ordered]@{ Installed=@(); WindowsFeatures=@() }
+    Updates = [ordered]@{
+        OS = [ordered]@{
+            Product=''
+            DisplayVersion=''
+            RegistryDisplayVersion=''
+            EditionId=''
+            UBR=''
+            FullBuild=''
+            Channel=''
+            SupportEndDate=''
+            DaysToEndOfSupport=$null
+            SupportStatus='Unknown'
+            LifecycleDataUpdatedAt=''
+        }
+        WindowsUpdate = [ordered]@{
+            ServiceStatus=''
+            ServiceStartType=''
+            AutoUpdateOption=''
+            NoAutoUpdate=$false
+            LastDetectSuccess=''
+            LastInstallSuccess=''
+            DaysSinceLastDetect=$null
+            ManagedByWSUS=$false
+            WSUSServer=''
+        }
+        PendingReboot = [ordered]@{ Required=$false; Reasons=@() }
+        Search = [ordered]@{ Status='NotChecked'; Method=''; Error=''; CheckedAt=''; DurationSeconds=0 }
+        Pending = [ordered]@{
+            Total=0
+            Detailed=0
+            IsTruncated=$false
+            Security=0
+            Critical=0
+            Driver=0
+            Definition=0
+            Other=0
+            Downloaded=0
+            TotalSizeMB=0
+            OldestReleasedOn=''
+            MaxAgeDays=$null
+            Items=@()
+        }
+        Installed = [ordered]@{ Total=0; LastInstalledOn=''; DaysSinceLastUpdate=$null; InstalledLast30Days=0; Recent=@() }
+    }
     USBDevices = @()
     # CollectionErrors — помилки ЗБОРУ даних (WMI/CIM/реєстр недоступні тощо):
     # властивість аудитованої машини, впливає на Health Score.

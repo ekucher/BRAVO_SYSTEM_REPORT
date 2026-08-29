@@ -1,0 +1,290 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Ручний запуск за замовчуванням dry run: пакет збирається і додається як workflow artifact.
+  # Публікація релізу з ручного запуску вмикається окремим input-ом publish_release —
+  # тег при цьому створює сам GitHub на тому commit, з якого запущено workflow.
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish GitHub Release (creates the tag from the current commit)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release package
+    runs-on: [self-hosted, Windows, X64, bravo-system-report]
+
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        run: |
+          Write-Host "=== RESOLVE VERSION ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $mainModule = Join-Path $env:GITHUB_WORKSPACE "src\90-Main.ps1"
+          $mainContent = Get-Content -LiteralPath $mainModule -Raw -Encoding UTF8
+          $scriptVersionMatch = [regex]::Match($mainContent, '\$ScriptVersion\s*=\s*"(?<Version>[^"]+)"')
+
+          if (-not $scriptVersionMatch.Success) {
+            throw "Cannot read ScriptVersion from src\90-Main.ps1"
+          }
+
+          $scriptVersion = $scriptVersionMatch.Groups["Version"].Value
+
+          $changelog = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "CHANGELOG.md") -Raw -Encoding UTF8
+          $changelogMatch = [regex]::Match($changelog, '(?m)^##\s+v?(?<Version>\d+\.\d+\.\d+)')
+
+          if (-not $changelogMatch.Success) {
+            throw "Cannot read release version from CHANGELOG.md"
+          }
+
+          $changelogVersion = $changelogMatch.Groups["Version"].Value
+
+          Write-Host "[INFO] ScriptVersion: $scriptVersion"
+          Write-Host "[INFO] CHANGELOG version: $changelogVersion"
+
+          if ($scriptVersion -ne $changelogVersion) {
+            throw "Version mismatch: src\90-Main.ps1=$scriptVersion, CHANGELOG.md=$changelogVersion"
+          }
+
+          # For tag pushes the version must match the tag, otherwise the release would describe different code.
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            $tagName = $env:GITHUB_REF -replace '^refs/tags/', ''
+
+            Write-Host "[INFO] Tag: $tagName"
+
+            if ($tagName -ne "v$scriptVersion") {
+              throw "Tag $tagName does not match version v$scriptVersion"
+            }
+          }
+
+          "PACKAGE_VERSION=$scriptVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RELEASE_TAG=v$scriptVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "[OK] Version resolved: $scriptVersion"
+
+      - name: Build modular monolith
+        run: |
+          Write-Host "=== BUILD MODULAR MONOLITH ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          & .\Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512
+
+          if (-not $?) {
+            throw "Build failed."
+          }
+
+          Write-Host "[OK] Build completed"
+
+      - name: Quick runtime test
+        run: |
+          Write-Host "=== QUICK RUNTIME TEST ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          $reportsDir = Join-Path $env:GITHUB_WORKSPACE "reports\release-check"
+
+          if (Test-Path -LiteralPath $reportsDir) {
+            Remove-Item -LiteralPath $reportsDir -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\dist\Get-BravoSystemReport.ps1" -Profile Quick -NoPause -NoOpenFolder -OutputPath $reportsDir
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Quick runtime test failed with code $LASTEXITCODE"
+          }
+
+          Write-Host "[OK] Quick runtime test passed"
+
+      - name: Build release package
+        run: |
+          Write-Host "=== BUILD RELEASE PACKAGE ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          & .\tools\New-ReleasePackage.ps1 -Version $env:PACKAGE_VERSION
+
+          if (-not $?) {
+            throw "Release package build failed."
+          }
+
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\BRAVO_SYSTEM_REPORT_v$($env:PACKAGE_VERSION).zip"
+          $shaPath = "$zipPath.sha256"
+
+          foreach ($requiredPath in @($zipPath, $shaPath)) {
+            if (-not (Test-Path -LiteralPath $requiredPath)) {
+              throw "Release artifact not found: $requiredPath"
+            }
+          }
+
+          "PACKAGE_ZIP=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PACKAGE_SHA256=$shaPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "[OK] Package ready: $zipPath"
+
+      - name: Verify package content
+        run: |
+          Write-Host "=== VERIFY PACKAGE CONTENT ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+          $extractDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\_verify"
+
+          if (Test-Path -LiteralPath $extractDir) {
+            Remove-Item -LiteralPath $extractDir -Recurse -Force
+          }
+
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($env:PACKAGE_ZIP, $extractDir)
+
+          $runtimePath = Join-Path $extractDir "dist\Get-BravoSystemReport.ps1"
+          $shaFilePath = "$runtimePath.sha512"
+
+          foreach ($requiredPath in @($runtimePath, $shaFilePath, (Join-Path $extractDir "Get-BravoSystemReport.ps1"), (Join-Path $extractDir "MANIFEST.txt"))) {
+            if (-not (Test-Path -LiteralPath $requiredPath)) {
+              throw "Missing file in package: $requiredPath"
+            }
+          }
+
+          $expectedHash = (Get-Content -LiteralPath $shaFilePath -Raw).Trim()
+          $actualHash = (Get-FileHash -LiteralPath $runtimePath -Algorithm SHA512).Hash
+
+          if ($expectedHash -ne $actualHash) {
+            throw "SHA512 mismatch inside package: expected $expectedHash, got $actualHash"
+          }
+
+          $tokens = $null
+          $parseErrors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile($runtimePath, [ref]$tokens, [ref]$parseErrors)
+
+          if ($parseErrors.Count -gt 0) {
+            throw "Packaged runtime has parse errors."
+          }
+
+          $runtimeContent = Get-Content -LiteralPath $runtimePath -Raw -Encoding UTF8
+          $packagedVersion = [regex]::Match($runtimeContent, '\$ScriptVersion\s*=\s*"(?<Version>[^"]+)"').Groups["Version"].Value
+
+          if ($packagedVersion -ne $env:PACKAGE_VERSION) {
+            throw "Packaged runtime version $packagedVersion does not match $($env:PACKAGE_VERSION)"
+          }
+
+          Remove-Item -LiteralPath $extractDir -Recurse -Force
+
+          Write-Host "[OK] Package verified: SHA512 matches, runtime parses, version $($env:PACKAGE_VERSION)"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BRAVO_SYSTEM_REPORT_v${{ env.PACKAGE_VERSION }}
+          path: |
+            artifacts/BRAVO_SYSTEM_REPORT_v${{ env.PACKAGE_VERSION }}.zip
+            artifacts/BRAVO_SYSTEM_REPORT_v${{ env.PACKAGE_VERSION }}.zip.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' || inputs.publish_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Write-Host "=== PUBLISH GITHUB RELEASE ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+          $apiHeaders = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept        = "application/vnd.github+json"
+            "User-Agent"  = "bravo-system-report-release"
+          }
+
+          $releasesUri = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases"
+
+          try {
+            $existingRelease = Invoke-RestMethod -Uri "$releasesUri/tags/$env:RELEASE_TAG" -Headers $apiHeaders -Method Get
+          } catch {
+            $existingRelease = $null
+          }
+
+          if ($existingRelease) {
+            throw "Release $env:RELEASE_TAG already exists: $($existingRelease.html_url)"
+          }
+
+          # Release notes are taken from the matching version section of CHANGELOG.md.
+          $changelog = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "CHANGELOG.md") -Raw -Encoding UTF8
+          $notesMatch = [regex]::Match(
+            $changelog,
+            "(?ms)^##\s+v?$([regex]::Escape($env:PACKAGE_VERSION))\b.*?(?=^##\s+|\z)"
+          )
+
+          $releaseNotes = if ($notesMatch.Success) { $notesMatch.Value.Trim() } else { "BRAVO SYSTEM REPORT v$env:PACKAGE_VERSION" }
+
+          # target_commitish let GitHub create the tag itself when it does not exist yet.
+          $releasePayload = @{
+            tag_name         = $env:RELEASE_TAG
+            target_commitish = $env:GITHUB_SHA
+            name             = "BRAVO SYSTEM REPORT $env:RELEASE_TAG"
+            body             = $releaseNotes
+            draft            = $false
+            prerelease       = $false
+          } | ConvertTo-Json -Depth 4
+
+          $release = Invoke-RestMethod -Uri $releasesUri -Headers $apiHeaders -Method Post `
+            -ContentType "application/json; charset=utf-8" `
+            -Body ([System.Text.Encoding]::UTF8.GetBytes($releasePayload))
+
+          Write-Host "[OK] Release created: $($release.html_url)"
+
+          $uploadUri = $release.upload_url -replace '\{\?name,label\}', ''
+
+          $assets = @(
+            @{ Path = $env:PACKAGE_ZIP;    ContentType = 'application/zip' }
+            @{ Path = $env:PACKAGE_SHA256; ContentType = 'text/plain' }
+          )
+
+          foreach ($asset in $assets) {
+            $assetName = Split-Path -Leaf $asset.Path
+
+            $uploadHeaders = @{
+              Authorization = "Bearer $env:GITHUB_TOKEN"
+              Accept        = "application/vnd.github+json"
+              "User-Agent"  = "bravo-system-report-release"
+            }
+
+            $uploaded = Invoke-RestMethod -Uri "$uploadUri`?name=$assetName" -Headers $uploadHeaders -Method Post `
+              -ContentType $asset.ContentType -InFile $asset.Path
+
+            Write-Host "[OK] Asset uploaded: $($uploaded.name) ($($uploaded.size) bytes)"
+          }
+
+          Write-Host "[SUCCESS] Release $env:RELEASE_TAG published"
+
+      - name: Dry run summary
+        if: github.event_name != 'push' && !inputs.publish_release
+        run: |
+          Write-Host "=== DRY RUN ==="
+          Write-Host "[INFO] Release is not published: workflow was started manually."
+          Write-Host "[INFO] Package was built and uploaded as a workflow artifact."
+          Write-Host "[INFO] To publish, push a tag: git tag v$env:PACKAGE_VERSION; git push origin v$env:PACKAGE_VERSION"
+          Write-Host "[INFO] Or start this workflow manually with publish_release enabled."

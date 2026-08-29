@@ -23,7 +23,7 @@
 #>
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = "0.5.0"
+$ScriptVersion = "0.5.1"
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
@@ -234,6 +234,8 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
         if ($SkipPublicIP) { $arguments += '-SkipPublicIP' }
+        if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
+        $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
         if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
         if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
@@ -283,9 +285,6 @@ Write-Host ''
 # --- ОС ---
 Get-BravoOperatingSystemAudit
 
-# --- Windows Update ---
-Get-BravoWindowsUpdateAudit
-
 # --- .NET / PowerShell (перевірка можливості оновлення) ---
 Get-BravoRuntimeAudit
 
@@ -322,6 +321,9 @@ Get-BravoEventLogsAudit
 
 # --- Програмне забезпечення ---
 Get-BravoSoftwareAudit
+
+# --- Оновлення ОС ---
+Get-BravoUpdatesAudit
 
 # --- Health score ---
 # Рахується РІВНО ОДИН РАЗ, одразу після завершення всіх колекторів. До

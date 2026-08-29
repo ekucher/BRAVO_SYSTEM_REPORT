@@ -44,6 +44,14 @@ function Export-BravoCsvReport {
                 [PSCustomObject]@{Parameter='Errors_24h'; Value=$script:Report.EventLogs.SystemErrors24h}
                 [PSCustomObject]@{Parameter='Errors_ProfileDays'; Value=$script:Report.EventLogs.SystemErrors}
                 [PSCustomObject]@{Parameter='Installed_Software'; Value=$script:Report.Software.Installed.Count}
+                [PSCustomObject]@{Parameter='OS_SupportStatus'; Value=$script:Report.Updates.OS.SupportStatus}
+                [PSCustomObject]@{Parameter='OS_SupportEndDate'; Value=$script:Report.Updates.OS.SupportEndDate}
+                [PSCustomObject]@{Parameter='Updates_SearchStatus'; Value=$script:Report.Updates.Search.Status}
+                [PSCustomObject]@{Parameter='Updates_Pending'; Value=$script:Report.Updates.Pending.Total}
+                [PSCustomObject]@{Parameter='Updates_Pending_Security'; Value=$script:Report.Updates.Pending.Security}
+                [PSCustomObject]@{Parameter='Updates_PendingReboot'; Value=$script:Report.Updates.PendingReboot.Required}
+                [PSCustomObject]@{Parameter='Updates_LastInstalledOn'; Value=$script:Report.Updates.Installed.LastInstalledOn}
+                [PSCustomObject]@{Parameter='Updates_DaysSinceLastUpdate'; Value=$script:Report.Updates.Installed.DaysSinceLastUpdate}
                 [PSCustomObject]@{Parameter='Local_Admins'; Value=$script:Report.Users.LocalAdmins.Count}
                 [PSCustomObject]@{Parameter='Findings'; Value=$script:Report.Health.Findings.Count}
                 [PSCustomObject]@{Parameter='CollectionErrors'; Value=$script:Report.CollectionErrors.Count}

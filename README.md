@@ -19,11 +19,12 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - процеси та служби;
 - події Windows Event Log;
 - встановлене ПЗ;
+- аналіз ОС і стан оновлень Windows: які оновлення потрібно встановити, pending reboot, життєвий цикл версії ОС;
 - health score, findings і collection errors.
 
 ## Поточний статус
 
-Поточна стабільна версія: **ScriptVersion 0.5.0** (контракт JSON-звіту: **SchemaVersion 0.6.0**).
+Поточна стабільна версія: **ScriptVersion 0.5.1** (контракт JSON-звіту: **SchemaVersion 0.6.1**).
 
 `ScriptVersion` версіонує реліз інструмента (`src/90-Main.ps1`), `SchemaVersion` — структуру JSON-контракту (`src/20-ReportModel.ps1`); вони змінюються незалежно.
 
@@ -37,7 +38,8 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - **v0.3.5** — актуалізація README / документації;
 - **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у `src`-модулі;
 - **v0.4.1** — Windows Update collector, privacy-гейтинг публічного IP (`-SkipPublicIP`), подвійний перерахунок Health Score після export-етапів, перевірка можливості оновлення .NET Framework/PowerShell, Catalog-посилання для pending updates;
-- **v0.5.0** — Stabilization P0: єдиний execution contract між root wrapper і `dist` (усунено дублювання дефолтів параметрів), розділення `CollectionErrors`/`ExportErrors`, детермінований exit code contract (0/1/2/3), спрощений export-pipeline (Health Score рахується один раз).
+- **v0.5.0** — аналіз ОС і оновлень Windows: колектор `Updates`, таблиця життєвого циклу всіх випусків Windows, вкладка Updates у HTML-звіті;
+- **v0.5.1** — Stabilization P0: єдиний execution contract між root wrapper і `dist` (усунено дублювання дефолтів параметрів), розділення `CollectionErrors`/`ExportErrors`, детермінований exit code contract (0/1/2/3), спрощений export-pipeline (Health Score рахується один раз).
 
 ## Швидкий запуск
 
@@ -86,6 +88,70 @@ BRAVO-SystemReport-Forensic.bat --nopause
 | `Full` | повний базовий аудит із розширеним збором |
 | `Deep` | глибокий аудит, включно зі Storage Deep Audit |
 | `Forensic` | максимально детальний режим збору для розслідування проблем |
+
+## Аналіз ОС і оновлень Windows
+
+Секція `Updates` у JSON і вкладка **Updates** у HTML-звіті відповідають на питання «що потрібно встановити».
+
+Що збирається:
+
+- **Життєвий цикл ОС** — продукт, `DisplayVersion` (наприклад `24H2`), full build з `UBR`, канал,
+  дата завершення підтримки, кількість днів до неї та статус
+  `Supported` / `EndingSoon` / `EndOfSupport` / `Unknown`. Дані беруться зі статичної таблиці життєвого циклу
+  всередині скрипта; дата її актуальності виводиться у полі `LifecycleDataUpdatedAt`.
+
+  Канал визначається за `Caption` ОС і має три значення з окремими датами:
+
+  | Канал | Редакції |
+  |---|---|
+  | `Consumer` | Home, Pro, Core |
+  | `Enterprise / Education` | Enterprise, Education, серверні редакції |
+  | `LTSC / LTSB` | Enterprise LTSC та LTSB |
+
+  LTSC/LTSB визначається за `EditionID` з реєстру (`EnterpriseS`, `EnterpriseSN`, `IoTEnterpriseS`),
+  бо `Caption` в Enterprise SAC і Enterprise LTSC однаковий; за відсутності `EditionID` використовується `Caption`.
+
+  Таблиця покриває всі випуски Windows від Windows 2000 до Windows 11 25H2 і від Windows 2000 Server
+  до Windows Server 2025, включно з усіма піврічними релізами Windows 10, LTSB/LTSC-редакціями і
+  Windows Server SAC. Клієнтські та серверні ОС з однаковим build (3790, 6002, 7601, 9200, 9600,
+  14393, 17763, 26100) розрізняються автоматично.
+
+  Свідомі виключення: IoT LTSC-редакції не виділені окремо; дати ESU не використовуються — показується
+  дата завершення звичайної підтримки (наприклад, Windows 7 SP1 — `2020-01-14`, а не `2023-01-10`);
+  Windows Server SAC 1809 пропущено через збіг build 17763 із Windows Server 2019.
+- **Доступні оновлення** — пошук через COM `Microsoft.Update.Session`
+  (`IsInstalled=0 and IsHidden=0`): назва, KB, категорії, `MsrcSeverity`, розмір, чи вже завантажено, дата випуску.
+  Зведення: `Total`, `Security`, `Critical`, `Driver`, `Definition`, `Other`, `Downloaded`, `TotalSizeMB`, `MaxAgeDays`.
+  Класифікація виконується за стабільними `CategoryID`, тому не залежить від мови інтерфейсу Windows.
+  Детально зберігається до 200 оновлень: якщо знайдено більше, `Pending.Total` показує реальну кількість,
+  `Pending.Detailed` — скільки збережено, а `Pending.IsTruncated` стає `true` і додається окрема знахідка.
+- **Стан Windows Update** — служба `wuauserv` і тип її запуску, політика `AUOptions`, WSUS-сервер,
+  час останнього успішного пошуку та встановлення оновлень.
+- **Pending reboot** — перевірка CBS, `WindowsUpdate\Auto Update\RebootRequired`,
+  `PendingFileRenameOperations` і запланованого перейменування машини, зі списком причин.
+- **Встановлені оновлення** — `Get-HotFix` (fallback `Win32_QuickFixEngineering`): загальна кількість,
+  дата останнього оновлення, кількість за 30 днів і список останніх записів.
+
+Знахідки, які потрапляють у Health Score:
+
+| Severity | Умова |
+|---|---|
+| `CRITICAL` | ОС поза підтримкою; є невстановлені security / critical оновлення |
+| `WARNING` | підтримка ОС завершується (<= 180 днів); є інші невстановлені оновлення; потрібне перезавантаження; `wuauserv` вимкнено; автооновлення вимкнено політикою; останній пошук > 30 днів тому; останнє оновлення встановлено > 60 днів тому |
+
+Параметри:
+
+| Параметр | Опис |
+|---|---|
+| `-SkipUpdateSearch` | не виконувати онлайн-пошук оновлень (локальні дані збираються завжди) |
+| `-UpdateSearchTimeoutSec` | ліміт часу онлайн-пошуку, за замовчуванням `180` сек |
+
+Особливості:
+
+- профіль `Quick` онлайн-пошук не виконує (`Search.Status = Skipped`);
+- пошук виконується у фоновому job із таймаутом, тому зависання агента Windows Update не блокує звіт;
+- для повного результату потрібні мережа (або доступний WSUS) і права адміністратора; без них секція
+  заповнюється локальними даними, а `Search.Status` отримує значення `Failed` або `Timeout`.
 
 ## Генеровані файли
 
@@ -235,6 +301,37 @@ BRAVO-SYSTEM-REPORT-WIN
 
 Він виконує базову перевірку структури репозиторію.
 
+## Реліз
+
+Реліз публікується автоматично workflow-ом `.github/workflows/release.yml` при push-і тега `v*`:
+
+```powershell
+git checkout main
+git pull
+git tag v0.5.0
+git push origin v0.5.0
+```
+
+Що робить workflow:
+
+1. звіряє версію в `src\90-Main.ps1`, `CHANGELOG.md` і в самому тезі — розбіжність зупиняє реліз;
+2. збирає `dist` через `Build-BRAVO-SystemReport.ps1` і робить контрольний прогін профілю `Quick`;
+3. пакує реліз через `tools\New-ReleasePackage.ps1`;
+4. розпаковує готовий ZIP і перевіряє його: наявність runtime і `MANIFEST.txt`, збіг SHA512, parser check
+   і версію запакованого скрипта;
+5. створює GitHub Release із нотатками із секції відповідної версії `CHANGELOG.md` і вкладає
+   `BRAVO_SYSTEM_REPORT_v<version>.zip` та `.zip.sha256`.
+
+Ручний запуск (`workflow_dispatch`) виконує все те саме, але **без публікації релізу** — пакет
+доступний як workflow artifact. Це зручно для перевірки пакування перед тегом.
+
+Локально пакет збирається тим самим скриптом:
+
+```powershell
+.\Build-BRAVO-SystemReport.ps1 -CreateSha512
+.\tools\New-ReleasePackage.ps1
+```
+
 ## Вимоги
 
 - Windows PowerShell 5.1;
@@ -249,7 +346,8 @@ BRAVO-SYSTEM-REPORT-WIN
 BRAVO_SYSTEM_REPORT
 ├── .github/workflows/
 │   ├── local-windows-validation.yml
-│   └── powershell-static-check.yml
+│   ├── powershell-static-check.yml
+│   └── release.yml
 ├── dist/
 │   ├── Get-BravoSystemReport.ps1
 │   └── Get-BravoSystemReport.ps1.sha512
@@ -324,7 +422,7 @@ BRAVO_SYSTEM_REPORT
 - release package має включати `dist\Get-BravoSystemReport.ps1` і SHA512, бо root wrapper запускає саме `dist`;
 - потрібно реалізувати `-Sanitize` для безпечної передачі звітів третім сторонам;
 - потрібно уніфікувати network schema для `IPv4`, `PrimaryIPv4` і `PrimaryInterface`;
-- потрібно розширити Deep/Forensic профілі: TPM, Secure Boot, BitLocker, Pending Reboot, RDP/NLA, WinRM, SMBv1, TLS baseline, EventLog provider summary;
+- потрібно розширити Deep/Forensic профілі: TPM, Secure Boot, BitLocker, RDP/NLA, WinRM, SMBv1, TLS baseline, EventLog provider summary;
 - потрібно додати Markdown/TXT summary і розширити CI-перевірки.
 
 Детальний план впровадження описано у файлі:
@@ -363,7 +461,7 @@ $ErrorActionPreference = "Stop"
 Найближчі етапи:
 
 - стабілізувати release package;
-- додати `-Sanitize` та `-Offline` (`-SkipPublicIP` вже реалізовано);
+- додати `-Sanitize` та `-Offline` (`-SkipPublicIP`/`-SkipUpdateSearch` вже реалізовано);
 - розширити hardware/storage/network/security/event log аудит;
 - додати Markdown/TXT summary;
 - розширити Local Windows Validation для Full/Forensic, BAT і release package тестів (Quick і Deep вже покриті).
