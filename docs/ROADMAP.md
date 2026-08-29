@@ -6,17 +6,35 @@
 
 ## Stabilization milestone (зовнішнє ТЗ P0-P3)
 
-За результатами зовнішнього технічного завдання на стабілізацію реалізовано **P0** (execution contract, exit codes, розділення CollectionErrors/ExportErrors) — деталі в `CHANGELOG.md` ("Stabilization P0"). Статус решти пунктів ТЗ:
+За результатами зовнішнього технічного завдання на стабілізацію реалізовано **P0-A (Runtime stabilization)** — execution contract, exit codes, розділення CollectionErrors/ExportErrors. Злито в `developer` через PR #45 ("Stabilization P0: execution contract, exit codes, CollectionErrors/ExportErrors", merge commit `7b951a075b5d3ea3ef7c1516c5fec6da98d2c935`) — деталі в `CHANGELOG.md` ("Stabilization P0"). **P0 не завершено повністю**: P0-B (Lifecycle correctness) лишається відкритим, статус нижче.
+
+**P0-A — Runtime stabilization → DONE**
 
 - [x] P0.1 Уніфікувати execution contract (root wrapper мав власний, розбіжний з `dist` param-блок — переписано на transparent passthrough).
 - [x] P0.2 `-Zip:$false`/`-NoZip` коректно форвардяться через обидва хопи (wrapper→dist, dist→elevation).
 - [x] P0.3 Єдиний default `Profile` (`Forensic`, лише в `src/05-Params.ps1`).
 - [x] P0.4 CollectionErrors/ExportErrors розділені, export-pipeline спрощено (Health Score рахується один раз).
 - [x] P0.5 Детермінований exit code contract (0/1/2/3), elevation прокидає реальний exit code дочірнього процесу.
-- [ ] **P0.6/P0.7 Windows Lifecycle dataset (EOL-дати Win11/Server)** — свідомо відкладено в окремий PR: цієї функції в коді немає взагалі (не фікс, а повноцінний новий collector+dataset), що суперечить власному принципу ТЗ "нові collectors не пріоритет" для стабілізаційного етапу.
+
+**P0-B — Lifecycle correctness → TODO**
+
+Під час злиття PR #45 з `main` до гілки незалежно потрапив колектор Windows Update/Lifecycle (`Get-BravoUpdatesAudit`, таблиця дат підтримки Windows 2000..11 25H2/Server 2025) — але це не закриває P0.6/P0.7: таблиця лишається inline-масивом усередині `src/39-Collectors-Updates.ps1`, а не централізованим dataset/data model, і потребує окремого процесу актуалізації.
+
+- [ ] P0.6 Актуалізація Windows Lifecycle database (звірка дат підтримки з офіційними джерелами Microsoft, процес регулярного оновлення).
+- [ ] P0.7 Винесення lifecycle records у централізований dataset/data model (окремий JSON/PS-data файл замість inline-масиву в колекторі, щоб оновлення дат не вимагало правок логіки колектора).
 - [ ] P1 (централізовані storage thresholds, collector/analyzer розділення, CPU/RAM findings, `-Offline`, `-SkipGeoIP`, `-SanitizeLevel`, розширення Pester/CI) — окремі майбутні PR.
 - [ ] P2 (cleanup, dead parameters, `.editorconfig`/`.gitattributes` — частину вже закрито попередніми раундами код-ревю цієї сесії, гл. `CHANGELOG.md`).
 - [ ] P3 (Deep Security: TPM/Secure Boot/BitLocker, повноцінний Forensic profile) — явно поза межами stabilization-етапу, окремі майбутні PR.
+
+**Додаткові результати PR #45** (виявлені й закриті під час верифікації/CI-циклу, не входили в оригінальний обсяг P0-A):
+
+- Pester regression suite: **35 passed / 0 failed / 1 skipped** на merge SHA `98ba948144bd033e2e28051651bf91c9a5752ab1`.
+- `tests/WorkflowEncoding.Tests.ps1` — regression-guard: жоден `run:`-крок з ефективним `shell: powershell` (Windows PowerShell 5.1) у `.github/workflows/*.yml` не містить небезпечного non-ASCII тексту (self-hosted раннер читає temp-скрипт без BOM у ANSI-кодуванні, не UTF-8; `pwsh`/`bash`-кроки та YAML-коментарі поза перевіркою).
+- CI-тригер `local-windows-validation.yml` розширено на `pull_request.branches: developer` (раніше PR у `developer` взагалі не запускав валідацію).
+- `tests/EndToEnd.Tests.ps1` — regression-покриття актуального `Updates.*` контракту моделі (замість застарілого мертвого `WindowsUpdate.*`, який залишився незаповненим після заміни колектора при злитті з `main`).
+- CI-верифікація на Quick/Full/Deep профілях (build, SHA512, parser check, JSON validation, Updates validation, Public IPv4 scan).
+- Exit-code contract regression test — виправлено test harness (`Start-Process -Wait -PassThru` замість голого `powershell.exe`, щоб навмисний ненульовий exit code дочірнього процесу не протікав у стан самого CI-кроку).
+- Bootstrap NuGet provider для `Install-Module Pester` на self-hosted Windows-раннері (non-interactive `Install-Module` падав без явного `Install-PackageProvider -Name NuGet -Force` + TLS 1.2).
 
 Проєкт перейшов на модульну архітектуру:
 
