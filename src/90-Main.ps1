@@ -345,8 +345,13 @@ if (@($script:Report.CollectionErrors).Count -gt $errorCountBeforeExport) {
     # ZIP пакує вже наявні файли на диску (Export-BravoZipReport читає
     # GeneratedFiles) — якщо він уже відпрацював вище, його треба перезібрати,
     # інакше архів міститиме застарілі JSON/HTML з дореозрахунковим Score.
+    # Перед повторним викликом обов'язково прибираємо з GeneratedFiles шлях
+    # до вже створеного першим проходом ZIP — інакше Export-BravoZipReport
+    # намагається запакувати сам себе (щойно відкритий ексклюзивно на запис
+    # файл), що кидає IOException і додає ще одну непідхоплену помилку вже
+    # ПІСЛЯ того, як Health Score/JSON/HTML вище зафіксовані як фінальні.
     if ($Zip) {
-        $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+        $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Where-Object { $_ -notlike '*.zip' } | Select-Object -Unique)
         Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
     }
 }

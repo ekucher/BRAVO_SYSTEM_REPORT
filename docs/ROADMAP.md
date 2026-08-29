@@ -18,16 +18,17 @@
 
 Ціль: зробити релізний пакет і документацію узгодженими з фактичною модульною архітектурою.
 
-- [ ] Виправити `tools/New-ReleasePackage.ps1`, щоб release ZIP включав:
-  - [ ] `dist/Get-BravoSystemReport.ps1`;
-  - [ ] `dist/Get-BravoSystemReport.ps1.sha512`.
+- [x] Виправити `tools/New-ReleasePackage.ps1`, щоб release ZIP включав:
+  - [x] `dist/Get-BravoSystemReport.ps1`;
+  - [x] `dist/Get-BravoSystemReport.ps1.sha512`.
+  (скрипт до цього фіксу взагалі не запускався — посилався на видалений `src/Get-BravoSystemReport.ps1`; тепер додатково звіряє sha512 перед пакуванням і використовує `src/90-Main.ps1` для визначення версії).
 - [ ] Додати перевірку release package:
   - [ ] створити ZIP;
   - [ ] розпакувати у temporary directory;
   - [ ] запустити `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого пакета;
   - [ ] перевірити створення JSON/HTML.
 - [x] Визначити долю старого моноліту `src/Get-BravoSystemReport.ps1`: видалено (весь runtime формується з `src/*.ps1` модулів через `Build-BRAVO-SystemReport.ps1`).
-- [ ] Оновити `examples/README.md` відповідно до поточного wrapper/dist flow.
+- [x] Оновити `examples/README.md` відповідно до поточного wrapper/dist flow (`-Zip` за замовчуванням, `-NoZip` для вимкнення).
 - [ ] Додати `docs/RELEASE.md` з описом створення й перевірки release package.
 
 ## v0.4.2 Runtime Quality

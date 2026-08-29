@@ -75,12 +75,12 @@ dist/Get-BravoSystemReport.ps1.sha512
 
 ### Задачі
 
-- [ ] Оновити `tools/New-ReleasePackage.ps1`.
-- [ ] Додати у package include list:
-  - [ ] `dist/Get-BravoSystemReport.ps1`;
-  - [ ] `dist/Get-BravoSystemReport.ps1.sha512`.
-- [ ] Перевірити, що package не включає сформовані звіти з `reports/`.
-- [ ] Перевірити, що package не включає sensitive artifacts.
+- [x] Оновити `tools/New-ReleasePackage.ps1` — раніше скрипт взагалі не запускався (посилався на видалений `src/Get-BravoSystemReport.ps1`).
+- [x] Додати у package include list:
+  - [x] `dist/Get-BravoSystemReport.ps1`;
+  - [x] `dist/Get-BravoSystemReport.ps1.sha512`.
+- [x] Перевірити, що package не включає сформовані звіти з `reports/` (`$IncludeFiles` — явний allowlist, `reports/` там немає).
+- [x] Перевірити, що package не включає sensitive artifacts (той самий allowlist-принцип).
 - [ ] Додати локальний тест release package:
   - [ ] build runtime;
   - [ ] create release ZIP;

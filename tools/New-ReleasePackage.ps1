@@ -46,16 +46,19 @@ function Resolve-PackageVersion {
         }
     }
 
-    $SourceScript = Join-Path $RepoPath "src\Get-BravoSystemReport.ps1"
-    if (Test-Path -LiteralPath $SourceScript) {
-        $SourceContent = Get-Content -LiteralPath $SourceScript -Raw -Encoding UTF8
-        $ScriptVersionMatch = [regex]::Match($SourceContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
+    # src\Get-BravoSystemReport.ps1 (застарілий моноліт) видалено — актуальний
+    # runtime це dist\Get-BravoSystemReport.ps1, зібраний з модулів src\*.ps1
+    # через Build-BRAVO-SystemReport.ps1. ScriptVersion читаємо з src\90-Main.ps1.
+    $MainScript = Join-Path $RepoPath "src\90-Main.ps1"
+    if (Test-Path -LiteralPath $MainScript) {
+        $MainContent = Get-Content -LiteralPath $MainScript -Raw -Encoding UTF8
+        $ScriptVersionMatch = [regex]::Match($MainContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
         if ($ScriptVersionMatch.Success) {
             return $ScriptVersionMatch.Groups["Version"].Value
         }
     }
 
-    throw "Cannot detect package version from CHANGELOG.md or src\Get-BravoSystemReport.ps1"
+    throw "Cannot detect package version from CHANGELOG.md or src\90-Main.ps1"
 }
 
 Write-Host "=== BRAVO SYSTEM REPORT RELEASE PACKAGE ==="
@@ -67,9 +70,16 @@ if (-not (Test-Path -LiteralPath $RepoPath)) {
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
 Set-Location -LiteralPath $RepoPath
 
-$SourceScript = Join-Path $RepoPath "src\Get-BravoSystemReport.ps1"
-if (-not (Test-Path -LiteralPath $SourceScript)) {
-    throw "Source script not found: $SourceScript"
+$DistScript = Join-Path $RepoPath "dist\Get-BravoSystemReport.ps1"
+$DistSha512 = Join-Path $RepoPath "dist\Get-BravoSystemReport.ps1.sha512"
+if (-not (Test-Path -LiteralPath $DistScript) -or -not (Test-Path -LiteralPath $DistSha512)) {
+    throw "dist\Get-BravoSystemReport.ps1 (+ .sha512) не знайдено. Спершу виконайте: .\Build-BRAVO-SystemReport.ps1 -CreateSha512"
+}
+
+$ActualHash = (Get-FileHash -LiteralPath $DistScript -Algorithm SHA512).Hash.Trim()
+$RecordedHash = (Get-Content -LiteralPath $DistSha512 -Raw).Trim()
+if ($ActualHash -ne $RecordedHash) {
+    throw "dist\Get-BravoSystemReport.ps1.sha512 не відповідає dist\Get-BravoSystemReport.ps1. Перезберіть через .\Build-BRAVO-SystemReport.ps1 -CreateSha512"
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -99,7 +109,8 @@ if (-not (Test-Path -LiteralPath $StagingRoot)) {
 
 $IncludeFiles = @(
     "Get-BravoSystemReport.ps1",
-    "src\Get-BravoSystemReport.ps1",
+    "dist\Get-BravoSystemReport.ps1",
+    "dist\Get-BravoSystemReport.ps1.sha512",
     "BRAVO-SystemReport-Quick.bat",
     "BRAVO-SystemReport-Full.bat",
     "BRAVO-SystemReport-Deep.bat",
@@ -108,6 +119,7 @@ $IncludeFiles = @(
     "README.md",
     "CHANGELOG.md",
     "LICENSE.md",
+    "docs\AI_RULES.md",
     "docs\ARCHITECTURE.md",
     "docs\PROJECT_RULES.md",
     "docs\ROADMAP.md",
