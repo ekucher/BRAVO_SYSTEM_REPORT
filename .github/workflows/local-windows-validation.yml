@@ -484,13 +484,35 @@ jobs:
 
           # Deliberately invalid SMTP server -> Export.Email adds an ExportError,
           # not a CollectionError (P0.4) -> exit code must be 1, not 0 (P0.5).
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\dist\Get-BravoSystemReport.ps1" `
-            -Profile Quick -NoZip -NoPause -NoOpenFolder `
-            -EmailTo "test@example.com" -SmtpServer "nonexistent.invalid.smtp.local" `
-            -OutputPath $reportsDir
+          #
+          # Started via Start-Process -Wait -PassThru (not a bare powershell.exe
+          # call) so the child's deliberately-nonzero exit code is captured into
+          # $actualExitCode instead of leaking into $LASTEXITCODE. A bare call
+          # here left $LASTEXITCODE=1 as the last recorded exit code of this
+          # run: block's own host process even after every assertion below
+          # passed - GitHub Actions then reported the whole step as failed
+          # despite "[OK] Exit code contract test passed" in the log.
+          $process = Start-Process `
+            -FilePath "powershell.exe" `
+            -ArgumentList @(
+              "-NoProfile",
+              "-ExecutionPolicy", "Bypass",
+              "-File", ".\dist\Get-BravoSystemReport.ps1",
+              "-Profile", "Quick",
+              "-NoZip",
+              "-NoPause",
+              "-NoOpenFolder",
+              "-EmailTo", "test@example.com",
+              "-SmtpServer", "nonexistent.invalid.smtp.local",
+              "-OutputPath", $reportsDir
+            ) `
+            -Wait `
+            -PassThru
 
-          if ($LASTEXITCODE -ne 1) {
-            throw "Expected exit code 1 (export error, no collection error), got $LASTEXITCODE"
+          $actualExitCode = $process.ExitCode
+
+          if ($actualExitCode -ne 1) {
+            throw "Expected exit code 1 (export error, no collection error), got $actualExitCode"
           }
 
           $latestJson = Get-ChildItem -LiteralPath $reportsDir -Filter "BravoSystemReport_*.json" -ErrorAction SilentlyContinue |
