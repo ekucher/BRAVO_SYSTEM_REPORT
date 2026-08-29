@@ -160,6 +160,17 @@ jobs:
           $pester = Get-Module -ListAvailable -Name Pester | Sort-Object Version -Descending | Select-Object -First 1
           if (-not $pester -or $pester.Version.Major -lt 5) {
             Write-Host "[INFO] Pester 5.x not found, installing locally for CurrentUser..."
+
+            # Non-interactive Windows PowerShell 5.1 fails to auto-bootstrap the
+            # NuGet provider on first Install-Module call ("Install-NuGetClientBinaries:
+            # Object reference not set to an instance of an object") when TLS 1.2 is
+            # not already the active protocol and/or the provider is not pre-cached.
+            # Bootstrapping it explicitly first makes Install-Module reliable in CI.
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+              Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+            }
+
             Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0.0
           }
 

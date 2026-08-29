@@ -56,4 +56,21 @@ Describe 'Наскрізний прогін dist (Quick, JSONOnly)' -Skip:(-not 
     It 'DotNet.LatestKnownVersion заповнений і відповідає 4.8 або 4.8.1' {
         $script:Report.DotNet.LatestKnownVersion | Should -BeIn @('4.8', '4.8.1')
     }
+
+    # Регресія: колектор Windows Update було переписано (Get-BravoWindowsUpdateAudit
+    # -> Get-BravoUpdatesAudit), і він пише в $script:Report.Updates.*, а не в
+    # старе поле $script:Report.WindowsUpdate.* (яке модель лишила як мертве
+    # legacy-поле — завжди дефолтні значення, ніхто його більше не заповнює).
+    # CI-крок "Deep runtime test" довгий час звірявся саме зі старим полем і
+    # тому мовчки ніколи не міг зловити реальну регресію (SearchStatus завжди
+    # 'NotChecked' з дефолту моделі, перевірка на 'Skipped' ніколи не спрацьовувала).
+    # Цей тест ловить повторення того самого класу бага: якщо хтось знову
+    # перейменує/перенесе секцію колектора, не оновивши модель чи споживачів.
+    It 'Updates.OS.FullBuild заповнений (колектор пише в актуальне поле моделі, не в застаріле WindowsUpdate.*)' {
+        $script:Report.Updates.OS.FullBuild | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Updates.Search.Status = Skipped у профілі Quick (онлайн-пошук не виконується)' {
+        $script:Report.Updates.Search.Status | Should -Be 'Skipped'
+    }
 }
