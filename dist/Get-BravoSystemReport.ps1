@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-24 18:04:17
+    GeneratedAt: 2026-08-29 04:41:33
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -33,11 +33,13 @@ param(
     [switch]$JSONOnly,
     [switch]$CSV,
     [switch]$Zip = $true,
+    [switch]$NoZip,
     [switch]$NoEmoji,
     [switch]$NoElevate,
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipPublicIP,
 
     [int]$EventLogDays = 0,
 
@@ -197,6 +199,8 @@ function Get-BravoPrimaryNetworkInterface {
             }
         }
     } catch {
+        # Свідомо ігноруємо: сучасний Get-NetRoute/Get-NetAdapter шлях недоступний
+        # або впав (наприклад, немає модуля NetTCPIP) — нижче є CIM/WMI fallback.
     }
 
     try {
@@ -226,6 +230,8 @@ function Get-BravoPrimaryNetworkInterface {
             }
         }
     } catch {
+        # Свідомо ігноруємо: обидва методи (NetAdapter та CIM) недоступні —
+        # повертаємо $null, виклик нижче трактує це як "primary interface не знайдено".
     }
 
     return $null
@@ -288,6 +294,8 @@ function Get-BravoAllUsableIPv4AddressList {
             }
         }
     } catch {
+        # Свідомо ігноруємо: CIM-запит недоступний на цій машині —
+        # повертаємо порожній список замість переривання збору мережевих даних.
     }
 
     return @($result)
@@ -426,7 +434,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.5.0'
+    SchemaVersion = '0.6.1'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -476,8 +484,26 @@ return [ordered]@{
         Findings = @()
     }
     OS = [ordered]@{ Caption=''; Version=''; Build=''; Architecture=''; InstallDate=''; LastBootUpTime=''; UptimeDays=0; UptimeHours=0 }
-    PowerShell = [ordered]@{ Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString() }
-    DotNet = [ordered]@{ v4='Not Installed' }
+    PowerShell = [ordered]@{
+        Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString()
+        Core7Installed=$false; Core7Version=''; Core7LatestKnown='7.4'; Core7UpdateAvailable=$false
+    }
+    DotNet = [ordered]@{ v4='Not Installed'; ReleaseKey=0; LatestKnownVersion='4.8.1'; UpdateAvailable=$false }
+    WindowsUpdate = [ordered]@{
+        ServiceStatus = ''
+        InstalledHotFixCount = 0
+        InstalledHotFixes = @()
+        LastInstalledHotFix = ''
+        LastInstallDate = ''
+        DaysSinceLastInstall = -1
+        PendingRebootRequired = $false
+        PendingUpdates = @()
+        PendingCount = 0
+        PendingCritical = 0
+        PendingSecurity = 0
+        SearchStatus = 'NotChecked'
+        SearchError = ''
+    }
     BIOS = [ordered]@{ Version=''; SerialNumber=''; ReleaseDate='' }
     Virtualization = [ordered]@{ IsVirtual=$false; Hypervisor='' }
     Hardware = [ordered]@{
@@ -516,7 +542,10 @@ return [ordered]@{
     Users = [ordered]@{ LocalAdmins=@() }
     Processes = [ordered]@{ Total=0; TopMemory=@() }
     Services = [ordered]@{ Total=0; Running=0; AutomaticStopped=@() }
-    EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0 }
+    EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0; TopErrorSources=@() }
+    # Software.WindowsFeatures та USBDevices: заплановані, ще не реалізовані
+    # колектори (жоден src/*.ps1 їх наразі не заповнює) — завжди порожній
+    # масив у звіті, не помилка збору.
     Software = [ordered]@{ Installed=@(); WindowsFeatures=@() }
     Updates = [ordered]@{
         OS = [ordered]@{
@@ -563,7 +592,12 @@ return [ordered]@{
         Installed = [ordered]@{ Total=0; LastInstalledOn=''; DaysSinceLastUpdate=$null; InstalledLast30Days=0; Recent=@() }
     }
     USBDevices = @()
+    # CollectionErrors — помилки ЗБОРУ даних (WMI/CIM/реєстр недоступні тощо):
+    # властивість аудитованої машини, впливає на Health Score.
+    # ExportErrors — помилки ЗАПИСУ звітів (JSON/HTML/CSV/ZIP/Email): проблема
+    # самого інструмента, НЕ впливає на Health Score, але впливає на exit code.
     CollectionErrors = @()
+    ExportErrors = @()
 }
 }
 
@@ -641,7 +675,18 @@ function Get-BravoHardwareAudit {
         $script:Report.Hardware.CPU.Cores = $cpuInfo.NumberOfCores
         $script:Report.Hardware.CPU.LogicalProcessors = $cpuInfo.NumberOfLogicalProcessors
         $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
-        $script:Report.Hardware.CPU.LoadPercent = [Math]::Round(($cpuInfo.LoadPercentage | Measure-Object -Average).Average)
+
+        # LoadPercentage — опціональна властивість WMI, на частині VM (особливо
+        # одразу після старту) повертає $null. Це очікуваний, не помилковий стан
+        # (не CollectionError) — трапляється регулярно на щойно піднятих VM,
+        # включно з CI-раннерами, і не мало б штрафувати Health Score чи ламати
+        # інваріант "CollectionErrors=0" в EndToEnd-тесті на кожному такому
+        # прогоні. [Math]::Round($null) мовчки стає 0 — залишаємо цю поведінку,
+        # 0% тут означає "невідомо", а не підтверджений нуль.
+        $cpuLoadAverage = ($cpuInfo.LoadPercentage | Measure-Object -Average).Average
+        if ($null -ne $cpuLoadAverage) {
+            $script:Report.Hardware.CPU.LoadPercent = [Math]::Round($cpuLoadAverage)
+        }
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
         $script:Report.Hardware.RAM.TotalGB = $totalPhysicalMemoryGB
@@ -721,6 +766,16 @@ function Convert-BravoBytesToGB {
 }
 
 function Get-BravoStorageDeepAudit {
+    # Заповнюються нижче в цій функції: CollectedAt, LogicalDisks, Volumes,
+    # Disks, Partitions, PageFiles.
+    #
+    # НЕ реалізовано (завжди порожній масив @() — заплановані, ще не написані
+    # колектори; див. docs/ROADMAP.md "Storage Audit" для BitLocker/Storage
+    # Spaces/Shadow Copies/SMART): PhysicalDisks (не плутати з окремим,
+    # реально заповненим $script:Report.Hardware.Disks.PhysicalDisks —
+    # це різні поля з однаковою назвою в різних секціях моделі),
+    # ReliabilityCounters, BitLocker, ShadowCopies, StoragePools,
+    # StorageSubsystems, SmartPredictFailures.
     $storage = [ordered]@{
         CollectedAt  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         LogicalDisks = @()
@@ -950,6 +1005,13 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
+        # CD-ROM/оптичні носії — read-only, "вільне місце" не є показником ризику
+        # (наприклад ISO-образ примонтований як том завжди показує 0% вільно).
+        if ([string]$volume.DriveType -eq 'CD-ROM') {
+            $risk.HealthyVolumes += $volumeRisk
+            continue
+        }
+
         if ($freePercent -lt $criticalThreshold) {
             $risk.CriticalVolumes += $volumeRisk
 
@@ -1157,7 +1219,7 @@ function Get-BravoNetworkAudit {
                 Add-AuditError -Section 'Network.TcpConnections' -Message $_.Exception.Message
             }
         }
-    # BRAVO IP ORDER OUTPUT START
+    # --- Впорядкування IPv4 (primary адреса першою) ---
     $bravoPrimaryNetwork = Get-BravoPrimaryNetworkInterface
     $bravoPrimaryIPv4 = $null
 
@@ -1167,14 +1229,8 @@ function Get-BravoNetworkAudit {
 
     $bravoIPv4Source = @(Get-BravoAllUsableIPv4AddressList)
 
-    if ($bravoIPv4Source.Count -eq 0 -and $Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            if ($Report.Network.Contains("IPv4")) {
-                $bravoIPv4Source = @($Report.Network["IPv4"])
-            }
-        } elseif ($Report.Network.IPv4) {
-            $bravoIPv4Source = @($Report.Network.IPv4)
-        }
+    if ($bravoIPv4Source.Count -eq 0 -and $script:Report.Network.IP.IPv4) {
+        $bravoIPv4Source = @($script:Report.Network.IP.IPv4)
     }
 
     $bravoOrderedIPv4 = @(Move-BravoIPv4ToFront -IPv4 $bravoIPv4Source -PrimaryIPv4 $bravoPrimaryIPv4)
@@ -1187,78 +1243,54 @@ function Get-BravoNetworkAudit {
         $bravoIPv4Text = "N/A"
     }
 
-    if ($Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            $Report.Network["IPv4"] = @($bravoOrderedIPv4)
-            $Report.Network["PrimaryIPv4"] = $bravoPrimaryIPv4
-            $Report.Network["PrimaryInterface"] = $bravoPrimaryNetwork
-            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
-            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
-            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
-        } else {
-            $Report.Network | Add-Member -NotePropertyName "IPv4" -NotePropertyValue @($bravoOrderedIPv4) -Force
-            $Report.Network | Add-Member -NotePropertyName "PrimaryIPv4" -NotePropertyValue $bravoPrimaryIPv4 -Force
-            $Report.Network | Add-Member -NotePropertyName "PrimaryInterface" -NotePropertyValue $bravoPrimaryNetwork -Force
-            $Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
-            $Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
-            $Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
-        }
-    }
+    $script:Report.Network.IP.IPv4 = @($bravoOrderedIPv4)
+    $script:Report.Network.IP.PrimaryIPv4 = $bravoPrimaryIPv4
+    $script:Report.Network.IP.PrimaryInterface = $bravoPrimaryNetwork
 
     Write-Host "  [OK] IP: $bravoIPv4Text" -ForegroundColor Green
-    # BRAVO IP ORDER OUTPUT END
 
+    # --- Public IPv4 та geo/ISP-дані ---
+    # Мережево-залежна перевірка, що звертається до сторонніх сервісів:
+    # гейтована профілем (не виконується для Quick) і прапорцем -SkipPublicIP.
+    $bravoPublicIPLookupEnabled = (-not $SkipPublicIP) -and ($Profile -in @('Full', 'Deep', 'Forensic'))
 
-    # BRAVO PUBLIC IP OUTPUT START
-    $bravoPublicIPv4Info = Get-BravoPublicIPv4Address
+    if ($bravoPublicIPLookupEnabled) {
+        $bravoPublicIPv4Info = Get-BravoPublicIPv4Address
 
-    if ($Report.Network) {
-        if ($Report.Network -is [System.Collections.IDictionary]) {
-            $Report.Network["PublicIPv4"] = $bravoPublicIPv4Info.IPv4
-            $Report.Network["PublicIPv4Provider"] = $bravoPublicIPv4Info.Provider
-            $Report.Network["PublicIPv4CheckedAt"] = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network["PublicIPv4Status"] = $bravoPublicIPv4Info.Status
-            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
-            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
-            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
+        $script:Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
+        $script:Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
+        $script:Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
+        $script:Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
+
+        $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
+
+        $script:Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
+        $script:Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
+        $script:Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
+        $script:Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
+        $script:Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
+        $script:Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
+        $script:Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
+        $script:Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
+        $script:Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
+        $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
+        $script:Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
+
+        if ($bravoPublicIPv4Info.Status -eq "Detected") {
+            if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
+                Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
+            } else {
+                Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+            }
         } else {
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4" -NotePropertyValue $bravoPublicIPv4Info.IPv4 -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4Provider" -NotePropertyValue $bravoPublicIPv4Info.Provider -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4CheckedAt" -NotePropertyValue $bravoPublicIPv4Info.CheckedAt -Force
-            $Report.Network | Add-Member -NotePropertyName "PublicIPv4Status" -NotePropertyValue $bravoPublicIPv4Info.Status -Force
-            $Report.Network.IP.PublicIPv4 = $bravoPublicIPv4Info.IPv4
-            $Report.Network.IP.PublicIPv4Provider = $bravoPublicIPv4Info.Provider
-            $Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
-            $Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
-        }
-    }
-
-    $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
-
-    if ($Report.Network -and $Report.Network.IP) {
-        $Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
-        $Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
-        $Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
-        $Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
-        $Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
-        $Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
-        $Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
-        $Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
-        $Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
-        $Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
-        $Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
-    }
-    if ($bravoPublicIPv4Info.Status -eq "Detected") {
-        if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
-            Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
-        } else {
-            Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
+            Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
+        $bravoSkipReason = if ($SkipPublicIP) { "-SkipPublicIP" } else { "профіль $Profile" }
+        $script:Report.Network.IP.PublicIPv4Status = 'Skipped'
+        $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = 'Skipped'
+        Write-Host "  [INFO] Public IP: пропущено ($bravoSkipReason)" -ForegroundColor Yellow
     }
-    # BRAVO PUBLIC IP OUTPUT END
     } catch {
         Add-AuditError -Section 'Network' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка мережевих даних: $($_.Exception.Message)" -ForegroundColor Red
@@ -1278,18 +1310,30 @@ function Get-BravoSecurityAudit {
 
     # --- Безпека ---
     try {
+        # Важливо: WARNING/INFO-знахідки нижче генеруються лише якщо ключ реєстру
+        # реально вдалось прочитати. Якщо $uac/$rdp -eq $null (немає прав, GPO,
+        # Server Core), стан невідомий — це НЕ те саме, що "підтверджено вимкнено",
+        # і не повинно ставати хибним WARNING на дефолтному значенні моделі.
         $uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
-        if ($uac) { $script:Report.Security.UAC.Enabled = ($uac.EnableLUA -eq 1) }
+        if ($uac) {
+            $script:Report.Security.UAC.Enabled = ($uac.EnableLUA -eq 1)
 
-        if (-not $script:Report.Security.UAC.Enabled) {
-            Add-AuditFinding -Severity 'WARNING' -Category 'Security' -Message 'UAC вимкнено.' -Recommendation 'Увімкніть UAC, якщо немає обґрунтованого винятку.'
+            if (-not $script:Report.Security.UAC.Enabled) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Security' -Message 'UAC вимкнено.' -Recommendation 'Увімкніть UAC, якщо немає обґрунтованого винятку.'
+            }
+        } else {
+            Add-AuditError -Section 'Security.UAC' -Message 'Не вдалося прочитати ключ реєстру EnableLUA — стан UAC невідомий.'
         }
 
         $rdp = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -ErrorAction SilentlyContinue
-        if ($rdp) { $script:Report.Security.RemoteAccess.RDPEnabled = ($rdp.fDenyTSConnections -eq 0) }
+        if ($rdp) {
+            $script:Report.Security.RemoteAccess.RDPEnabled = ($rdp.fDenyTSConnections -eq 0)
 
-        if ($script:Report.Security.RemoteAccess.RDPEnabled) {
-            Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Перевірте NLA, firewall scope і список дозволених користувачів.'
+            if ($script:Report.Security.RemoteAccess.RDPEnabled) {
+                Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Перевірте NLA, firewall scope і список дозволених користувачів.'
+            }
+        } else {
+            Add-AuditError -Section 'Security.RemoteAccess' -Message 'Не вдалося прочитати ключ реєстру fDenyTSConnections — стан RDP невідомий.'
         }
 
         try {
@@ -1356,14 +1400,27 @@ function Get-LocalAdministratorsSafe {
     try {
         $raw = net localgroup "$adminGroupName" 2>$null
         if ($raw) {
+            # Завершальний рядок "The command completed successfully." (net.exe)
+            # локалізується разом з MUI-пакетом Windows — раніше тут матчився
+            # текст лише для en/uk, на інших локалях (ru/de/pl/...) фальшивий
+            # службовий рядок потрапляв у список адмінів. net localgroup
+            # структурно ЗАВЖДИ завершує вивід рівно одним таким рядком
+            # одразу після переліку членів, тому замість тексту-матчингу
+            # просто відкидаємо останній непорожній рядок після роздільника
+            # "----" — це локале-незалежно.
             $capture = $false
+            $capturedLines = New-Object System.Collections.Generic.List[string]
             foreach ($line in $raw) {
                 $text = ($line | Out-String).Trim()
                 if (-not $text) { continue }
                 if ($text -match '^-{3,}$') { $capture = $true; continue }
-                if ($text -match 'command completed|Команда виконана|completed successfully') { break }
-                if ($capture) { $members += $text }
+                if ($capture) { $capturedLines.Add($text) }
             }
+            if ($capturedLines.Count -gt 0) {
+                # Останній рядок — завжди статус-повідомлення net.exe, не ім'я.
+                $capturedLines.RemoveAt($capturedLines.Count - 1)
+            }
+            $members = @($capturedLines)
         }
     } catch {
         Add-AuditError -Section 'Users.LocalAdmins.NetLocalGroup' -Message $_.Exception.Message
@@ -1401,9 +1458,33 @@ function Get-BravoProcessesServicesAudit {
         $processInfo = Get-Process -ErrorAction Stop
         $script:Report.Processes.Total = $processInfo.Count
         if ($Profile -in @('Full','Deep','Forensic')) {
-            $script:Report.Processes.TopMemory = $processInfo |
-                Sort-Object -Property WorkingSet64 -Descending |
-                Select-Object -First 10 @{Name='ProcessName';Expression={$_.ProcessName}}, Id, @{Name='MemoryMB';Expression={[Math]::Round($_.WorkingSet64 / 1MB, 2)}}
+            try {
+                # WorkingSet64 обчислюється лениво при першому зверненні (потребує
+                # handle до процесу), а не кешується в момент Get-Process — якщо
+                # короткоживучий процес завершується між Get-Process і Sort-Object,
+                # звернення до .WorkingSet64 усередині сортування кидає виняток
+                # "process has exited" і валить весь TopMemory разом з рештою
+                # процесів. Тому знімаємо WorkingSet64 у власному try/catch на
+                # кожен процес окремо — процес, що встиг завершитись, просто
+                # пропускається, решта топ-10 все одно рахується.
+                $processSnapshot = New-Object System.Collections.Generic.List[object]
+                foreach ($proc in $processInfo) {
+                    try {
+                        $processSnapshot.Add([PSCustomObject]@{
+                            ProcessName = $proc.ProcessName
+                            Id          = $proc.Id
+                            MemoryMB    = [Math]::Round($proc.WorkingSet64 / 1MB, 2)
+                        })
+                    } catch {
+                        # Свідомо ігноруємо: процес завершився між Get-Process і
+                        # зверненням до WorkingSet64 — не переривляємо збір топ-10
+                        # через один короткоживучий процес.
+                    }
+                }
+                $script:Report.Processes.TopMemory = @($processSnapshot | Sort-Object -Property MemoryMB -Descending | Select-Object -First 10)
+            } catch {
+                Add-AuditError -Section 'Processes.TopMemory' -Message $_.Exception.Message
+            }
         }
         Write-Host "  $IconService Процеси: $($script:Report.Processes.Total)" -ForegroundColor Green
     } catch {
@@ -1418,10 +1499,26 @@ function Get-BravoProcessesServicesAudit {
 
         if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
             try {
+                # Відомі trigger-start/опціональні служби Windows: WMI показує їх як
+                # StartMode='Auto', але вони штатно стоять Stopped, поки їх не розбудить
+                # тригер (подія/пристрій/попит) — це не ознака проблеми на машині.
+                # RemoteRegistry особливо: зупинена = добре (security best practice).
+                $bravoKnownTriggerStartServices = @(
+                    'edgeupdate', 'edgeupdatem', 'gupdate', 'gupdatem',
+                    'MapsBroker', 'sppsvc', 'WbioSrvc', 'RemoteRegistry'
+                )
+
                 $autoStopped = Get-CimInstance Win32_Service -Filter "StartMode='Auto' AND State<>'Running'" -ErrorAction Stop
                 $script:Report.Services.AutomaticStopped = @($autoStopped | Select-Object Name, DisplayName, State, StartMode, StartName)
-                if ($script:Report.Services.AutomaticStopped.Count -gt 0) {
-                    Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($script:Report.Services.AutomaticStopped.Count)." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
+
+                $noteworthyStopped = @($script:Report.Services.AutomaticStopped | Where-Object { $_.Name -notin $bravoKnownTriggerStartServices })
+
+                if ($noteworthyStopped.Count -gt 0) {
+                    $totalStoppedCount = $script:Report.Services.AutomaticStopped.Count
+                    $noiseCount = $totalStoppedCount - $noteworthyStopped.Count
+                    $noiseNote = if ($noiseCount -gt 0) { " (ще $noiseCount — відомі trigger-start/опціональні служби, не є ризиком)" } else { '' }
+
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($noteworthyStopped.Count)$noiseNote." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
                 }
             } catch {
                 Add-AuditError -Section 'Services.AutomaticStopped' -Message $_.Exception.Message
@@ -1449,18 +1546,46 @@ function Get-BravoEventLogsAudit {
         $lastDay = (Get-Date).AddDays(-1)
         $eventLogStart = (Get-Date).AddDays(-1 * $EventLogDays)
 
-        $systemErrors24h = Get-EventLog -LogName System -EntryType Error -After $lastDay -ErrorAction SilentlyContinue
-        $systemWarnings24h = Get-EventLog -LogName System -EntryType Warning -After $lastDay -ErrorAction SilentlyContinue
-        $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue
-        $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue
+        # -ErrorAction SilentlyContinue сам собою нічого не пише в CollectionErrors.
+        # "No matches found" — очікуваний benign-результат, коли за період справді
+        # немає жодного запису (не помилка збору). Будь-яка ІНША помилка
+        # (лог очищено/недоступний, немає прав) реєструється явно, щоб
+        # SystemErrors=0 не видавали себе за "перевірено й чисто", коли збір
+        # насправді провалився.
+        $eventLogErrors = @()
+        $systemErrors24h = Get-EventLog -LogName System -EntryType Error -After $lastDay -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+        $systemWarnings24h = Get-EventLog -LogName System -EntryType Warning -After $lastDay -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+        $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+        $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+
+        # Звіряємо FullyQualifiedErrorId, а не текст Exception.Message: повідомлення
+        # локалізується разом з MUI-пакетом Windows (напр. на uk-UA/ru-UA системах
+        # текст буде не англійським), тоді як FullyQualifiedErrorId — стабільний
+        # ідентифікатор, незалежний від локалі.
+        foreach ($eventLogError in $eventLogErrors) {
+            if ($eventLogError.FullyQualifiedErrorId -notmatch 'GetEventLogNoEntriesFound') {
+                Add-AuditError -Section 'EventLogs.System' -Message $eventLogError.Exception.Message
+            }
+        }
 
         $script:Report.EventLogs.SystemErrors24h = @($systemErrors24h).Count
         $script:Report.EventLogs.SystemWarnings24h = @($systemWarnings24h).Count
         $script:Report.EventLogs.SystemErrors = @($systemErrors).Count
         $script:Report.EventLogs.SystemWarnings = @($systemWarnings).Count
 
+        # Топ джерел помилок — щоб знахідка була дієвою, а не просто цифрою.
+        $topErrorSources = @(
+            $systemErrors |
+                Group-Object -Property Source |
+                Sort-Object -Property Count -Descending |
+                Select-Object -First 10 -Property @{Name='Source'; Expression={$_.Name}}, Count, @{Name='LastMessage'; Expression={($_.Group | Select-Object -First 1).Message}}
+        )
+        $script:Report.EventLogs.TopErrorSources = $topErrorSources
+
         if ($script:Report.EventLogs.SystemErrors -gt 0) {
-            Add-AuditFinding -Severity 'WARNING' -Category 'EventLogs' -Message "За $EventLogDays днів знайдено системних помилок: $($script:Report.EventLogs.SystemErrors)." -Recommendation 'Перегляньте System log і визначте повторювані джерела помилок.'
+            $topSourcesText = ($topErrorSources | Select-Object -First 3 | ForEach-Object { "$($_.Source) ($($_.Count))" }) -join ', '
+            $topSourcesNote = if ($topSourcesText) { " Топ джерел: $topSourcesText." } else { '' }
+            Add-AuditFinding -Severity 'WARNING' -Category 'EventLogs' -Message "За $EventLogDays днів знайдено системних помилок: $($script:Report.EventLogs.SystemErrors).$topSourcesNote" -Recommendation 'Перегляньте System log і визначте повторювані джерела помилок.'
         }
 
         Write-Host "  $IconEvent Події System: помилок=$($script:Report.EventLogs.SystemErrors), попереджень=$($script:Report.EventLogs.SystemWarnings) за $EventLogDays дн." -ForegroundColor Green
@@ -2282,6 +2407,118 @@ function Get-BravoUpdatesAudit {
 
 
 # ============================================================
+# MODULE: src/39b-Collectors-Runtime.ps1
+# ============================================================
+
+# MODULE: 39b-Collectors-Runtime.ps1
+# Перевірка можливості оновлення .NET Framework (4.x) та PowerShell.
+# Працює повністю офлайн: "найновіша відома версія" — константи в коді,
+# без звернень в інтернет. Періодично варто оновлювати ці константи.
+
+function Get-BravoRuntimeAudit {
+    [CmdletBinding()]
+    param()
+
+    # --- .NET Framework 4.x ---
+    try {
+        # .NET Framework 4.8.1 підтримується лише на Windows 11 22H2+ (build 22621+)
+        # та Windows Server 2022 23H2/Annual Channel+ (build 25398+, теж >= 22621).
+        # На старіших ОС (Windows 7 SP1–10, Server 2012–2022 LTSC) 4.8.1 не існує
+        # як окремий пакет — інсталятор там блокується "не підтримується цією ОС",
+        # тож максимум, який можна рекомендувати, — 4.8.
+        $osBuildNumber = 0
+        $osBuildParsed = [int]::TryParse([string]$script:Report.OS.Build, [ref]$osBuildNumber)
+        $supports481 = $osBuildParsed -and ($osBuildNumber -ge 22621)
+
+        if ($supports481) {
+            $maxCompatibleVersion = '4.8.1'
+            $maxCompatibleReleaseKey = 533320
+        } else {
+            $maxCompatibleVersion = '4.8'
+            $maxCompatibleReleaseKey = 528040
+        }
+        $script:Report.DotNet.LatestKnownVersion = $maxCompatibleVersion
+
+        if (Test-Path 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full') {
+            $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release
+
+            if ($release) {
+                $script:Report.DotNet.ReleaseKey = $release
+
+                if ($release -ge 533320) { $script:Report.DotNet.v4 = '4.8.1+' }
+                elseif ($release -ge 528040) { $script:Report.DotNet.v4 = '4.8' }
+                elseif ($release -ge 461808) { $script:Report.DotNet.v4 = '4.7.2+' }
+                else { $script:Report.DotNet.v4 = "Release $release" }
+
+                $script:Report.DotNet.UpdateAvailable = ($release -lt $maxCompatibleReleaseKey)
+
+                if ($script:Report.DotNet.UpdateAvailable) {
+                    if ($supports481) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'DotNet' -Message ".NET Framework застарів: $($script:Report.DotNet.v4) (максимальна сумісна версія для цієї ОС: 4.8.1)" -Recommendation 'Встановіть оновлення через Windows Update (.NET Framework 4.8.1 постачається як компонент ОС) або офлайн-інсталятор із microsoft.com/net/download/dotnet-framework/net481, якщо Windows Update недоступний.'
+                    } else {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'DotNet' -Message ".NET Framework застарів: $($script:Report.DotNet.v4) (максимальна сумісна версія для цієї ОС: 4.8; 4.8.1 на цій версії Windows НЕ підтримується)" -Recommendation 'Встановіть .NET Framework 4.8 (максимум, підтримуваний цією ОС) через Windows Update або офлайн-інсталятор. Не намагайтесь ставити 4.8.1 — інсталятор заблокує встановлення як несумісне з цією ОС.'
+                    }
+                }
+            }
+        }
+
+        Write-Host "  $IconOk .NET Framework: $($script:Report.DotNet.v4)" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Runtime.DotNet' -Message $_.Exception.Message
+    }
+
+    # --- Windows PowerShell (Desktop edition) ---
+    try {
+        $psVersion = $PSVersionTable.PSVersion
+        $currentPSEdition = $PSVersionTable.PSEdition
+
+        if ($currentPSEdition -eq 'Desktop' -and $psVersion.Major -lt 5) {
+            Add-AuditFinding -Severity 'WARNING' -Category 'PowerShell' -Message "Застаріла версія Windows PowerShell: $psVersion" -Recommendation 'Оновіть до Windows PowerShell 5.1 (Windows Management Framework 5.1) — це остання версія Desktop-редакції.'
+        }
+    } catch {
+        Add-AuditError -Section 'Runtime.PowerShell' -Message $_.Exception.Message
+    }
+
+    # --- PowerShell 7 (Core), встановлений поруч ---
+    try {
+        $latestKnownCore7 = '7.6' # оновлено 2026-08, звірити при наступному ревю
+        $script:Report.PowerShell.Core7LatestKnown = $latestKnownCore7
+
+        $core7InstallsPath = 'HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions'
+        if (Test-Path $core7InstallsPath) {
+            $core7Install = Get-ChildItem -LiteralPath $core7InstallsPath -ErrorAction SilentlyContinue |
+                ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue } |
+                Where-Object { $_.SemanticVersion } |
+                Sort-Object { [version]($_.SemanticVersion -replace '-.*$','') } -Descending |
+                Select-Object -First 1
+
+            if ($core7Install) {
+                $script:Report.PowerShell.Core7Installed = $true
+                $script:Report.PowerShell.Core7Version = $core7Install.SemanticVersion
+
+                $core7VersionParsed = [version]($core7Install.SemanticVersion -replace '-.*$','')
+                $latestKnownParsed = [version]$latestKnownCore7
+
+                if (($core7VersionParsed.Major -lt $latestKnownParsed.Major) -or
+                    ($core7VersionParsed.Major -eq $latestKnownParsed.Major -and $core7VersionParsed.Minor -lt $latestKnownParsed.Minor)) {
+                    $script:Report.PowerShell.Core7UpdateAvailable = $true
+                    Add-AuditFinding -Severity 'WARNING' -Category 'PowerShell' -Message "PowerShell 7 застарів: $($script:Report.PowerShell.Core7Version) (найновіша відома версія: $latestKnownCore7)" -Recommendation 'Оновіть PowerShell 7 через winget (winget upgrade Microsoft.PowerShell) або MSI з github.com/PowerShell/PowerShell.'
+                }
+            }
+        }
+
+        if (-not $script:Report.PowerShell.Core7Installed -and $PSVersionTable.PSEdition -eq 'Desktop' -and $PSVersionTable.PSVersion.Major -ge 5) {
+            Add-AuditFinding -Severity 'INFO' -Category 'PowerShell' -Message 'PowerShell 7 (Core) не встановлено' -Recommendation 'За потреби встановіть сучасний PowerShell 7 для розширеної функціональності та кросплатформної сумісності.'
+        }
+
+        Write-Host "  $IconOk PowerShell 7 (Core): $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'не встановлено'})" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Runtime.PowerShellCore' -Message $_.Exception.Message
+    }
+}
+
+
+# ============================================================
 # MODULE: src/40-Health.ps1
 # ============================================================
 
@@ -2315,7 +2552,16 @@ function Update-BravoHealthScore {
             $script:Report.Dashboard.Header.GeneratedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 
             if ($script:Report.Hardware -and $script:Report.Hardware.Disks) {
-                $diskStatus = if ($script:Report.Hardware.Disks.FreePercent -lt 10) { 'CRITICAL' } elseif ($script:Report.Hardware.Disks.FreePercent -lt 20) { 'WARNING' } else { 'OK' }
+                # Статус dashboard-плитки рахуємо по НАЙГІРШОМУ тому (тим самим
+                # порогом 10/20%, що й per-volume findings у 32-Collectors-Storage.ps1),
+                # а не по агрегованому FreePercent по всіх дисках разом. Інакше
+                # один майже заповнений диск ховається за великим вільним місцем
+                # на інших, і dashboard показує "OK" одночасно з CRITICAL-знахідкою
+                # для того самого тому.
+                $volumeFreePercents = @($script:Report.Hardware.Disks.Volumes | Where-Object { $null -ne $_.FreePercent } | ForEach-Object { $_.FreePercent })
+                $worstFreePercent = if ($volumeFreePercents.Count -gt 0) { ($volumeFreePercents | Measure-Object -Minimum).Minimum } else { $script:Report.Hardware.Disks.FreePercent }
+
+                $diskStatus = if ($worstFreePercent -lt 10) { 'CRITICAL' } elseif ($worstFreePercent -lt 20) { 'WARNING' } else { 'OK' }
                 $script:Report.Dashboard.Metrics.Disk.Value = "$($script:Report.Hardware.Disks.FreePercent)% free"
                 $script:Report.Dashboard.Metrics.Disk.Details = "$($script:Report.Hardware.Disks.FreeGB) GB free з $($script:Report.Hardware.Disks.TotalGB) GB"
                 $script:Report.Dashboard.Metrics.Disk.Status = $diskStatus
@@ -2351,11 +2597,48 @@ function Export-BravoJsonReport {
     # JSON
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
-        ConvertTo-Json $script:Report -Depth 12 | Out-File $jsonPath -Encoding utf8
+        $jsonContent = ConvertTo-Json $script:Report -Depth 12
+        # Out-File -Encoding utf8 у Windows PowerShell 5.1 завжди додає BOM,
+        # що ламає суворі JSON-парсери (RFC 8259 не допускає BOM) у зовнішніх
+        # CI/monitoring-пайплайнах, які читають цей файл. Пишемо через
+        # .NET напряму з UTF8Encoding($false) — без BOM.
+        #
+        # Ретрай на IOException: якщо цей файл уже існує (90-Main.ps1 повторно
+        # викликає цю функцію наприкінці, щоб зафіксувати фінальні ExportErrors),
+        # він міг лишитись коротко заблокованим попереднім кроком — наприклад,
+        # Send-MailMessage асинхронно звільняє handle вкладення не миттєво
+        # (garbage collector/finalizer), і негайний повторний запис ловить
+        # sharing violation. Підтверджено реальним прогоном. 3 спроби з
+        # короткою паузою покривають цей транзієнтний випадок.
+        # Примітка: виключення від .NET static method call (WriteAllText)
+        # PowerShell 5.1 обгортає в MethodInvocationException — типізований
+        # `catch [System.IO.IOException]` НЕ спрацьовує (тип не збігається,
+        # перевірено емпірично), тому тут навмисно catch-all із перевіркою
+        # реальної причини через InnerException.
+        #
+        # Важливо: сам по собі Start-Sleep НЕ допомагає — підтверджено
+        # емпірично, lock тримається 5+ секунд і довше без дій. Причина:
+        # Send-MailMessage (SmtpClient/MailMessage/Attachment) звільняє
+        # file handle вкладення лише через finalizer, а не одразу при
+        # виключенні — GC не запускається сам по собі негайно. Явний
+        # [GC]::Collect() + WaitForPendingFinalizers() форсує звільнення
+        # миттєво (перевірено емпірично — без цього retry марний).
+        $maxAttempts = 3
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            try {
+                [System.IO.File]::WriteAllText($jsonPath, $jsonContent, (New-Object System.Text.UTF8Encoding($false)))
+                break
+            } catch {
+                $isShareViolation = ($_.Exception.InnerException -is [System.IO.IOException]) -or ($_.Exception -is [System.IO.IOException])
+                if (-not $isShareViolation -or $attempt -ge $maxAttempts) { throw }
+                [System.GC]::Collect()
+                [System.GC]::WaitForPendingFinalizers()
+            }
+        }
         $script:Report.GeneratedFiles += $jsonPath
         Write-Host "  $IconJson JSON: $BaseFileName.json" -ForegroundColor Green
     } catch {
-        Add-AuditError -Section 'Export.Json' -Message $_.Exception.Message
+        Add-ExportError -Section 'Export.Json' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка JSON: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
@@ -2402,6 +2685,26 @@ function Export-BravoHtmlReport {
                 param([AllowNull()][object]$Value)
                 if ($null -eq $Value) { return '' }
                 return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+            }
+
+            function Get-BravoSafePercentText {
+                # Для progress-bar значень (style="width:...%"), які вставляються
+                # без ConvertTo-BravoHtmlText напряму в HTML-атрибут і текст.
+                # Гарантує, що на виході завжди чисте число 0-100 — навіть якщо
+                # джерело (WMI/CIM) колись поверне не число, воно не потрапить
+                # у розмітку як є.
+                param([AllowNull()][object]$Value)
+                $parsed = 0.0
+                # [string]-каст PowerShell форматує double через InvariantCulture
+                # (крапка), тож TryParse ТЕЖ має звірятись з InvariantCulture —
+                # інакше на локалізованих ОС (де CurrentCulture очікує кому,
+                # напр. uk-UA) парсинг мовчки провалюється і все стає "0%".
+                if ($null -ne $Value -and [double]::TryParse([string]$Value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
+                    if ($parsed -lt 0) { $parsed = 0 }
+                    if ($parsed -gt 100) { $parsed = 100 }
+                    return $parsed.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+                }
+                return '0'
             }
 
             function ConvertTo-BravoHtmlListText {
@@ -2605,10 +2908,18 @@ function Export-BravoHtmlReport {
 
             $serviceRows = if ($script:Report.Services.AutomaticStopped.Count -gt 0) {
                 ($script:Report.Services.AutomaticStopped | ForEach-Object {
-                    "<tr><td>$(ConvertTo-BravoHtmlText $_.Name)</td><td>$(ConvertTo-BravoHtmlText $_.DisplayName)</td><td>$(ConvertTo-BravoHtmlText $_.StartType)</td><td>$(ConvertTo-BravoHtmlText $_.Status)</td></tr>"
+                    "<tr><td>$(ConvertTo-BravoHtmlText $_.Name)</td><td>$(ConvertTo-BravoHtmlText $_.DisplayName)</td><td>$(ConvertTo-BravoHtmlText $_.StartMode)</td><td>$(ConvertTo-BravoHtmlText $_.State)</td></tr>"
                 }) -join "`n"
             } else {
                 '<tr><td colspan="4" class="muted">Автоматичних служб у зупиненому стані не знайдено.</td></tr>'
+            }
+
+            $eventTopErrorRows = if ($script:Report.EventLogs.TopErrorSources.Count -gt 0) {
+                ($script:Report.EventLogs.TopErrorSources | ForEach-Object {
+                    "<tr><td>$(ConvertTo-BravoHtmlText $_.Source)</td><td>$(ConvertTo-BravoHtmlText $_.Count)</td><td>$(ConvertTo-BravoHtmlText $_.LastMessage)</td></tr>"
+                }) -join "`n"
+            } else {
+                '<tr><td colspan="3" class="muted">Помилок System log за вибраний період не знайдено.</td></tr>'
             }
 
             $adapterRows = if ($script:Report.Network.Adapters.Count -gt 0) {
@@ -2667,6 +2978,28 @@ function Export-BravoHtmlReport {
                 '<tr><td colspan="11" class="muted">Storage Deep дані відсутні для поточного профілю або збір завершився з помилкою.</td></tr>'
             }
 
+            $updatesPending = @($script:Report.WindowsUpdate.PendingUpdates)
+            $updatesPendingRows = if ($updatesPending.Count -gt 0) {
+                ($updatesPending | ForEach-Object {
+                    $pendingUpdate = $_
+                    $severityText = if ([string]::IsNullOrWhiteSpace([string]$pendingUpdate.Severity)) { 'Unspecified' } else { [string]$pendingUpdate.Severity }
+                    $severityClass = switch ($severityText) {
+                        'Critical'  { 'risk-critical' }
+                        'Important' { 'risk-warning' }
+                        'Moderate'  { 'risk-warning' }
+                        'Low'       { 'risk-ok' }
+                        default     { 'risk-unknown' }
+                    }
+                    # Allow-list схеми перед вставкою в href: HTML-encode сам собою
+                    # не блокує javascript:/data:-URI, лише екранує спецсимволи.
+                    $catalogUrlValue = [string]$pendingUpdate.CatalogUrl
+                    $catalogLinkHtml = if ([string]::IsNullOrWhiteSpace($catalogUrlValue) -or $catalogUrlValue -notmatch '^https://') { '' } else { "<a href=`"$(ConvertTo-BravoHtmlText $catalogUrlValue)`" target=`"_blank`" rel=`"noopener noreferrer`">Catalog ↗</a>" }
+                    "<tr><td>$(ConvertTo-BravoHtmlText $pendingUpdate.KB)</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Title)</td><td><span class=`"risk $severityClass`">$(ConvertTo-BravoHtmlText $severityText)</span></td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Categories)</td><td>$(if($pendingUpdate.IsDownloaded){'Так'}else{'Ні'})</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.SizeMB)</td><td>$catalogLinkHtml</td></tr>"
+                }) -join "`n"
+            } else {
+                '<tr><td colspan="7" class="muted">Відсутні оновлення не виявлені, пошук пропущено або завершився з помилкою (див. Search status).</td></tr>'
+            }
+
             $computerNameHtml = ConvertTo-BravoHtmlText $script:Report.ComputerName
             $timestampHtml = ConvertTo-BravoHtmlText $script:Report.Timestamp
             $profileHtml = ConvertTo-BravoHtmlText $Profile
@@ -2677,8 +3010,6 @@ function Export-BravoHtmlReport {
             $primaryIpv4Html = ConvertTo-BravoHtmlText $script:Report.Network.IP.PrimaryIPv4
             $publicIpv4StatusForReport = if (-not [string]::IsNullOrWhiteSpace([string]$script:Report.Network.IP.PublicIPv4)) {
                 [string]$script:Report.Network.IP.PublicIPv4
-            } elseif (-not [string]::IsNullOrWhiteSpace([string]$script:Report.Network.PublicIPv4)) {
-                [string]$script:Report.Network.PublicIPv4
             } else {
                 [string]$script:Report.Network.IP.PublicIPv4Status
             }
@@ -2742,16 +3073,16 @@ function Export-BravoHtmlReport {
   </nav>
   <main class="content">
     <section id="tab-general" class="tab-panel active"><h2 class="tab-panel-title"><span class="section-icon">📌</span>General Dashboard</h2><div class="metrics-grid">$metricCardsHtml</div><div class="grid"><div class="card"><h3>Підсумок</h3>$(New-BravoInfoRowHtml 'Health Score' "$($script:Report.Health.Score)/100")$(New-BravoInfoRowHtml 'Status' $script:Report.Status)$(New-BravoInfoRowHtml 'Status reason' $script:Report.StatusReason)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)$(New-BravoInfoRowHtml 'Collection errors' $script:Report.CollectionErrors.Count)</div><div class="card"><h3>Ключова мережа</h3>$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div></div></section>
-    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div></div></section>
-    <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.CPU.LoadPercent)%">$($script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.RAM.UsedPercent)%">$($script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$($script:Report.Hardware.Disks.FreePercent)%">$($script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div></section>
+    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml '.NET оновлення' $(if($script:Report.DotNet.UpdateAvailable){"Доступне (найновіша: $($script:Report.DotNet.LatestKnownVersion))"}else{'Немає'}))$(New-BravoInfoRowHtml 'PowerShell 7 (Core)' $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'Не встановлено'}))$(New-BravoInfoRowHtml 'PowerShell 7 оновлення' $(if($script:Report.PowerShell.Core7UpdateAvailable){"Доступне (найновіша: $($script:Report.PowerShell.Core7LatestKnown))"}else{'Немає'}))$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Service' $script:Report.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Installed hotfixes' $script:Report.WindowsUpdate.InstalledHotFixCount)$(New-BravoInfoRowHtml 'Last hotfix' "$($script:Report.WindowsUpdate.LastInstalledHotFix) ($($script:Report.WindowsUpdate.LastInstallDate))")$(New-BravoInfoRowHtml 'Pending reboot' $(if($script:Report.WindowsUpdate.PendingRebootRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Pending updates' $script:Report.WindowsUpdate.PendingCount)$(New-BravoInfoRowHtml 'Pending critical / security' "$($script:Report.WindowsUpdate.PendingCritical) / $($script:Report.WindowsUpdate.PendingSecurity)")$(New-BravoInfoRowHtml 'Search status' $script:Report.WindowsUpdate.SearchStatus)</div></div><h3>Pending Windows Updates</h3>$(New-BravoTableToolbarHtml -TableId 'table-pending-updates' -Placeholder 'Пошук по KB, назві, severity...')<div class="table-scroll"><table id="table-pending-updates" class="data-table"><thead><tr><th>KB</th><th>Назва</th><th>Severity</th><th>Категорії</th><th>Завантажено</th><th>Size MB</th><th>Посилання</th></tr></thead><tbody>$updatesPendingRows</tbody></table></div></section>
+    <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div></section>
     <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th></tr></thead><tbody>$adapterRows</tbody></table></div></section>
     <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div></div></section>
-    <section id="tab-services" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">⚙️</span>Services</h2><div class="grid"><div class="card"><h3>Service summary</h3>$(New-BravoInfoRowHtml 'Processes' $script:Report.Processes.Total)$(New-BravoInfoRowHtml 'Services running' "$($script:Report.Services.Running)/$($script:Report.Services.Total)")$(New-BravoInfoRowHtml 'Automatic stopped' $script:Report.Services.AutomaticStopped.Count)$(New-BravoInfoRowHtml "System errors ($EventLogDays дн.)" $script:Report.EventLogs.SystemErrors)$(New-BravoInfoRowHtml "System warnings ($EventLogDays дн.)" $script:Report.EventLogs.SystemWarnings)</div></div><h3>Automatic stopped services</h3>$(New-BravoTableToolbarHtml -TableId 'table-services-stopped' -Placeholder 'Пошук по службах...')<div class="table-scroll"><table id="table-services-stopped" class="data-table"><thead><tr><th>Name</th><th>DisplayName</th><th>StartType</th><th>Status</th></tr></thead><tbody>$serviceRows</tbody></table></div></section>
+    <section id="tab-services" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">⚙️</span>Services</h2><div class="grid"><div class="card"><h3>Service summary</h3>$(New-BravoInfoRowHtml 'Processes' $script:Report.Processes.Total)$(New-BravoInfoRowHtml 'Services running' "$($script:Report.Services.Running)/$($script:Report.Services.Total)")$(New-BravoInfoRowHtml 'Automatic stopped' $script:Report.Services.AutomaticStopped.Count)$(New-BravoInfoRowHtml "System errors ($EventLogDays дн.)" $script:Report.EventLogs.SystemErrors)$(New-BravoInfoRowHtml "System warnings ($EventLogDays дн.)" $script:Report.EventLogs.SystemWarnings)</div></div><h3>Automatic stopped services</h3>$(New-BravoTableToolbarHtml -TableId 'table-services-stopped' -Placeholder 'Пошук по службах...')<div class="table-scroll"><table id="table-services-stopped" class="data-table"><thead><tr><th>Name</th><th>DisplayName</th><th>StartType</th><th>Status</th></tr></thead><tbody>$serviceRows</tbody></table></div><h3>Топ джерел помилок System log ($EventLogDays дн.)</h3>$(New-BravoTableToolbarHtml -TableId 'table-events-top-sources' -Placeholder 'Пошук по джерелах помилок...')<div class="table-scroll"><table id="table-events-top-sources" class="data-table"><thead><tr><th>Source</th><th>Count</th><th>Останнє повідомлення</th></tr></thead><tbody>$eventTopErrorRows</tbody></table></div></section>
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>
     <section id="tab-updates" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔄</span>Updates</h2><div class="grid"><div class="card"><h3>Життєвий цикл ОС</h3>$(New-BravoInfoRowHtml 'Продукт' $script:Report.Updates.OS.Product)$(New-BravoInfoRowHtml 'Версія' $script:Report.Updates.OS.DisplayVersion)$(New-BravoInfoRowHtml 'Версія з реєстру' $script:Report.Updates.OS.RegistryDisplayVersion)$(New-BravoInfoRowHtml 'Full build' $script:Report.Updates.OS.FullBuild)$(New-BravoInfoRowHtml 'Канал' $script:Report.Updates.OS.Channel)$(New-BravoInfoRowHtml 'EditionID' $script:Report.Updates.OS.EditionId)$(New-BravoInfoRowHtml 'Кінець підтримки' $script:Report.Updates.OS.SupportEndDate)$(New-BravoInfoRowHtml 'Днів до кінця підтримки' $script:Report.Updates.OS.DaysToEndOfSupport)<div class="info-row"><span class="info-label">Статус підтримки</span><span class="info-value"><span class="status-pill $updatesSupportStatusClass">$(ConvertTo-BravoHtmlText $updatesSupportStatusText)</span></span></div>$(New-BravoInfoRowHtml 'Дані lifecycle від' $script:Report.Updates.OS.LifecycleDataUpdatedAt)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Служба wuauserv' $script:Report.Updates.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Тип запуску' $script:Report.Updates.WindowsUpdate.ServiceStartType)$(New-BravoInfoRowHtml 'Політика оновлень' $script:Report.Updates.WindowsUpdate.AutoUpdateOption)$(New-BravoInfoRowHtml 'WSUS' $(if($script:Report.Updates.WindowsUpdate.ManagedByWSUS){$script:Report.Updates.WindowsUpdate.WSUSServer}else{'Ні'}))$(New-BravoInfoRowHtml 'Останній пошук' $script:Report.Updates.WindowsUpdate.LastDetectSuccess)$(New-BravoInfoRowHtml 'Остання установка' $script:Report.Updates.WindowsUpdate.LastInstallSuccess)$(New-BravoInfoRowHtml 'Потрібне перезавантаження' $pendingRebootText)$(New-BravoInfoRowHtml 'Статус пошуку' $updatesSearchStatusText)$(New-BravoInfoRowHtml 'Тривалість пошуку, сек' $script:Report.Updates.Search.DurationSeconds)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Потрібно встановити</div><div class="storage-summary-value">$($script:Report.Updates.Pending.Total)$(if($script:Report.Updates.Pending.IsTruncated){" <span class=`"risk risk-warning`">детально: $($script:Report.Updates.Pending.Detailed)</span>"})</div></div><div class="storage-summary-item"><div class="storage-summary-label">Security</div><div class="storage-summary-value"><span class="risk risk-critical">$($script:Report.Updates.Pending.Security)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Драйвери</div><div class="storage-summary-value"><span class="risk risk-warning">$($script:Report.Updates.Pending.Driver)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Завантажено</div><div class="storage-summary-value"><span class="risk risk-ok">$($script:Report.Updates.Pending.Downloaded)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Обсяг, MB</div><div class="storage-summary-value">$($script:Report.Updates.Pending.TotalSizeMB)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Встановлено оновлень</div><div class="storage-summary-value">$($script:Report.Updates.Installed.Total)</div></div></div><h3>Оновлення, які потрібно встановити</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-pending' -Placeholder 'Пошук по назві, KB, категорії...')<div class="table-scroll"><table id="table-updates-pending" class="data-table"><thead><tr><th>Title</th><th>KB</th><th>Categories</th><th>Severity</th><th>Size MB</th><th>Downloaded</th><th>Released</th></tr></thead><tbody>$pendingUpdatesRows</tbody></table></div><h3>Останні встановлені оновлення</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-installed' -Placeholder 'Пошук по KB, опису, користувачу...')<div class="table-scroll"><table id="table-updates-installed" class="data-table"><thead><tr><th>HotFixID</th><th>Description</th><th>Installed by</th><th>Installed on</th></tr></thead><tbody>$installedUpdatesRows</tbody></table></div></section>
     <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div></section>
   </main>
-  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $OutputDir</p></footer>
+  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $(ConvertTo-BravoHtmlText $OutputDir)</p></footer>
 </div>
 <script>
 (function(){
@@ -2819,7 +3150,7 @@ function Export-BravoHtmlReport {
             $script:Report.GeneratedFiles += $htmlPath
             Write-Host "  $IconHtml HTML: $BaseFileName.html" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Html' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Html' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка HTML: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
@@ -2893,7 +3224,7 @@ function Export-BravoCsvReport {
             $script:Report.GeneratedFiles += $csvPath
             Write-Host "  $IconCsv CSV: $BaseFileName.csv" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Csv' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Csv' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка CSV: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
@@ -2983,7 +3314,7 @@ function Export-BravoZipReport {
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Zip' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Zip' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка створення ZIP: $($_.Exception.Message)" -ForegroundColor Red
         } finally {
             if ($null -ne $zipArchive) { $zipArchive.Dispose() }
@@ -3026,7 +3357,7 @@ function Send-BravoEmailReport {
             Send-MailMessage -To $EmailTo -From $EmailFrom -Subject "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)" -Body $mailBody -SmtpServer $smtpToUse -Attachments $attachments -ErrorAction Stop
             Write-Host "  $IconEmail Email відправлено на $EmailTo" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Email' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Email' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка відправки Email: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
@@ -3062,7 +3393,7 @@ function Send-BravoEmailReport {
 #>
 $ErrorActionPreference = 'Continue'
 $ScriptStartTime = Get-Date
-$ScriptVersion = "0.5.0"
+$ScriptVersion = "0.5.1"
 
 function Show-Pause {
     param([string]$Message = 'Натисніть будь-яку клавішу для виходу...')
@@ -3121,6 +3452,25 @@ function Add-AuditError {
     if (-not $script:Report) { return }
 
     $script:Report.CollectionErrors += [PSCustomObject]@{
+        Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Section = $Section
+        Message = $Message
+    }
+}
+
+function Add-ExportError {
+    # На відміну від Add-AuditError (помилки ЗБОРУ даних, впливають на Health
+    # Score), ExportErrors — помилки ЗАПИСУ звітів (JSON/HTML/CSV/ZIP/Email):
+    # проблема самого інструмента, а не аудитованої машини. Не впливає на
+    # Health Score, але впливає на exit code (P0.5).
+    param(
+        [string]$Section,
+        [string]$Message
+    )
+
+    if (-not $script:Report) { return }
+
+    $script:Report.ExportErrors += [PSCustomObject]@{
         Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         Section = $Section
         Message = $Message
@@ -3186,6 +3536,18 @@ function Resolve-AuditOutputPath {
     return (Resolve-Path -LiteralPath $RequestedPath).Path
 }
 
+# Фатальний fallback (P0.5): будь-яка термінуюча помилка, що вислизнула з
+# усіх внутрішніх try/catch колекторів/export-функцій нижче (тобто справжній
+# баг чи неочікуваний runtime-збій, а не штатна помилка збору/експорту),
+# ловиться тут і завершує процес з exit code 2 — "fatal init/runtime error",
+# на відміну від 1 (штатні CollectionErrors/ExportErrors, аудит все одно
+# завершився й дав результат).
+trap {
+    Write-Host ''
+    Write-Host "[FATAL] Неопрацьована помилка виконання: $($_.Exception.Message)" -ForegroundColor Red
+    exit 2
+}
+
 try { Clear-Host } catch {}
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
@@ -3205,6 +3567,10 @@ if ($EventLogDays -le 0) {
     }
 }
 
+# -NoZip явно вимикає ZIP (переопределяє default=$true у -Zip). Див. коментар
+# нижче біля forwarding у $arguments — CLI не підтримує -Zip:$false напряму.
+if ($NoZip) { $Zip = $false }
+
 $ScriptDirectory = Get-ScriptDirectory
 
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -3222,10 +3588,22 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($OutputPath) { $arguments += "-OutputPath `"$OutputPath`"" }
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
-        if ($Zip) { $arguments += '-Zip' }
+        # $Zip не форвардиться напряму: powershell.exe -File не підтримує
+        # синтаксис -Zip:$false для switch-параметрів з рядка команди (це
+        # PowerShell-мовна конструкція, а не CLI-конвенція — перевірено
+        # емпірично, дає ParameterArgumentTransformationError). Тому вимкнення
+        # ZIP форвардиться через окремий default-false switch -NoZip, за тим
+        # самим патерном, що й -NoPause/-NoEmoji/-NoOpenFolder нижче.
+        # Перевіряємо ЕФЕКТИВНЕ значення $Zip (уже враховує і -NoZip, і
+        # прямий -Zip:$false — обидва застосовані вище, до elevation-блоку),
+        # а не сам прапорець -NoZip, — інакше користувач, що викликав
+        # -Zip:$false напряму (старий, задокументований в CHANGELOG спосіб),
+        # так само втратить вимкнення ZIP при relaunch під адміном.
+        if (-not $Zip) { $arguments += '-NoZip' }
         if ($NoEmoji) { $arguments += '-NoEmoji' }
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
+        if ($SkipPublicIP) { $arguments += '-SkipPublicIP' }
         if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
         $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
@@ -3239,8 +3617,13 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         $psi.WorkingDirectory = $ScriptDirectory
 
         try {
-            [System.Diagnostics.Process]::Start($psi) | Out-Null
-            exit 0
+            # Чекаємо завершення елевованого процесу і прокидаємо його реальний
+            # exit code — раніше батьківський процес завершувався одразу (exit 0)
+            # незалежно від результату дочірнього, тож зовнішній caller (CI/скрипт),
+            # що перевіряє exit code первинного виклику, завжди бачив 0 (P0.5).
+            $elevatedProcess = [System.Diagnostics.Process]::Start($psi)
+            $elevatedProcess.WaitForExit()
+            exit $elevatedProcess.ExitCode
         } catch {
             Write-Host "[INFO] Не вдалося підвищити права: $($_.Exception.Message)" -ForegroundColor Yellow
         }
@@ -3272,18 +3655,8 @@ Write-Host ''
 # --- ОС ---
 Get-BravoOperatingSystemAudit
 
-# --- .NET ---
-try {
-    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full') {
-        $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release
-        if ($release -ge 533320) { $script:Report.DotNet.v4 = '4.8.1+' }
-        elseif ($release -ge 528040) { $script:Report.DotNet.v4 = '4.8' }
-        elseif ($release -ge 461808) { $script:Report.DotNet.v4 = '4.7.2+' }
-        elseif ($release) { $script:Report.DotNet.v4 = "Release $release" }
-    }
-} catch {
-    Add-AuditError -Section 'DotNet' -Message $_.Exception.Message
-}
+# --- .NET / PowerShell (перевірка можливості оновлення) ---
+Get-BravoRuntimeAudit
 
 # --- Апаратне забезпечення ---
 Get-BravoHardwareAudit
@@ -3323,6 +3696,15 @@ Get-BravoSoftwareAudit
 Get-BravoUpdatesAudit
 
 # --- Health score ---
+# Рахується РІВНО ОДИН РАЗ, одразу після завершення всіх колекторів. До
+# стабілізаційного рефакторингу (P0.4) тут існував "гейт" повторного
+# перерахунку після export-етапів — бо помилки запису JSON/HTML/ZIP мішались
+# у той самий CollectionErrors, що й впливає на Health Score. Тепер
+# CollectionErrors (помилки ЗБОРУ) і ExportErrors (помилки ЗАПИСУ звітів)
+# розділені: Health Score — властивість аудитованої машини (CollectionErrors
+# + Findings), export-етапи більше не можуть його змінити заднім числом,
+# тож повторний перерахунок і пов'язаний з ним ризик (self-zip race з
+# попередніх версій) став непотрібним.
 Update-BravoHealthScore
 
 # ============================================================
@@ -3332,7 +3714,9 @@ Update-BravoHealthScore
 try {
     $outputDir = Resolve-AuditOutputPath -RequestedPath $OutputPath -DefaultPath $ScriptDirectory
 } catch {
-    Add-AuditError -Section 'OutputPath' -Message $_.Exception.Message
+    # Проблема самого інструмента (не вдалось підготувати каталог виводу),
+    # не властивість аудитованої машини — ExportError, не CollectionError.
+    Add-ExportError -Section 'OutputPath' -Message $_.Exception.Message
     $outputDir = $ScriptDirectory
 }
 
@@ -3344,7 +3728,15 @@ Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
 Write-Host ''
 Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
-# JSON
+# JSON — Health Score вже фінальний (рахувався до початку export-етапів),
+# тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
+# Пишеться ПЕРШИМ (не останнім), щоб потрапити до ZIP нижче — але через це
+# ExportErrors від наступних export-етапів (HTML/CSV/ZIP/Email) у ньому ще
+# не відомі на момент цього запису. Тому наприкінці пайплайну JSON
+# перезаписується ще раз, якщо ExportErrors змінились — це ЄДИНИЙ можливий
+# повторний запис (не Health Score, не HTML, без re-zip), набагато простіше
+# й безпечніше за попередній "гейт" повторного перерахунку.
+$exportErrorCountBeforeExport = @($script:Report.ExportErrors).Count
 Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
 # HTML
@@ -3353,11 +3745,26 @@ Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOn
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
+$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+
 # ZIP
 Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
-# Email
+# Email — останній export-етап. Тіло листа й вкладення відображають стан на
+# момент відправки (Health Score вже фінальний; JSON-вкладення може не
+# містити ExportErrors від самого Email — лист не може повідомити про власну
+# невдалу відправку заднім числом, це очікуване обмеження).
 Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+
+# Якщо HTML/CSV/ZIP/Email додали нові ExportErrors після першого запису JSON —
+# перезаписуємо JSON ще раз, щоб файл на диску (не копія в ZIP) був
+# авторитетним щодо ExportErrors. Health Score тут не перераховується (не
+# залежить від ExportErrors), тож це просто один додатковий запис файлу.
+if (@($script:Report.ExportErrors).Count -gt $exportErrorCountBeforeExport) {
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+}
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)
@@ -3379,16 +3786,29 @@ if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
     Write-Host "$IconError ZIP не створено: $baseFileName.zip" -ForegroundColor Red
 }
 Write-Host "Оцінка стану: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))" -ForegroundColor Cyan
-Write-Host "Знахідки: $($script:Report.Health.Findings.Count); помилки збору: $($script:Report.CollectionErrors.Count)" -ForegroundColor Cyan
+Write-Host "Знахідки: $($script:Report.Health.Findings.Count); помилки збору: $($script:Report.CollectionErrors.Count); помилки експорту: $($script:Report.ExportErrors.Count)" -ForegroundColor Cyan
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
 Write-Host ''
 
+# --- Exit code contract (P0.5) ---
+# 0 = аудит успішно завершено, без помилок збору/експорту;
+# 1 = аудит завершено, але були CollectionErrors і/або ExportErrors;
+# 3 = обов'язковий вихідний файл (JSON) не згенеровано.
+# Health Status (WARNING/CRITICAL) НЕ впливає на exit code — це властивість
+# аудитованої машини, не ознака збою самого інструмента.
+$script:ExitCode = 0
+if (-not (Test-Path -LiteralPath $jsonPath)) {
+    $script:ExitCode = 3
+} elseif ((@($script:Report.CollectionErrors).Count -gt 0) -or (@($script:Report.ExportErrors).Count -gt 0)) {
+    $script:ExitCode = 1
+}
+
 if (-not $NoOpenFolder) {
     try { Start-Process explorer.exe -ArgumentList "`"$outputDir`"" -ErrorAction SilentlyContinue } catch {
-        Add-AuditError -Section 'OpenFolder' -Message $_.Exception.Message
+        Add-ExportError -Section 'OpenFolder' -Message $_.Exception.Message
     }
 }
 
 if (-not $NoPause) { Show-Pause }
-exit 0
+exit $script:ExitCode
 

@@ -2,7 +2,21 @@
 
 ## Поточний статус
 
-Поточна стабільна версія: **v0.4.0**.
+Поточна стабільна версія: **ScriptVersion 0.5.0** (SchemaVersion 0.6.0).
+
+## Stabilization milestone (зовнішнє ТЗ P0-P3)
+
+За результатами зовнішнього технічного завдання на стабілізацію реалізовано **P0** (execution contract, exit codes, розділення CollectionErrors/ExportErrors) — деталі в `CHANGELOG.md` ("Stabilization P0"). Статус решти пунктів ТЗ:
+
+- [x] P0.1 Уніфікувати execution contract (root wrapper мав власний, розбіжний з `dist` param-блок — переписано на transparent passthrough).
+- [x] P0.2 `-Zip:$false`/`-NoZip` коректно форвардяться через обидва хопи (wrapper→dist, dist→elevation).
+- [x] P0.3 Єдиний default `Profile` (`Forensic`, лише в `src/05-Params.ps1`).
+- [x] P0.4 CollectionErrors/ExportErrors розділені, export-pipeline спрощено (Health Score рахується один раз).
+- [x] P0.5 Детермінований exit code contract (0/1/2/3), elevation прокидає реальний exit code дочірнього процесу.
+- [ ] **P0.6/P0.7 Windows Lifecycle dataset (EOL-дати Win11/Server)** — свідомо відкладено в окремий PR: цієї функції в коді немає взагалі (не фікс, а повноцінний новий collector+dataset), що суперечить власному принципу ТЗ "нові collectors не пріоритет" для стабілізаційного етапу.
+- [ ] P1 (централізовані storage thresholds, collector/analyzer розділення, CPU/RAM findings, `-Offline`, `-SkipGeoIP`, `-SanitizeLevel`, розширення Pester/CI) — окремі майбутні PR.
+- [ ] P2 (cleanup, dead parameters, `.editorconfig`/`.gitattributes` — частину вже закрито попередніми раундами код-ревю цієї сесії, гл. `CHANGELOG.md`).
+- [ ] P3 (Deep Security: TPM/Secure Boot/BitLocker, повноцінний Forensic profile) — явно поза межами stabilization-етапу, окремі майбутні PR.
 
 Проєкт перейшов на модульну архітектуру:
 
@@ -18,26 +32,24 @@
 
 Ціль: зробити релізний пакет і документацію узгодженими з фактичною модульною архітектурою.
 
-- [ ] Виправити `tools/New-ReleasePackage.ps1`, щоб release ZIP включав:
-  - [ ] `dist/Get-BravoSystemReport.ps1`;
-  - [ ] `dist/Get-BravoSystemReport.ps1.sha512`.
+- [x] Виправити `tools/New-ReleasePackage.ps1`, щоб release ZIP включав:
+  - [x] `dist/Get-BravoSystemReport.ps1`;
+  - [x] `dist/Get-BravoSystemReport.ps1.sha512`.
+  (скрипт до цього фіксу взагалі не запускався — посилався на видалений `src/Get-BravoSystemReport.ps1`; тепер додатково звіряє sha512 перед пакуванням і використовує `src/90-Main.ps1` для визначення версії).
 - [ ] Додати перевірку release package:
   - [ ] створити ZIP;
   - [ ] розпакувати у temporary directory;
   - [ ] запустити `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого пакета;
   - [ ] перевірити створення JSON/HTML.
-- [ ] Визначити долю старого моноліту `src/Get-BravoSystemReport.ps1`:
-  - [ ] прибрати з release package;
-  - [ ] перенести у `legacy/`;
-  - [ ] або видалити після перевірки, що весь runtime формується з модулів.
-- [ ] Оновити `examples/README.md` відповідно до поточного wrapper/dist flow.
+- [x] Визначити долю старого моноліту `src/Get-BravoSystemReport.ps1`: видалено (весь runtime формується з `src/*.ps1` модулів через `Build-BRAVO-SystemReport.ps1`).
+- [x] Оновити `examples/README.md` відповідно до поточного wrapper/dist flow (`-Zip` за замовчуванням, `-NoZip` для вимкнення).
 - [ ] Додати `docs/RELEASE.md` з описом створення й перевірки release package.
 
 ## v0.4.2 Runtime Quality
 
 Ціль: прибрати логічні ризики runtime і зробити результат звіту більш передбачуваним.
 
-- [ ] Перераховувати Health Score після export-етапів або додати окремий `ExportHealth`.
+- [x] Перераховувати Health Score після export-етапів (`Update-BravoHealthScore` викликається вдруге в `90-Main.ps1`, JSON і HTML перегенеровуються лише якщо з'явились нові `CollectionErrors`).
 - [ ] Додати режим strict validation:
   - [ ] `-Strict`;
   - [ ] ненульовий exit code при критичних collection/export помилках;
@@ -63,7 +75,7 @@
 
 - [ ] Додати параметр `-Sanitize`.
 - [ ] Додати параметр `-SanitizeLevel Basic|Strict`.
-- [ ] Додати параметр `-SkipPublicIP`.
+- [x] Додати параметр `-SkipPublicIP` (`src/05-Params.ps1`, гейтинг профілем Full/Deep/Forensic).
 - [ ] Додати параметр `-Offline`, який вимикає зовнішні HTTPS-запити.
 - [ ] Маскувати у JSON/HTML/CSV/TXT/Markdown:
   - [ ] computer name;
@@ -146,9 +158,9 @@
 ### Updates and Event Logs
 
 - [x] System errors/warnings за 24h і за період профілю.
-- [ ] Installed hotfixes.
-- [ ] Pending reboot detection.
-- [ ] Windows Update errors.
+- [x] Installed hotfixes (`39-Collectors-Updates.ps1`, `WindowsUpdate.InstalledHotFixes`).
+- [x] Pending reboot detection (`WindowsUpdate.PendingRebootRequired`).
+- [x] Windows Update errors (`WindowsUpdate.SearchError`; pending updates з Catalog-посиланням у Deep/Forensic).
 - [ ] Event logs: System, Application, Setup, Security summary.
 - [ ] Provider summary.
 - [ ] Critical/Error/Warning grouping.
@@ -300,10 +312,11 @@
 - [x] JSON validation.
 - [x] `CollectionErrors=0` для Quick CI.
 - [x] Public IPv4 literal scan.
-- [ ] Parser check для всіх `src/*.ps1`.
+- [x] Deep runtime test з `-CSV -Zip`.
+- [x] Базовий Pester-набір (`tests/`: чисті helper-функції, консистентність build-маніфесту, наскрізний E2E-прогін), запускається і в CI, і локально через `Invoke-Pester tests/`.
+- [ ] Parser check для всіх `src/*.ps1` (окремо від `dist`).
 - [ ] Quick BAT test.
 - [ ] Full runtime test.
-- [ ] Deep runtime test з `-CSV -Zip`.
 - [ ] Forensic smoke test з `-JSONOnly`.
 - [ ] Release package build test.
 - [ ] Release package unpack-and-run test.
@@ -313,11 +326,10 @@
 
 ## Технічний борг
 
-- [ ] Усунути плутанину між `src/Get-BravoSystemReport.ps1` і модульним runtime у `dist`.
-- [ ] Вирішити, чи потрібен `src/Get-BravoSystemReport.ps1` як legacy artifact.
-- [ ] Уніфікувати версії `ScriptVersion`, `SchemaVersion`, README, CHANGELOG і release package.
+- [x] Усунути плутанину між `src/Get-BravoSystemReport.ps1` і модульним runtime у `dist` — застарілий моноліт видалено, `powershell-static-check.yml` більше не посилається на нього.
+- [x] Уніфікувати версії `ScriptVersion`, `SchemaVersion`, README, CHANGELOG — README/ROADMAP синхронізовані з фактичними версіями (release package все ще потребує окремої перевірки, див. v0.4.1 Release Stabilization вище).
 - [ ] Додати `docs/SCHEMA.md`.
-- [ ] Додати `docs/TESTING.md`.
+- [ ] Додати `docs/TESTING.md` (базовий Pester-набір уже є в `tests/`, документ ще не написаний).
 - [ ] Додати `docs/RELEASE.md`.
 - [ ] Описати правила сумісності Windows PowerShell 5.1 / PowerShell 7.
 

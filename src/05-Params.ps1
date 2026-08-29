@@ -11,11 +11,13 @@ param(
     [switch]$JSONOnly,
     [switch]$CSV,
     [switch]$Zip = $true,
+    [switch]$NoZip,
     [switch]$NoEmoji,
     [switch]$NoElevate,
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipPublicIP,
 
     [int]$EventLogDays = 0,
 

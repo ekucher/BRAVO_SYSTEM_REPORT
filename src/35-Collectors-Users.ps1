@@ -24,14 +24,27 @@ function Get-LocalAdministratorsSafe {
     try {
         $raw = net localgroup "$adminGroupName" 2>$null
         if ($raw) {
+            # Завершальний рядок "The command completed successfully." (net.exe)
+            # локалізується разом з MUI-пакетом Windows — раніше тут матчився
+            # текст лише для en/uk, на інших локалях (ru/de/pl/...) фальшивий
+            # службовий рядок потрапляв у список адмінів. net localgroup
+            # структурно ЗАВЖДИ завершує вивід рівно одним таким рядком
+            # одразу після переліку членів, тому замість тексту-матчингу
+            # просто відкидаємо останній непорожній рядок після роздільника
+            # "----" — це локале-незалежно.
             $capture = $false
+            $capturedLines = New-Object System.Collections.Generic.List[string]
             foreach ($line in $raw) {
                 $text = ($line | Out-String).Trim()
                 if (-not $text) { continue }
                 if ($text -match '^-{3,}$') { $capture = $true; continue }
-                if ($text -match 'command completed|Команда виконана|completed successfully') { break }
-                if ($capture) { $members += $text }
+                if ($capture) { $capturedLines.Add($text) }
             }
+            if ($capturedLines.Count -gt 0) {
+                # Останній рядок — завжди статус-повідомлення net.exe, не ім'я.
+                $capturedLines.RemoveAt($capturedLines.Count - 1)
+            }
+            $members = @($capturedLines)
         }
     } catch {
         Add-AuditError -Section 'Users.LocalAdmins.NetLocalGroup' -Message $_.Exception.Message

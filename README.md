@@ -24,7 +24,9 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 
 ## Поточний статус
 
-Поточна стабільна версія: **v0.5.0**.
+Поточна стабільна версія: **ScriptVersion 0.5.1** (контракт JSON-звіту: **SchemaVersion 0.6.1**).
+
+`ScriptVersion` версіонує реліз інструмента (`src/90-Main.ps1`), `SchemaVersion` — структуру JSON-контракту (`src/20-ReportModel.ps1`); вони змінюються незалежно.
 
 Стабільні етапи:
 
@@ -34,8 +36,10 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - **v0.3.3** — HTML-таблиці Storage Deep / Storage Critical Findings;
 - **v0.3.4** — виправлено BAT `--nopause`;
 - **v0.3.5** — актуалізація README / документації;
-- **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у `src`-модулі.
-- **v0.5.0** — аналіз ОС і оновлень Windows: колектор `Updates`, таблиця життєвого циклу всіх випусків Windows, вкладка Updates у HTML-звіті.
+- **v0.4.0** — модульна архітектура BRAVO SYSTEM REPORT: collector-и, export-и, Health Score і модель звіту винесені у `src`-модулі;
+- **v0.4.1** — Windows Update collector, privacy-гейтинг публічного IP (`-SkipPublicIP`), подвійний перерахунок Health Score після export-етапів, перевірка можливості оновлення .NET Framework/PowerShell, Catalog-посилання для pending updates;
+- **v0.5.0** — аналіз ОС і оновлень Windows: колектор `Updates`, таблиця життєвого циклу всіх випусків Windows, вкладка Updates у HTML-звіті;
+- **v0.5.1** — Stabilization P0: єдиний execution contract між root wrapper і `dist` (усунено дублювання дефолтів параметрів), розділення `CollectionErrors`/`ExportErrors`, детермінований exit code contract (0/1/2/3), спрощений export-pipeline (Health Score рахується один раз).
 
 ## Швидкий запуск
 
@@ -166,7 +170,7 @@ BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.csv
 BravoSystemReport_<COMPUTERNAME>_<yyyyMMdd_HHmmss>.zip
 ```
 
-CSV і ZIP створюються при використанні відповідних параметрів `-CSV` і `-Zip`.
+CSV створюється при використанні `-CSV`. ZIP створюється за замовчуванням (`-Zip` увімкнено за замовчуванням) — вимкнути можна через `-NoZip` (рекомендовано) або `-Zip:$false` (обидва способи коректно форвардяться навіть при автоматичному підвищенні прав до адміністратора).
 
 ## Storage Deep Audit
 
@@ -231,6 +235,21 @@ risk-warning
 risk-ok
 risk-unknown
 ```
+
+## Exit code contract
+
+Скрипт завершується з детермінованим exit code, придатним для перевірки в CI/автоматизації:
+
+| Code | Значення |
+|------|----------|
+| `0` | Аудит успішно завершено, без помилок збору чи експорту |
+| `1` | Аудит завершено, але були помилки збору (`CollectionErrors`) і/або запису звітів (`ExportErrors`) |
+| `2` | Фатальна неопрацьована помилка виконання (баг/runtime-збій) |
+| `3` | Обов'язковий вихідний файл (JSON) не згенеровано |
+
+`Health.Status` (`OK`/`WARNING`/`CRITICAL`) **не впливає** на exit code — це властивість аудитованої машини (наскільки вона здорова), а не ознака збою самого інструмента BRAVO SYSTEM REPORT. `CollectionErrors` (помилки WMI/CIM/реєстру) і `ExportErrors` (помилки запису JSON/HTML/CSV/ZIP/email) розділені в JSON-звіті — перші впливають на `Health.Score`, другі — ні, обидва впливають на exit code.
+
+При автоматичному підвищенні прав (UAC) батьківський процес чекає завершення елевованого дочірнього процесу й повертає його реальний exit code.
 
 ## BAT-запускачі
 
@@ -333,6 +352,7 @@ BRAVO_SYSTEM_REPORT
 │   ├── Get-BravoSystemReport.ps1
 │   └── Get-BravoSystemReport.ps1.sha512
 ├── docs/
+│   ├── AI_RULES.md
 │   ├── ARCHITECTURE.md
 │   ├── IMPLEMENTATION_PLAN.md
 │   ├── PROJECT_RULES.md
@@ -341,6 +361,10 @@ BRAVO_SYSTEM_REPORT
 ├── examples/
 ├── patch/
 ├── review/
+├── tests/
+│   ├── Core.Tests.ps1
+│   ├── Manifest.Tests.ps1
+│   └── EndToEnd.Tests.ps1
 ├── src/
 │   ├── 00-Header.ps1
 │   ├── 05-Params.ps1
@@ -356,6 +380,7 @@ BRAVO_SYSTEM_REPORT
 │   ├── 37-Collectors-Events.ps1
 │   ├── 38-Collectors-Software.ps1
 │   ├── 39-Collectors-Updates.ps1
+│   ├── 39b-Collectors-Runtime.ps1
 │   ├── 40-Health.ps1
 │   ├── 50-Export-Json.ps1
 │   ├── 51-Export-Html.ps1
@@ -387,14 +412,14 @@ BRAVO_SYSTEM_REPORT
 - `docs/ROADMAP.md` — актуальний backlog і етапи розвитку;
 - `docs/IMPLEMENTATION_PLAN.md` — практичний план впровадження наступних доробок;
 - `docs/SECURITY.md` — правила безпечної роботи зі звітами;
-- `docs/PROJECT_RULES.md` — правила мови, стилю, git workflow і console contract.
+- `docs/PROJECT_RULES.md` — правила мови, стилю, git workflow і console contract;
+- `docs/AI_RULES.md` — правила роботи з AI-асистентами в цьому проєкті.
 
 ## Відомі технічні борги
 
 Після аналізу репозиторію зафіксовано такі ключові напрями доробки:
 
-- старий моноліт `src\Get-BravoSystemReport.ps1` лишається в репозиторії як legacy: з release flow його прибрано, але файл ще потребує перенесення або видалення;
-- Health Score потрібно перераховувати після export-етапів або окремо враховувати export health;
+- release package має включати `dist\Get-BravoSystemReport.ps1` і SHA512, бо root wrapper запускає саме `dist`;
 - потрібно реалізувати `-Sanitize` для безпечної передачі звітів третім сторонам;
 - потрібно уніфікувати network schema для `IPv4`, `PrimaryIPv4` і `PrimaryInterface`;
 - потрібно розширити Deep/Forensic профілі: TPM, Secure Boot, BitLocker, RDP/NLA, WinRM, SMBv1, TLS baseline, EventLog provider summary;
@@ -435,11 +460,11 @@ $ErrorActionPreference = "Stop"
 
 Найближчі етапи:
 
-- прибрати legacy-конфлікт `src\Get-BravoSystemReport.ps1`;
-- додати `-Sanitize`, `-SkipPublicIP` і `-Offline`;
+- стабілізувати release package;
+- додати `-Sanitize` та `-Offline` (`-SkipPublicIP`/`-SkipUpdateSearch` вже реалізовано);
 - розширити hardware/storage/network/security/event log аудит;
 - додати Markdown/TXT summary;
-- розширити Local Windows Validation для Full/Deep/Forensic, BAT і release package тестів.
+- розширити Local Windows Validation для Full/Forensic, BAT і release package тестів (Quick і Deep вже покриті).
 
 Актуальний деталізований план ведеться у:
 

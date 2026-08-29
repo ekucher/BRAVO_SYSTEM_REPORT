@@ -1,4 +1,4 @@
-# MODULE: 39-Collectors-Updates.ps1
+﻿# MODULE: 39-Collectors-Updates.ps1
 # Аналіз ОС і збір інформації про оновлення Windows, які потрібно встановити.
 
 # Дата актуальності статичної таблиці життєвого циклу Windows.

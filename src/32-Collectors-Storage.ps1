@@ -17,6 +17,16 @@ function Convert-BravoBytesToGB {
 }
 
 function Get-BravoStorageDeepAudit {
+    # Заповнюються нижче в цій функції: CollectedAt, LogicalDisks, Volumes,
+    # Disks, Partitions, PageFiles.
+    #
+    # НЕ реалізовано (завжди порожній масив @() — заплановані, ще не написані
+    # колектори; див. docs/ROADMAP.md "Storage Audit" для BitLocker/Storage
+    # Spaces/Shadow Copies/SMART): PhysicalDisks (не плутати з окремим,
+    # реально заповненим $script:Report.Hardware.Disks.PhysicalDisks —
+    # це різні поля з однаковою назвою в різних секціях моделі),
+    # ReliabilityCounters, BitLocker, ShadowCopies, StoragePools,
+    # StorageSubsystems, SmartPredictFailures.
     $storage = [ordered]@{
         CollectedAt  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         LogicalDisks = @()
@@ -243,6 +253,13 @@ function Get-BravoStorageRiskSummary {
         }
 
         if ($null -eq $freePercent) {
+            continue
+        }
+
+        # CD-ROM/оптичні носії — read-only, "вільне місце" не є показником ризику
+        # (наприклад ISO-образ примонтований як том завжди показує 0% вільно).
+        if ([string]$volume.DriveType -eq 'CD-ROM') {
+            $risk.HealthyVolumes += $volumeRisk
             continue
         }
 

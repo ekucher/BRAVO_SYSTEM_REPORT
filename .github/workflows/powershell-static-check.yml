@@ -23,8 +23,14 @@ jobs:
           test -f "Get-BravoSystemReport.ps1"
           echo "[OK] Знайдено root wrapper"
 
-          test -f "src/Get-BravoSystemReport.ps1"
-          echo "[OK] Знайдено основний PowerShell-скрипт"
+          test -f "src/90-Main.ps1"
+          echo "[OK] Знайдено модульний entrypoint src/90-Main.ps1"
+
+          test -f "src/BRAVO.build.json"
+          echo "[OK] Знайдено build-маніфест src/BRAVO.build.json"
+
+          test -f "dist/Get-BravoSystemReport.ps1"
+          echo "[OK] Знайдено зібраний runtime dist/Get-BravoSystemReport.ps1"
 
           test -f "README.md"
           echo "[OK] Знайдено README.md"
