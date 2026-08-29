@@ -109,22 +109,22 @@ jobs:
           $reportModelChanged = $changedFiles -contains "src/20-ReportModel.ps1"
 
           if ($reportModelChanged) {
-            Write-Host "[INFO] src/20-ReportModel.ps1 changed — контракт \$script:Report міг змінитись."
+            Write-Host "[INFO] src/20-ReportModel.ps1 changed - report contract may have changed."
 
             $schemaVersionDiff = git diff "$baseSha" "$headSha" -- src/20-ReportModel.ps1 | Select-String -Pattern '^\s*[+-]\s*SchemaVersion\s*='
             $changelogChanged = $changedFiles -contains "CHANGELOG.md"
 
             if (-not $schemaVersionDiff) {
-              throw "src/20-ReportModel.ps1 змінено, але значення SchemaVersion у diff не змінилось. Якщо це зміна контракту \$script:Report — підніміть SchemaVersion (docs/AI_RULES.md п.6). Якщо контракт не змінився — переконайтесь, що diff дійсно не чіпає структуру звіту."
+              throw "src/20-ReportModel.ps1 changed, but SchemaVersion value in diff did not change. If this is a report contract change, bump SchemaVersion (docs/AI_RULES.md item 6). If the contract did not change, verify the diff really does not touch report structure."
             }
 
             if (-not $changelogChanged) {
-              throw "src/20-ReportModel.ps1 змінено (SchemaVersion піднято), але CHANGELOG.md не оновлено (docs/AI_RULES.md п.6)."
+              throw "src/20-ReportModel.ps1 changed (SchemaVersion bumped), but CHANGELOG.md was not updated (docs/AI_RULES.md item 6)."
             }
 
-            Write-Host "[OK] SchemaVersion і CHANGELOG.md оновлені разом зі зміною контракту"
+            Write-Host "[OK] SchemaVersion and CHANGELOG.md updated together with the contract change"
           } else {
-            Write-Host "[OK] src/20-ReportModel.ps1 не змінювався — перевірка не застосовна"
+            Write-Host "[OK] src/20-ReportModel.ps1 not changed - check not applicable"
           }
 
       - name: PowerShell parser check for dist
@@ -159,7 +159,7 @@ jobs:
 
           $pester = Get-Module -ListAvailable -Name Pester | Sort-Object Version -Descending | Select-Object -First 1
           if (-not $pester -or $pester.Version.Major -lt 5) {
-            Write-Host "[INFO] Pester 5.x не знайдено, встановлюю локально для CurrentUser..."
+            Write-Host "[INFO] Pester 5.x not found, installing locally for CurrentUser..."
             Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0.0
           }
 
@@ -168,10 +168,10 @@ jobs:
           $result = Invoke-Pester -Path ".\tests" -PassThru
 
           if ($result.FailedCount -gt 0) {
-            throw "Pester: $($result.FailedCount) тест(ів) провалено з $($result.TotalCount)."
+            throw "Pester: $($result.FailedCount) of $($result.TotalCount) tests failed."
           }
 
-          Write-Host "[OK] Pester: усі $($result.PassedCount) тестів пройдено"
+          Write-Host "[OK] Pester: all $($result.PassedCount) tests passed"
 
       - name: Quick runtime test
         run: |
@@ -436,22 +436,22 @@ jobs:
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
           if (-not $latestJson) { throw "No BravoSystemReport_*.json files found in $reportsDir" }
-          if (-not $latestCsv) { throw "No BravoSystemReport_*.csv files found in $reportsDir (-CSV не спрацював)" }
-          if (-not $latestZip) { throw "No BravoSystemReport_*.zip files found in $reportsDir (-Zip не спрацював)" }
+          if (-not $latestCsv) { throw "No BravoSystemReport_*.csv files found in $reportsDir (-CSV did not work)" }
+          if (-not $latestZip) { throw "No BravoSystemReport_*.zip files found in $reportsDir (-Zip did not work)" }
 
           $report = Get-Content -LiteralPath $latestJson.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
 
           Write-Host "[INFO] Profile: $($report.Profile)"
-          Write-Host "[INFO] WindowsUpdate.SearchStatus: $($report.WindowsUpdate.SearchStatus)"
-          Write-Host "[INFO] WindowsUpdate.PendingCount: $($report.WindowsUpdate.PendingCount)"
+          Write-Host "[INFO] Updates.Search.Status: $($report.Updates.Search.Status)"
+          Write-Host "[INFO] Updates.Pending.Total: $($report.Updates.Pending.Total)"
           Write-Host "[INFO] DotNet.LatestKnownVersion: $($report.DotNet.LatestKnownVersion)"
 
           if ($report.Profile -ne "Deep") {
             throw "Expected Profile=Deep, got Profile=$($report.Profile)"
           }
 
-          if ($report.WindowsUpdate.SearchStatus -eq "Skipped") {
-            throw "WindowsUpdate.SearchStatus=Skipped у профілі Deep — COM-пошук оновлень не мав пропускатись."
+          if ($report.Updates.Search.Status -eq "Skipped") {
+            throw "Updates.Search.Status=Skipped on Deep profile - update search should not have been skipped."
           }
 
           Write-Host "[OK] Deep runtime test (CSV + Zip) passed"
@@ -470,8 +470,8 @@ jobs:
 
           New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
 
-          # Навмисно невалідний SMTP-сервер -> Export.Email додає ExportError,
-          # не CollectionError (P0.4) -> exit code має бути 1, не 0 (P0.5).
+          # Deliberately invalid SMTP server -> Export.Email adds an ExportError,
+          # not a CollectionError (P0.4) -> exit code must be 1, not 0 (P0.5).
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\dist\Get-BravoSystemReport.ps1" `
             -Profile Quick -NoZip -NoPause -NoOpenFolder `
             -EmailTo "test@example.com" -SmtpServer "nonexistent.invalid.smtp.local" `
