@@ -438,9 +438,24 @@ docs/IMPLEMENTATION_PLAN.md
 
 Скрипт не змінює системні налаштування Windows. Він виконує аудит і формує локальні звіти.
 
-Звіти можуть містити службову інформацію про машину, мережу, локальних користувачів, служби, диски та події. Перед передачею звітів третім особам потрібно перевіряти вміст JSON/HTML/CSV.
+Звіти можуть містити службову інформацію про машину, мережу, локальних користувачів, служби, диски та події. Перед передачею звітів третім особам, якщо не використовується `-Sanitize`, потрібно перевіряти вміст JSON/HTML/CSV.
 
-Для майбутньої безпечної передачі звітів заплановано параметр `-Sanitize`.
+### Sanitize (безпечна передача звітів)
+
+Параметр `-Sanitize` маскує чутливі дані у JSON/HTML/CSV одним проходом одразу після розрахунку Health Score (маскування не впливає на Score/Status) і до будь-якого export'а — усі формати отримують уже замасковані дані.
+
+| Параметр | Опис |
+|---|---|
+| `-Sanitize` | вмикає маскування чутливих даних |
+| `-SanitizeLevel Basic\|Strict` | обсяг маскування, за замовчуванням `Basic` |
+
+`-SanitizeLevel Basic` маскує: computer name, user name, domain/workgroup, DNS suffix, public IPv4, MAC-адреси, серійні номери (BIOS/RAM/PhysicalDisks/Storage Deep Audit), локальних адміністраторів, install path встановленого ПЗ.
+
+`-SanitizeLevel Strict` додає до Basic: приватні IPv4 — масив адаптерів, `PrimaryIPv4`, `PrimaryInterface`, gateway, DNS-сервери, listening ports.
+
+Кожне унікальне значення в межах одного звіту маскується в один і той самий токен виду `REDACTED-<КАТЕГОРІЯ>-<N>` (наприклад, `REDACTED-COMPUTERNAME-1`) — читабельність структури зберігається, реальні дані не розкриваються.
+
+Відомі межі: "service account names" з чекліста поки не маскуються — колектор служб не збирає LogOnAs/StartName, немає що маскувати. Ім'я файлу звіту (`BravoSystemReport_<COMPUTERNAME>_...`) і далі містить реальну назву машини — маскується лише вміст файлів, не назва.
 
 ## Правила проєкту
 
@@ -464,9 +479,9 @@ $ErrorActionPreference = "Stop"
 Найближчі етапи:
 
 - стабілізувати release package;
-- додати `-Sanitize`/`-SanitizeLevel` (`-SkipPublicIP`/`-SkipGeoIP`/`-Offline`/`-SkipUpdateSearch` вже реалізовано);
+- CI validation для sanitize (regex-скан JSON/HTML на IP/MAC/serial/user/domain literals після `-Sanitize`);
 - розширити hardware/storage/network/security/event log аудит;
-- додати Markdown/TXT summary;
+- додати Markdown/TXT summary (маскування `-Sanitize` застосується автоматично, коли з'явиться);
 - розширити Local Windows Validation для Full/Forensic, BAT і release package тестів (Quick і Deep вже покриті).
 
 Актуальний деталізований план ведеться у:

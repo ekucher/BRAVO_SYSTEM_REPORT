@@ -139,6 +139,27 @@ Describe 'P1 — -Strict дає окремий exit code 4 на CRITICAL Health.
     }
 }
 
+Describe 'P1 — -Sanitize маскує ComputerName у JSON (наскрізно через wrapper)' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    It 'wrapper має -Sanitize і -SanitizeLevel' {
+        (Get-Command $script:WrapperPath).Parameters.Keys | Should -Contain 'Sanitize'
+        (Get-Command $script:WrapperPath).Parameters.Keys | Should -Contain 'SanitizeLevel'
+    }
+
+    It '-Sanitize через wrapper -> ComputerName у JSON замаскований, реальна назва машини не потрапляє у файл' {
+        $dir = New-BravoTestReportsDir -Name 'sanitize'
+        & $script:WrapperPath -Profile Quick -Sanitize -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+        $json = Get-ChildItem -LiteralPath $dir -Filter '*.json' -Recurse | Select-Object -First 1
+        $rawJson = Get-Content -LiteralPath $json.FullName -Raw
+        $report = $rawJson | ConvertFrom-Json
+
+        $exitCode | Should -Be 0
+        $report.ComputerName | Should -Match '^REDACTED-COMPUTERNAME-'
+        $rawJson | Should -Not -Match ([regex]::Escape($env:COMPUTERNAME))
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'
