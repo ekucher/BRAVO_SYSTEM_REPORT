@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-08-29 04:41:33
+    GeneratedAt: 2026-09-01 23:12:24
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1643,15 +1643,18 @@ function Get-BravoSoftwareAudit {
 
 
 # ============================================================
-# MODULE: src/39-Collectors-Updates.ps1
+# MODULE: src/39a-Data-WindowsLifecycle.ps1
 # ============================================================
 
-# MODULE: 39-Collectors-Updates.ps1
-# Аналіз ОС і збір інформації про оновлення Windows, які потрібно встановити.
+# MODULE: 39a-Data-WindowsLifecycle.ps1
+# Централізований data-модуль: статична таблиця життєвого циклу Windows.
+# Винесено з src/39-Collectors-Updates.ps1 (P0.7), щоб оновлення дат
+# не вимагало правок логіки колектора Get-BravoOsSupportInfo.
 
 # Дата актуальності статичної таблиці життєвого циклу Windows.
 # Оновлюйте разом із таблицею у Get-BravoWindowsLifecycleTable.
-$script:BravoLifecycleTableUpdatedAt = '2026-08-24'
+# Звірено з офіційними lifecycle-сторінками Microsoft Learn (learn.microsoft.com/lifecycle).
+$script:BravoLifecycleTableUpdatedAt = '2026-09-01'
 
 function Get-BravoWindowsLifecycleTable {
     [CmdletBinding()]
@@ -1669,8 +1672,8 @@ function Get-BravoWindowsLifecycleTable {
     # - дати ESU не використовуються (наприклад, Windows 7 SP1 і Server 2008 R2 SP1 показують 2020-01-14,
     #   а не 2023-01-10; Windows 10 22H2 показує 2025-10-14, а не дату завершення ESU);
     # - Windows Server SAC 1809 пропущено, бо build 17763 збігається з Windows Server 2019 (LTSC);
-    # - Windows 11 25H2 (build 26200): дати виведені за штатним циклом Microsoft
-    #   (24 міс. Home/Pro, 36 міс. Enterprise/Education) і не звірені з lifecycle-сторінкою.
+    # - дати наведені як публічно оголошена дата (офіційна raw "Retirement Date" на learn.microsoft.com/lifecycle
+    #   вказана як HH:59:59 наступного календарного дня в PT — тут узгоджено з публічним анонсом, на 1 день раніше).
     return @(
         # --- Клієнтські випуски ---
         [PSCustomObject]@{ Build = 26200; IsServer = $false; Product = 'Windows 11'                    ; DisplayVersion = '25H2'                ; SupportEndConsumer = '2027-10-12'; SupportEndEnterprise = '2028-10-10'; SupportEndLtsc = '' }
@@ -1704,7 +1707,7 @@ function Get-BravoWindowsLifecycleTable {
         [PSCustomObject]@{ Build = 2195 ; IsServer = $false; Product = 'Windows 2000 Professional'     ; DisplayVersion = 'SP4'                 ; SupportEndConsumer = '2010-07-13'; SupportEndEnterprise = '2010-07-13'; SupportEndLtsc = '' }
 
         # --- Серверні випуски ---
-        [PSCustomObject]@{ Build = 26100; IsServer = $true ; Product = 'Windows Server 2025'           ; DisplayVersion = '24H2'                ; SupportEndConsumer = '2034-10-10'; SupportEndEnterprise = '2034-10-10'; SupportEndLtsc = '' }
+        [PSCustomObject]@{ Build = 26100; IsServer = $true ; Product = 'Windows Server 2025'           ; DisplayVersion = '24H2'                ; SupportEndConsumer = '2034-11-14'; SupportEndEnterprise = '2034-11-14'; SupportEndLtsc = '' }
         [PSCustomObject]@{ Build = 25398; IsServer = $true ; Product = 'Windows Server 23H2'          ; DisplayVersion = '23H2'                ; SupportEndConsumer = '2025-10-24'; SupportEndEnterprise = '2025-10-24'; SupportEndLtsc = '' }
         [PSCustomObject]@{ Build = 20348; IsServer = $true ; Product = 'Windows Server 2022'           ; DisplayVersion = '21H2'                ; SupportEndConsumer = '2031-10-14'; SupportEndEnterprise = '2031-10-14'; SupportEndLtsc = '' }
         [PSCustomObject]@{ Build = 19042; IsServer = $true ; Product = 'Windows Server SAC'            ; DisplayVersion = '20H2'                ; SupportEndConsumer = '2022-08-09'; SupportEndEnterprise = '2022-08-09'; SupportEndLtsc = '' }
@@ -1725,6 +1728,18 @@ function Get-BravoWindowsLifecycleTable {
         [PSCustomObject]@{ Build = 2195 ; IsServer = $true ; Product = 'Windows 2000 Server'           ; DisplayVersion = 'SP4'                 ; SupportEndConsumer = '2010-07-13'; SupportEndEnterprise = '2010-07-13'; SupportEndLtsc = '' }
     )
 }
+
+
+# ============================================================
+# MODULE: src/39-Collectors-Updates.ps1
+# ============================================================
+
+# MODULE: 39-Collectors-Updates.ps1
+# Аналіз ОС і збір інформації про оновлення Windows, які потрібно встановити.
+#
+# Таблиця життєвого циклу Windows (Get-BravoWindowsLifecycleTable) винесена
+# у окремий data-модуль src/39a-Data-WindowsLifecycle.ps1 (P0.7), який будується
+# перед цим модулем — див. src/BRAVO.build.json.
 
 function Test-BravoUpdateClassification {
     [CmdletBinding()]
