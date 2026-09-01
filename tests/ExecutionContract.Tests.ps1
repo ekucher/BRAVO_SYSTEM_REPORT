@@ -103,6 +103,42 @@ Describe 'P1 — -Offline вимикає всі зовнішні HTTPS-запи�
     }
 }
 
+Describe 'P1 — -Strict дає окремий exit code 4 на CRITICAL Health.Status' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    It 'wrapper має -Strict (раніше був відсутній повністю)' {
+        (Get-Command $script:WrapperPath).Parameters.Keys | Should -Contain 'Strict'
+    }
+
+    It 'без -Strict: CRITICAL Health.Status НЕ впливає на exit code (лишається 0)' {
+        $dir = New-BravoTestReportsDir -Name 'strict-off'
+        & $script:WrapperPath -Profile Quick -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+        $json = Get-ChildItem -LiteralPath $dir -Filter '*.json' -Recurse | Select-Object -First 1
+        $report = Get-Content -LiteralPath $json.FullName -Raw | ConvertFrom-Json
+
+        # Ця тестова машина реально звітує CRITICAL (Health.Score нижче порогу) —
+        # саме тому тест значущий: без -Strict це не мало б впливати на exit code.
+        if ($report.Health.Status -eq 'CRITICAL') {
+            $exitCode | Should -Be 0
+        }
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It '-Strict через wrapper: CRITICAL Health.Status -> exit code 4' {
+        $dir = New-BravoTestReportsDir -Name 'strict-on'
+        & $script:WrapperPath -Profile Quick -Strict -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+        $json = Get-ChildItem -LiteralPath $dir -Filter '*.json' -Recurse | Select-Object -First 1
+        $report = Get-Content -LiteralPath $json.FullName -Raw | ConvertFrom-Json
+
+        if ($report.Health.Status -eq 'CRITICAL') {
+            $exitCode | Should -Be 4
+        } else {
+            $exitCode | Should -Be 0
+        }
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'

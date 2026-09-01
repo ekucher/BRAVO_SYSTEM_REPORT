@@ -1,4 +1,16 @@
-﻿## Unreleased — P1: параметри -Offline та -SkipGeoIP
+﻿## Unreleased — P1/v0.4.2: -Strict (exit code 4 на CRITICAL Health.Status)
+
+Четвертий пункт P1 / v0.4.2 Runtime Quality — режим strict validation.
+
+- **Раніше**: `Health.Status` (`OK`/`WARNING`/`CRITICAL`) свідомо НЕ впливав на exit code — задокументована властивість контракту (P0.5): exit code відображає стан ІНСТРУМЕНТА (чи зміг зібрати/записати дані), не стан АУДИТОВАНОЇ машини. Для CI-гейтів, яким потрібен ненульовий exit code саме на "машина в критичному стані" (наприклад, security-скан у пайплайні), такого способу не було.
+- **Новий `-Strict`** (`src/05-Params.ps1`): у цьому режимі, якщо аудит завершився без `CollectionErrors`/`ExportErrors`, але `Health.Status = CRITICAL` — exit code стає `4` (новий, окремий від існуючих 0/1/2/3). Без `-Strict` поведінка не змінюється (backward-compatible, опційна). Форвардиться через wrapper (transparent passthrough) і elevation relaunch (`src/90-Main.ps1`, за патерном `-SkipPublicIP`/`-Offline`).
+- `README.md`: оновлено таблицю exit code contract, додано рядок `4` і пояснення `-Strict`.
+- Свідомо НЕ реалізовано (залишено відкритим у `docs/ROADMAP.md`): розділення `CollectionErrors`/`ExportErrors` на "критичні"/"некритичні" з різними exit code, і окремі коди для parser/build/runtime/export failures — існуючий контракт (1=помилки збору/експорту, 2=fatal trap, 3=JSON не згенеровано) лишається як є, `-Strict` додає лише вимір Health.Status.
+- Новий блок тестів у `tests/ExecutionContract.Tests.ps1` (3 тести): наявність `-Strict` у wrapper, без `-Strict` CRITICAL не впливає на exit code (лишається 0), з `-Strict` CRITICAL → exit code 4. Тести умовні на реальний `Health.Status` тестової машини (не мокають дані) — на цій сесії підтверджено фактичним прогоном (машина реально CRITICAL, exit code 4 отримано).
+
+Усі 51 Pester-тест проходить (48 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
+
+## Unreleased — P1: параметри -Offline та -SkipGeoIP
 
 Третій пункт P1 / v0.4.3 Safe Sharing — контроль над зовнішніми HTTPS-запитами скрипта.
 

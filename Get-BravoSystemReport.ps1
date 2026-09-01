@@ -38,6 +38,7 @@ param(
     [switch]$SkipPublicIP,
     [switch]$SkipGeoIP,
     [switch]$Offline,
+    [switch]$Strict,
     [switch]$SkipUpdateSearch,
 
     [int]$EventLogDays = 0,

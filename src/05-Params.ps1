@@ -20,6 +20,7 @@ param(
     [switch]$SkipPublicIP,
     [switch]$SkipGeoIP,
     [switch]$Offline,
+    [switch]$Strict,
 
     [int]$EventLogDays = 0,
 
