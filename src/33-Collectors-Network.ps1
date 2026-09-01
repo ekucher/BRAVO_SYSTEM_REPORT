@@ -93,8 +93,9 @@ function Get-BravoNetworkAudit {
 
     # --- Public IPv4 та geo/ISP-дані ---
     # Мережево-залежна перевірка, що звертається до сторонніх сервісів:
-    # гейтована профілем (не виконується для Quick) і прапорцем -SkipPublicIP.
-    $bravoPublicIPLookupEnabled = (-not $SkipPublicIP) -and ($Profile -in @('Full', 'Deep', 'Forensic'))
+    # гейтована профілем (не виконується для Quick), прапорцем -SkipPublicIP
+    # і глобальним -Offline (вимикає всі зовнішні HTTPS-запити скрипта).
+    $bravoPublicIPLookupEnabled = (-not $SkipPublicIP) -and (-not $Offline) -and ($Profile -in @('Full', 'Deep', 'Forensic'))
 
     if ($bravoPublicIPLookupEnabled) {
         $bravoPublicIPv4Info = Get-BravoPublicIPv4Address
@@ -104,31 +105,43 @@ function Get-BravoNetworkAudit {
         $script:Report.Network.IP.PublicIPv4CheckedAt = $bravoPublicIPv4Info.CheckedAt
         $script:Report.Network.IP.PublicIPv4Status = $bravoPublicIPv4Info.Status
 
-        $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
+        # GeoIP/ISP-лукап (ipapi.co) — окремий зовнішній запит, що передає
+        # публічну IPv4-адресу третій стороні. Гейтований окремо від самого
+        # факту визначення Public IPv4: -SkipGeoIP (або -Offline) дозволяє
+        # лишити Public IPv4 у звіті, але не відправляти її на geo-lookup сервіс.
+        $bravoGeoIPLookupEnabled = (-not $SkipGeoIP) -and (-not $Offline)
 
-        $script:Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
-        $script:Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
-        $script:Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
-        $script:Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
-        $script:Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
-        $script:Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
-        $script:Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
-        $script:Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
-        $script:Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
-        $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
-        $script:Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
+        if ($bravoGeoIPLookupEnabled) {
+            $bravoPublicIPv4ProviderInfo = Get-BravoPublicIPv4ProviderInfo -PublicIPv4 $bravoPublicIPv4Info.IPv4
 
-        if ($bravoPublicIPv4Info.Status -eq "Detected") {
-            if (-not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
-                Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
-            } else {
-                Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
-            }
+            $script:Report.Network.IP.PublicIPv4LookupProvider = $bravoPublicIPv4ProviderInfo.LookupProvider
+            $script:Report.Network.IP.PublicIPv4ISP = $bravoPublicIPv4ProviderInfo.ISP
+            $script:Report.Network.IP.PublicIPv4Organization = $bravoPublicIPv4ProviderInfo.Organization
+            $script:Report.Network.IP.PublicIPv4ASN = $bravoPublicIPv4ProviderInfo.ASN
+            $script:Report.Network.IP.PublicIPv4Country = $bravoPublicIPv4ProviderInfo.Country
+            $script:Report.Network.IP.PublicIPv4Region = $bravoPublicIPv4ProviderInfo.Region
+            $script:Report.Network.IP.PublicIPv4City = $bravoPublicIPv4ProviderInfo.City
+            $script:Report.Network.IP.PublicIPv4Timezone = $bravoPublicIPv4ProviderInfo.Timezone
+            $script:Report.Network.IP.PublicIPv4ProviderInfoCheckedAt = $bravoPublicIPv4ProviderInfo.CheckedAt
+            $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = $bravoPublicIPv4ProviderInfo.Status
+            $script:Report.Network.IP.PublicIPv4ProviderInfoError = $bravoPublicIPv4ProviderInfo.Error
+
         } else {
+            $bravoGeoSkipReason = if ($Offline) { "-Offline" } else { "-SkipGeoIP" }
+            $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = 'Skipped'
+            $script:Report.Network.IP.PublicIPv4ProviderInfoError = "GeoIP lookup пропущено ($bravoGeoSkipReason)."
+            Write-Host "  [INFO] GeoIP/ISP lookup: пропущено ($bravoGeoSkipReason)" -ForegroundColor Yellow
+        }
+
+        if ($bravoPublicIPv4Info.Status -ne "Detected") {
             Write-Host "  [INFO] Public IP: не визначено" -ForegroundColor Yellow
+        } elseif ($bravoGeoIPLookupEnabled -and -not [string]::IsNullOrWhiteSpace([string]$bravoPublicIPv4ProviderInfo.ISP)) {
+            Write-Host "  [OK] Public IP: визначено, ISP: $($bravoPublicIPv4ProviderInfo.ISP)" -ForegroundColor Green
+        } else {
+            Write-Host "  [OK] Public IP: визначено, записано у звіт" -ForegroundColor Green
         }
     } else {
-        $bravoSkipReason = if ($SkipPublicIP) { "-SkipPublicIP" } else { "профіль $Profile" }
+        $bravoSkipReason = if ($Offline) { "-Offline" } elseif ($SkipPublicIP) { "-SkipPublicIP" } else { "профіль $Profile" }
         $script:Report.Network.IP.PublicIPv4Status = 'Skipped'
         $script:Report.Network.IP.PublicIPv4ProviderInfoStatus = 'Skipped'
         Write-Host "  [INFO] Public IP: пропущено ($bravoSkipReason)" -ForegroundColor Yellow

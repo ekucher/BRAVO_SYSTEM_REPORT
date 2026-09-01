@@ -1,4 +1,17 @@
-﻿## Unreleased — P1: CPU/RAM findings, узгодження Disk threshold у Health Score
+﻿## Unreleased — P1: параметри -Offline та -SkipGeoIP
+
+Третій пункт P1 / v0.4.3 Safe Sharing — контроль над зовнішніми HTTPS-запитами скрипта.
+
+- **Раніше**: `-SkipPublicIP` вимикав ОДНОЧАСНО і визначення Public IPv4, і geo/ISP-лукап (`ipapi.co`) — не було способу лишити Public IPv4 у звіті, не відправляючи її третій стороні для геолокації. Окремого "вимкнути все мережеве одразу" також не було — доводилось комбінувати `-SkipPublicIP -SkipUpdateSearch`.
+- **Новий `-SkipGeoIP`** (`src/05-Params.ps1`): визначає Public IPv4 як і раніше, але не викликає `Get-BravoPublicIPv4ProviderInfo` (запит до `ipapi.co` з публічною IPv4 в URL) — `PublicIPv4ProviderInfoStatus` стає `Skipped` з причиною в `PublicIPv4ProviderInfoError`.
+- **Новий `-Offline`** (`src/05-Params.ps1`): єдиний перемикач, що вимикає геть усі зовнішні HTTPS-запити скрипта одночасно — Public IPv4 (`src/33-Collectors-Network.ps1`), GeoIP і онлайн-пошук оновлень (`src/39-Collectors-Updates.ps1`, той самий гейт, що й `-SkipUpdateSearch`).
+- Обидва параметри форвардяться через wrapper (transparent `$PSBoundParameters` passthrough, P0.1) і через elevation relaunch (`src/90-Main.ps1`, ручний CLI-forwarding — додано явні рядки, за тим самим патерном, що й `-SkipPublicIP`).
+- `README.md` оновлено (таблиця параметрів Updates-секції, "Плани розвитку").
+- Новий тест у `tests/ExecutionContract.Tests.ps1`: `-Offline` через wrapper з профілем `Full` (де Public IP інакше виконувався б) → `Network.IP.PublicIPv4Status`/`PublicIPv4ProviderInfoStatus`/`Updates.Search.Status` усі `Skipped`, exit code 0.
+
+Усі 48 Pester-тестів проходять (46 попередніх + 2 нових: наявність параметрів у wrapper, наскрізна поведінка `-Offline`). `dist` перебудовано, sha512 звірено.
+
+## Unreleased — P1: CPU/RAM findings, узгодження Disk threshold у Health Score
 
 Другий пункт P1 — CPU/RAM findings, за тим самим патерном, що й попередній storage thresholds PR.
 

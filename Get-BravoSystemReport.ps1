@@ -36,6 +36,8 @@ param(
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
     [switch]$SkipPublicIP,
+    [switch]$SkipGeoIP,
+    [switch]$Offline,
     [switch]$SkipUpdateSearch,
 
     [int]$EventLogDays = 0,

@@ -234,6 +234,8 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($NoPause) { $arguments += '-NoPause' }
         if ($NoOpenFolder) { $arguments += '-NoOpenFolder' }
         if ($SkipPublicIP) { $arguments += '-SkipPublicIP' }
+        if ($SkipGeoIP) { $arguments += '-SkipGeoIP' }
+        if ($Offline) { $arguments += '-Offline' }
         if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
         $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
