@@ -20,7 +20,7 @@
 
 - [x] P0.6 Актуалізація Windows Lifecycle database — усі записи звірено з офіційними lifecycle-сторінками Microsoft Learn (learn.microsoft.com/lifecycle) станом на 2026-09-01. Виявлено й виправлено помилкову дату Windows Server 2025 (Extended End Date був `2034-10-10`, коректно `2034-11-14` за офіційною raw-датою `11/15/2034 6:59:59 AM PT`); знята позначка "не звірено" з Windows 11 25H2 — офіційна дата (`2027-10-12` Home/Pro, `2028-10-10` Enterprise/Education) підтверджена. Регулярний процес актуалізації: звіряти `$script:BravoLifecycleTableUpdatedAt` під час кожного релізу нової версії Windows.
 - [x] P0.7 Винесення lifecycle records у централізований dataset/data model — таблиця перенесена з inline-масиву в `src/39-Collectors-Updates.ps1` у окремий модуль `src/39a-Data-WindowsLifecycle.ps1` (додано в `src/BRAVO.build.json` перед колектором), щоб оновлення дат не вимагало правок логіки колектора `Get-BravoOsSupportInfo`.
-- [ ] P1 (collector/analyzer розділення, CPU/RAM findings, `-Offline`, `-SkipGeoIP`, `-SanitizeLevel`, розширення Pester/CI) — окремі майбутні PR. Централізовані storage thresholds з цього пункту вже закрито, деталі в "v0.4.2 Runtime Quality" нижче.
+- [ ] P1 (collector/analyzer розділення, `-Offline`, `-SkipGeoIP`, `-SanitizeLevel`, розширення Pester/CI) — окремі майбутні PR. Централізовані storage thresholds і CPU/RAM findings з цього пункту вже закрито, деталі в "v0.4.2 Runtime Quality" нижче.
 - [ ] P2 (cleanup, dead parameters, `.editorconfig`/`.gitattributes` — частину вже закрито попередніми раундами код-ревю цієї сесії, гл. `CHANGELOG.md`).
 - [ ] P3 (Deep Security: TPM/Secure Boot/BitLocker, повноцінний Forensic profile) — явно поза межами stabilization-етапу, окремі майбутні PR.
 
@@ -80,10 +80,11 @@
   - [x] один набір порогів для basic і deep storage audit (`Get-BravoStorageThresholds`: 5% critical / 10% warning / 15% системний);
   - [x] уникнути дублювання findings для одного й того самого тому (у Deep/Forensic профілях basic-прохід більше не емітить власні findings — рішення делегується `Get-BravoStorageRiskSummary`, який покриває ті самі томи глибше);
   - [x] винести thresholds у helper/config-блок (`Get-BravoStorageThresholds` + чиста функція `Get-BravoStorageFreeSpaceSeverity`, покриті `tests/StorageThresholds.Tests.ps1`).
-- [ ] HTML export:
-  - [ ] HTML-encode всі динамічні значення;
-  - [ ] HTML-encode findings/errors rows;
-  - [ ] перевірити коректність великих таблиць.
+- [x] CPU/RAM findings (P1, `src/31-Collectors-Hardware.ps1`): перевантаження CPU/RAM раніше впливало лише на колір Dashboard-плитки (`Dashboard.Metrics.CPU/RAM.Status`), але не потрапляло в `Health.Findings` — тобто не впливало на Health Score і не показувалось у Findings tab. Додано `Get-BravoHardwareThresholds` (CPU: 75%/90% warning/critical, RAM: 85%/95%) як спільне джерело для Dashboard-статусу й нових `Add-AuditFinding` (Category `Hardware.CPU`/`Hardware.RAM`); CPU-finding пропускається, якщо `LoadPercent` невідомий (`$null` на щойно піднятій VM — не помилка). Побічно виправлено неузгодженість: `src/40-Health.ps1` (Disk dashboard tile) досі мав захардкожені пороги `10%`/`20%`, хоча `src/32-Collectors-Storage.ps1` вже перейшов на `Get-BravoStorageThresholds` (5%/10%/15%) — тепер обидва місця узгоджені.
+- [x] HTML export (закрито в попередньому раунді код-ревю, деталі в `CHANGELOG.md` "четвертий раунд глибокого код-ревю: XSS-екранування"; чекбокс тут не був позначений):
+  - [x] HTML-encode всі динамічні значення (`ConvertTo-BravoHtmlText` у `src/51-Export-Html.ps1`, включно з прогрес-барами через `Get-BravoSafePercentText`);
+  - [x] HTML-encode findings/errors rows (перевірено систематично — усі `$_.*`-поля в `<td>` проходять через `ConvertTo-BravoHtmlText`);
+  - [x] перевірено коректність великих таблиць (client-side пошук/фільтр по рядках, `table-scroll` з `max-height`).
 
 ## v0.4.3 Safe Sharing / Sanitize
 
