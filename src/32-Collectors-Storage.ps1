@@ -1,7 +1,46 @@
 ﻿# MODULE: 32-Collectors-Storage.ps1
 # Збір інформації про диски, Storage Deep Audit та storage-ризики.
 
-# --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
+# --- P1: централізовані storage thresholds ---
+# Єдине джерело порогів вільного місця для basic (Get-BravoStorageAudit)
+# і deep (Get-BravoStorageRiskSummary) audit — щоб обидва шляхи узгоджено
+# оцінювали один і той самий том і не породжували суперечливих findings.
+function Get-BravoStorageThresholds {
+    [CmdletBinding()]
+    param()
+
+    return [ordered]@{
+        CriticalFreePercent      = 5
+        WarningFreePercent       = 10
+        SystemWarningFreePercent = 15
+    }
+}
+
+# Чиста функція без побічних ефектів: за відсотком вільного місця повертає
+# рівень ризику тому. CD-ROM/оптичні носії завжди 'Healthy' (read-only,
+# "вільне місце" не є показником ризику — примонтований ISO завжди 0%).
+function Get-BravoStorageFreeSpaceSeverity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [Nullable[double]]$FreePercent,
+        [bool]$IsSystemDrive = $false,
+        [string]$DriveType = ''
+    )
+
+    if ($null -eq $FreePercent) { return 'Unknown' }
+    if ($DriveType -eq 'CD-ROM') { return 'Healthy' }
+
+    $thresholds = Get-BravoStorageThresholds
+
+    if ($FreePercent -lt $thresholds.CriticalFreePercent) { return 'Critical' }
+    if ($FreePercent -lt $thresholds.WarningFreePercent) { return 'Warning' }
+    if ($IsSystemDrive -and $FreePercent -lt $thresholds.SystemWarningFreePercent) { return 'SystemWarning' }
+
+    return 'Healthy'
+}
+
 function Convert-BravoBytesToGB {
     param([Parameter(Mandatory = $false)]$Bytes)
 
@@ -188,9 +227,10 @@ function Get-BravoStorageRiskSummary {
         $StorageDeep
     )
 
-    $criticalThreshold = 5
-    $warningThreshold = 10
-    $systemWarningThreshold = 15
+    $thresholds = Get-BravoStorageThresholds
+    $criticalThreshold = $thresholds.CriticalFreePercent
+    $warningThreshold = $thresholds.WarningFreePercent
+    $systemWarningThreshold = $thresholds.SystemWarningFreePercent
     $systemDrive = ($env:SystemDrive -replace ':','').ToUpperInvariant()
 
     $risk = [ordered]@{
@@ -320,6 +360,16 @@ function Get-BravoStorageAudit {
         $totalSpace = 0
         $totalFree = 0
 
+        # Deep/Forensic профілі нижче в цій же функції запускають
+        # Get-BravoStorageRiskSummary, який оцінює ті самі томи з тими самими
+        # централізованими порогами (Get-BravoStorageThresholds), але глибше
+        # (включно з томами без літери диска й системним порогом). Щоб не
+        # породжувати для одного тому два findings різної суворості —
+        # basic-прохід у Deep/Forensic суто збирає TotalGB/FreeGB, а рішення
+        # про findings делегує risk summary.
+        $emitBasicFindings = ($Profile -notin @('Deep','Forensic'))
+        $thresholds = Get-BravoStorageThresholds
+
         foreach ($logicalDisk in $logicalDiskInfo) {
             $totalSpace += [double]$logicalDisk.Size
             $totalFree += [double]$logicalDisk.FreeSpace
@@ -334,10 +384,12 @@ function Get-BravoStorageAudit {
             }
             $script:Report.Hardware.Disks.Volumes += $volume
 
-            if ($volume.FreePercent -lt 10) {
-                Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 10% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
-            } elseif ($volume.FreePercent -lt 20) {
-                Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 20% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
+            if ($emitBasicFindings) {
+                if ($volume.FreePercent -lt $thresholds.CriticalFreePercent) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.CriticalFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
+                } elseif ($volume.FreePercent -lt $thresholds.WarningFreePercent) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.WarningFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
+                }
             }
         }
 
