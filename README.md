@@ -145,6 +145,8 @@ BRAVO-SystemReport-Forensic.bat --nopause
 |---|---|
 | `-SkipUpdateSearch` | не виконувати онлайн-пошук оновлень (локальні дані збираються завжди) |
 | `-UpdateSearchTimeoutSec` | ліміт часу онлайн-пошуку, за замовчуванням `180` сек |
+| `-SkipGeoIP` | визначити Public IPv4, але не відправляти її на geo-lookup сервіс (`ipapi.co`) — без ISP/ASN/локації |
+| `-Offline` | вимикає всі зовнішні HTTPS-запити скрипта одразу (Public IPv4, GeoIP, онлайн-пошук оновлень) |
 
 Особливості:
 
@@ -461,7 +463,7 @@ $ErrorActionPreference = "Stop"
 Найближчі етапи:
 
 - стабілізувати release package;
-- додати `-Sanitize` та `-Offline` (`-SkipPublicIP`/`-SkipUpdateSearch` вже реалізовано);
+- додати `-Sanitize`/`-SanitizeLevel` (`-SkipPublicIP`/`-SkipGeoIP`/`-Offline`/`-SkipUpdateSearch` вже реалізовано);
 - розширити hardware/storage/network/security/event log аудит;
 - додати Markdown/TXT summary;
 - розширити Local Windows Validation для Full/Forensic, BAT і release package тестів (Quick і Deep вже покриті).

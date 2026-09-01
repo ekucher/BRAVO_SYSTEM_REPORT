@@ -54,6 +54,11 @@ Describe 'P0.1/P0.2 — wrapper приймає й форвардить усі sw
         (Get-Command $script:WrapperPath).Parameters.Keys | Should -Contain 'SkipPublicIP'
     }
 
+    It 'wrapper має -SkipGeoIP і -Offline (P1)' {
+        (Get-Command $script:WrapperPath).Parameters.Keys | Should -Contain 'SkipGeoIP'
+        (Get-Command $script:WrapperPath).Parameters.Keys | Should -Contain 'Offline'
+    }
+
     It 'forwarding-логіка — transparent passthrough через $PSBoundParameters, не ручний if-блок на кожен параметр' {
         $wrapperContent = Get-Content -LiteralPath $script:WrapperPath -Raw
         $wrapperContent | Should -Match '\$PSBoundParameters\.Keys'
@@ -78,6 +83,22 @@ Describe 'P0.2 — -NoZip і -Zip:$false коректно вимикають ZIP
         $zipFiles = Get-ChildItem -LiteralPath $dir -Filter '*.zip' -Recurse -ErrorAction SilentlyContinue
         $zipFiles | Should -BeNullOrEmpty
         $exitCode | Should -Be 0
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'P1 — -Offline вимикає всі зовнішні HTTPS-запити (Public IPv4, GeoIP, онлайн-пошук оновлень)' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    It '-Offline через wrapper (профіль Full, де Public IP інакше виконувався б) -> усе Skipped, exit code 0' {
+        $dir = New-BravoTestReportsDir -Name 'offline'
+        & $script:WrapperPath -Profile Full -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+        $json = Get-ChildItem -LiteralPath $dir -Filter '*.json' -Recurse | Select-Object -First 1
+        $report = Get-Content -LiteralPath $json.FullName -Raw | ConvertFrom-Json
+
+        $exitCode | Should -Be 0
+        $report.Network.IP.PublicIPv4Status | Should -Be 'Skipped'
+        $report.Network.IP.PublicIPv4ProviderInfoStatus | Should -Be 'Skipped'
+        $report.Updates.Search.Status | Should -Be 'Skipped'
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

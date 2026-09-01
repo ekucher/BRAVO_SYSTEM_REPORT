@@ -562,11 +562,11 @@ function Get-BravoUpdatesAudit {
 
     # --- Пошук доступних оновлень ---
     try {
-        $skipSearch = $SkipUpdateSearch -or ($Profile -eq 'Quick')
+        $skipSearch = $SkipUpdateSearch -or $Offline -or ($Profile -eq 'Quick')
 
         if ($skipSearch) {
             $script:Report.Updates.Search.Status = 'Skipped'
-            $script:Report.Updates.Search.Error = if ($SkipUpdateSearch) { 'Пошук вимкнено параметром -SkipUpdateSearch.' } else { 'Профіль Quick не виконує онлайн-пошук оновлень.' }
+            $script:Report.Updates.Search.Error = if ($Offline) { 'Пошук вимкнено параметром -Offline.' } elseif ($SkipUpdateSearch) { 'Пошук вимкнено параметром -SkipUpdateSearch.' } else { 'Профіль Quick не виконує онлайн-пошук оновлень.' }
             Write-Host "  $IconGear Оновлення: онлайн-пошук пропущено" -ForegroundColor Yellow
         } else {
             Write-Host "  $IconGear Оновлення: пошук доступних оновлень (до $UpdateSearchTimeoutSec сек)..." -ForegroundColor Cyan
