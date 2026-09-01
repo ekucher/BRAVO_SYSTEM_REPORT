@@ -66,10 +66,10 @@
 Ціль: прибрати логічні ризики runtime і зробити результат звіту більш передбачуваним.
 
 - [x] Перераховувати Health Score після export-етапів (`Update-BravoHealthScore` викликається вдруге в `90-Main.ps1`, JSON і HTML перегенеровуються лише якщо з'явились нові `CollectionErrors`).
-- [ ] Додати режим strict validation:
-  - [ ] `-Strict`;
-  - [ ] ненульовий exit code при критичних collection/export помилках;
-  - [ ] окремий exit code для parser/build/runtime/export failures.
+- [x] Додати режим strict validation (P1, `src/90-Main.ps1`):
+  - [x] `-Strict`;
+  - [x] ненульовий exit code, коли Health.Status аудитованої машини = `CRITICAL` (окремий exit code `4`, лише в `-Strict` режимі — за замовчуванням Health.Status і далі НЕ впливає на exit code, це властивість машини, не збій інструмента).
+  - [ ] `CollectionErrors`/`ExportErrors` і далі дають один exit code `1` незалежно від "критичності" — окремих кодів для parser/build/runtime/export failures немає (є лише 2=fatal trap, 3=JSON не згенеровано); розділення за типом failure — окрема майбутня задача, якщо знадобиться.
 - [ ] Уніфікувати network schema:
   - [ ] `Network.IP.IPv4`;
   - [ ] `Network.IP.PrimaryIPv4`;

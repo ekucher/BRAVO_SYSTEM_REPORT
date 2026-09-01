@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-02 00:34:53
+    GeneratedAt: 2026-09-02 00:59:45
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -42,6 +42,7 @@ param(
     [switch]$SkipPublicIP,
     [switch]$SkipGeoIP,
     [switch]$Offline,
+    [switch]$Strict,
 
     [int]$EventLogDays = 0,
 
@@ -3724,6 +3725,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($SkipPublicIP) { $arguments += '-SkipPublicIP' }
         if ($SkipGeoIP) { $arguments += '-SkipGeoIP' }
         if ($Offline) { $arguments += '-Offline' }
+        if ($Strict) { $arguments += '-Strict' }
         if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
         $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
@@ -3910,17 +3912,27 @@ Write-Host "Знахідки: $($script:Report.Health.Findings.Count); поми�
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
 Write-Host ''
 
-# --- Exit code contract (P0.5) ---
-# 0 = аудит успішно завершено, без помилок збору/експорту;
+# --- Exit code contract (P0.5, розширено -Strict у P1) ---
+# 0 = аудит успішно завершено, без помилок збору/експорту (і, у -Strict
+#     режимі, без CRITICAL Health.Status);
 # 1 = аудит завершено, але були CollectionErrors і/або ExportErrors;
-# 3 = обов'язковий вихідний файл (JSON) не згенеровано.
-# Health Status (WARNING/CRITICAL) НЕ впливає на exit code — це властивість
-# аудитованої машини, не ознака збою самого інструмента.
+# 2 = фатальна неопрацьована помилка виконання (top-level trap, вище в файлі);
+# 3 = обов'язковий вихідний файл (JSON) не згенеровано;
+# 4 = лише у -Strict режимі: аудит завершено без CollectionErrors/ExportErrors,
+#     але Health.Status аудитованої машини = CRITICAL.
+#
+# За замовчуванням (без -Strict) Health Status (WARNING/CRITICAL) НЕ впливає
+# на exit code — це властивість аудитованої машини (наскільки вона здорова),
+# а не ознака збою самого інструмента. -Strict вмикає цю поведінку явно —
+# для CI-гейтів, яким потрібен ненульовий exit code саме на "машина в
+# критичному стані", а не лише на "інструмент не зміг щось зібрати/записати".
 $script:ExitCode = 0
 if (-not (Test-Path -LiteralPath $jsonPath)) {
     $script:ExitCode = 3
 } elseif ((@($script:Report.CollectionErrors).Count -gt 0) -or (@($script:Report.ExportErrors).Count -gt 0)) {
     $script:ExitCode = 1
+} elseif ($Strict -and $script:Report.Health.Status -eq 'CRITICAL') {
+    $script:ExitCode = 4
 }
 
 if (-not $NoOpenFolder) {
