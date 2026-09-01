@@ -1,4 +1,15 @@
-﻿## Unreleased — P1: централізовані storage thresholds
+﻿## Unreleased — P1: CPU/RAM findings, узгодження Disk threshold у Health Score
+
+Другий пункт P1 — CPU/RAM findings, за тим самим патерном, що й попередній storage thresholds PR.
+
+- **Проблема**: `Get-BravoHardwareAudit` (`src/31-Collectors-Hardware.ps1`) обчислював `Dashboard.Metrics.CPU.Status`/`RAM.Status` (CRITICAL/WARNING/OK) для кольору dashboard-плитки, але жодного разу не викликав `Add-AuditFinding` — перевантаження CPU/RAM ніяк не впливало на `Health.Score`/`Health.Status` і не потрапляло у вкладку Findings, на відміну від storage/security, де ризики й Health Score узгоджені.
+- **Fix**: нова `Get-BravoHardwareThresholds` (CPU: 75%/90% warning/critical; RAM: 85%/95%) — спільне джерело для Dashboard-статусу й нових findings (`Category 'Hardware.CPU'`/`'Hardware.RAM'`). CPU-finding не пишеться, якщо `LoadPercent` невідомий (`$null` на щойно піднятій VM — задокументована, не помилкова ситуація).
+- **Побічно знайдено й виправлено**: `src/40-Health.ps1` (розрахунок статусу Disk dashboard-плитки за найгіршим томом) досі мав захардкожені пороги `10%`/`20%`, хоча `src/32-Collectors-Storage.ps1` вже перейшов на централізовану `Get-BravoStorageThresholds` (5%/10%/15%) у попередньому P1 PR — коментар у коді прямо стверджував "тим самим порогом", що вже не відповідало дійсності. Тепер обидва місця читають той самий `Get-BravoStorageThresholds`.
+- Новий `tests/HardwareThresholds.Tests.ps1` (2 тести): чисті unit-тести `Get-BravoHardwareThresholds`.
+
+Усі 46 Pester-тестів проходять (44 попередніх + 2 нових). `dist` перебудовано, sha512 звірено. На тестовій машині (CPU/RAM у межах норми) кількість findings не змінилась — підтверджено відсутність хибних спрацювань.
+
+## Unreleased — P1: централізовані storage thresholds
 
 Перший пункт milestone "v0.4.2 Runtime Quality" / P1 зовнішнього ТЗ — уніфікація порогів вільного місця для basic і Deep/Forensic storage audit.
 

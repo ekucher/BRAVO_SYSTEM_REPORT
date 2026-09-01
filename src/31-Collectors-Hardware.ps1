@@ -1,6 +1,22 @@
 ﻿# MODULE: 31-Collectors-Hardware.ps1
 # Збір базової інформації про апаратне забезпечення.
 
+# --- P1: централізовані CPU/RAM thresholds ---
+# Єдине джерело порогів для Dashboard-плиток CPU/RAM і для Health.Findings —
+# щоб перевантаження CPU/RAM (на відміну від попередньої поведінки) впливало
+# на Health Score і потрапляло у Findings tab, а не лише в колір dashboard-картки.
+function Get-BravoHardwareThresholds {
+    [CmdletBinding()]
+    param()
+
+    return [ordered]@{
+        CpuWarningPercent = 75
+        CpuCriticalPercent = 90
+        RamWarningPercent = 85
+        RamCriticalPercent = 95
+    }
+}
+
 function Get-BravoHardwareAudit {
     [CmdletBinding()]
     param()
@@ -53,13 +69,31 @@ function Get-BravoHardwareAudit {
             $script:Report.Hardware.RAM.UsedPercent = $usedPercent
         }
 
+        $hardwareThresholds = Get-BravoHardwareThresholds
+
         $script:Report.Dashboard.Metrics.CPU.Value = "$($script:Report.Hardware.CPU.LoadPercent)%"
         $script:Report.Dashboard.Metrics.CPU.Details = "$($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків"
-        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge 90) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge 75) { 'WARNING' } else { 'OK' }
+        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuCriticalPercent) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuWarningPercent) { 'WARNING' } else { 'OK' }
 
         $script:Report.Dashboard.Metrics.RAM.Value = "$($script:Report.Hardware.RAM.UsedPercent)%"
         $script:Report.Dashboard.Metrics.RAM.Details = "$($script:Report.Hardware.RAM.UsedGB) GB використано з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB"
-        $script:Report.Dashboard.Metrics.RAM.Status = if ($script:Report.Hardware.RAM.UsedPercent -ge 95) { 'CRITICAL' } elseif ($script:Report.Hardware.RAM.UsedPercent -ge 85) { 'WARNING' } else { 'OK' }
+        $script:Report.Dashboard.Metrics.RAM.Status = if ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamCriticalPercent) { 'CRITICAL' } elseif ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamWarningPercent) { 'WARNING' } else { 'OK' }
+
+        # CPU LoadPercent буває $null (щойно піднята VM — див. коментар вище,
+        # це не помилка), тож findings пишемо лише коли значення реально відоме.
+        if ($null -ne $script:Report.Hardware.CPU.LoadPercent) {
+            if ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuCriticalPercent) {
+                Add-AuditFinding -Severity 'CRITICAL' -Category 'Hardware.CPU' -Message "Завантаження CPU критично високе: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Перевірте процеси з найбільшим споживанням CPU (Processes.TopCPU) — можливий runaway-процес або недостатня продуктивність для навантаження.'
+            } elseif ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuWarningPercent) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Hardware.CPU' -Message "Завантаження CPU підвищене: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Спостерігайте за динамікою навантаження CPU, за потреби перевірте Processes.TopCPU.'
+            }
+        }
+
+        if ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamCriticalPercent) {
+            Add-AuditFinding -Severity 'CRITICAL' -Category 'Hardware.RAM' -Message "Використання RAM критично високе: $($script:Report.Hardware.RAM.UsedPercent)% ($($script:Report.Hardware.RAM.UsedGB) GB з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB)." -Recommendation 'Перевірте процеси з найбільшим споживанням пам''яті (Processes.TopMemory) — можливий memory leak або недостатньо RAM для навантаження.'
+        } elseif ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamWarningPercent) {
+            Add-AuditFinding -Severity 'WARNING' -Category 'Hardware.RAM' -Message "Використання RAM підвищене: $($script:Report.Hardware.RAM.UsedPercent)% ($($script:Report.Hardware.RAM.UsedGB) GB з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB)." -Recommendation 'Спостерігайте за динамікою використання RAM, за потреби перевірте Processes.TopMemory.'
+        }
 
         if ($Profile -in @('Full','Deep','Forensic')) {
             try {
