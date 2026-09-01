@@ -1,4 +1,14 @@
-﻿## Unreleased — Stabilization P0: execution contract, exit codes, ExportErrors
+﻿## Unreleased — Stabilization P0-B: Windows Lifecycle data model
+
+Закриває P0.6/P0.7 з зовнішнього ТЗ на стабілізацію — **Stabilization P0 тепер повністю завершено** (P0-A виконано раніше, див. запис нижче).
+
+- **[P0.7]** Таблиця життєвого циклу Windows (`Get-BravoWindowsLifecycleTable`) винесена з `src/39-Collectors-Updates.ps1` у окремий data-модуль `src/39a-Data-WindowsLifecycle.ps1`, доданий у `src/BRAVO.build.json` перед колектором. Логіка колектора (`Get-BravoOsSupportInfo`) не змінилась — оновлення дат тепер не потребує правок коду колектора.
+- **[P0.6]** Усі записи таблиці звірено з офіційними lifecycle-сторінками Microsoft Learn (`learn.microsoft.com/lifecycle`). Знайдено й виправлено помилку: **Windows Server 2025** мав `SupportEndConsumer`/`SupportEndEnterprise = 2034-10-10`, коректна дата — `2034-11-14` (офіційна raw "Extended End Date" — `11/15/2034 6:59:59 AM PT`, у публічно оголошеному форматі мінус 1 день). Знято позначку "не звірено з lifecycle-сторінкою" з Windows 11 25H2 — офіційні дати (`2027-10-12` Home/Pro, `2028-10-10` Enterprise/Education) підтверджено збіглись з уже наявними в таблиці. Інші звірені записи (24H2, 23H2, 22H2, 21H2 для Windows 11 та Windows 10, LTSC 2019/2021, Server 2022, Server 23H2 Annual Channel) — усі коректні, розбіжностей не знайдено. `$script:BravoLifecycleTableUpdatedAt` оновлено на `2026-09-01`.
+- `tests/Manifest.Tests.ps1` підтверджує коректність нового модуля в `BRAVO.build.json` (жодних змін самого тесту не знадобилось — існуюче регресійне покриття вже ловить розсинхронізацію manifest/`src/*.ps1`).
+
+Усі 36 Pester-тестів проходять (36/36, без пропусків). `dist` перебудовано, sha512 звірено.
+
+## Unreleased — Stabilization P0: execution contract, exit codes, ExportErrors
 
 За зовнішнім технічним завданням на стабілізацію (P0-P3) реалізовано **P0** (execution contract, exit codes, розділення CollectionErrors/ExportErrors). P0.6/P0.7 (Windows Lifecycle dataset — повноцінна нова функція, якої в коді не існувало) і P1-P3 свідомо відкладені в окремі майбутні PR.
 

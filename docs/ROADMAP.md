@@ -6,7 +6,7 @@
 
 ## Stabilization milestone (зовнішнє ТЗ P0-P3)
 
-За результатами зовнішнього технічного завдання на стабілізацію реалізовано **P0-A (Runtime stabilization)** — execution contract, exit codes, розділення CollectionErrors/ExportErrors. Злито в `developer` через PR #45 ("Stabilization P0: execution contract, exit codes, CollectionErrors/ExportErrors", merge commit `7b951a075b5d3ea3ef7c1516c5fec6da98d2c935`) — деталі в `CHANGELOG.md` ("Stabilization P0"). **P0 не завершено повністю**: P0-B (Lifecycle correctness) лишається відкритим, статус нижче.
+За результатами зовнішнього технічного завдання на стабілізацію реалізовано **P0-A (Runtime stabilization)** та **P0-B (Lifecycle correctness)** — **P0 завершено повністю**. P0-A злито в `developer` через PR #45 ("Stabilization P0: execution contract, exit codes, CollectionErrors/ExportErrors", merge commit `7b951a075b5d3ea3ef7c1516c5fec6da98d2c935`) — деталі в `CHANGELOG.md` ("Stabilization P0"). P0-B закрито окремим PR (гілка `fix/lifecycle-data-model`).
 
 **P0-A — Runtime stabilization → DONE**
 
@@ -16,12 +16,10 @@
 - [x] P0.4 CollectionErrors/ExportErrors розділені, export-pipeline спрощено (Health Score рахується один раз).
 - [x] P0.5 Детермінований exit code contract (0/1/2/3), elevation прокидає реальний exit code дочірнього процесу.
 
-**P0-B — Lifecycle correctness → TODO**
+**P0-B — Lifecycle correctness → DONE**
 
-Під час злиття PR #45 з `main` до гілки незалежно потрапив колектор Windows Update/Lifecycle (`Get-BravoUpdatesAudit`, таблиця дат підтримки Windows 2000..11 25H2/Server 2025) — але це не закриває P0.6/P0.7: таблиця лишається inline-масивом усередині `src/39-Collectors-Updates.ps1`, а не централізованим dataset/data model, і потребує окремого процесу актуалізації.
-
-- [ ] P0.6 Актуалізація Windows Lifecycle database (звірка дат підтримки з офіційними джерелами Microsoft, процес регулярного оновлення).
-- [ ] P0.7 Винесення lifecycle records у централізований dataset/data model (окремий JSON/PS-data файл замість inline-масиву в колекторі, щоб оновлення дат не вимагало правок логіки колектора).
+- [x] P0.6 Актуалізація Windows Lifecycle database — усі записи звірено з офіційними lifecycle-сторінками Microsoft Learn (learn.microsoft.com/lifecycle) станом на 2026-09-01. Виявлено й виправлено помилкову дату Windows Server 2025 (Extended End Date був `2034-10-10`, коректно `2034-11-14` за офіційною raw-датою `11/15/2034 6:59:59 AM PT`); знята позначка "не звірено" з Windows 11 25H2 — офіційна дата (`2027-10-12` Home/Pro, `2028-10-10` Enterprise/Education) підтверджена. Регулярний процес актуалізації: звіряти `$script:BravoLifecycleTableUpdatedAt` під час кожного релізу нової версії Windows.
+- [x] P0.7 Винесення lifecycle records у централізований dataset/data model — таблиця перенесена з inline-масиву в `src/39-Collectors-Updates.ps1` у окремий модуль `src/39a-Data-WindowsLifecycle.ps1` (додано в `src/BRAVO.build.json` перед колектором), щоб оновлення дат не вимагало правок логіки колектора `Get-BravoOsSupportInfo`.
 - [ ] P1 (централізовані storage thresholds, collector/analyzer розділення, CPU/RAM findings, `-Offline`, `-SkipGeoIP`, `-SanitizeLevel`, розширення Pester/CI) — окремі майбутні PR.
 - [ ] P2 (cleanup, dead parameters, `.editorconfig`/`.gitattributes` — частину вже закрито попередніми раундами код-ревю цієї сесії, гл. `CHANGELOG.md`).
 - [ ] P3 (Deep Security: TPM/Secure Boot/BitLocker, повноцінний Forensic profile) — явно поза межами stabilization-етапу, окремі майбутні PR.
