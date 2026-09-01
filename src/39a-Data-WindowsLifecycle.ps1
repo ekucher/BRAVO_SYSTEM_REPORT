@@ -1,4 +1,4 @@
-# MODULE: 39a-Data-WindowsLifecycle.ps1
+﻿# MODULE: 39a-Data-WindowsLifecycle.ps1
 # Централізований data-модуль: статична таблиця життєвого циклу Windows.
 # Винесено з src/39-Collectors-Updates.ps1 (P0.7), щоб оновлення дат
 # не вимагало правок логіки колектора Get-BravoOsSupportInfo.

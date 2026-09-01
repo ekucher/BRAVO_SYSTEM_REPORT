@@ -1,4 +1,15 @@
-﻿## Unreleased — Stabilization P0-B: Windows Lifecycle data model
+﻿## Unreleased — P1: централізовані storage thresholds
+
+Перший пункт milestone "v0.4.2 Runtime Quality" / P1 зовнішнього ТЗ — уніфікація порогів вільного місця для basic і Deep/Forensic storage audit.
+
+- **Проблема**: `Get-BravoStorageAudit` (basic, усі профілі) використовував пороги `10%`/`20%` для CRITICAL/WARNING, а `Get-BravoStorageRiskSummary` (лише Deep/Forensic) — окремі, неузгоджені `5%`/`10%`/`15%`. Для одного й того самого тому в Deep/Forensic профілі це породжувало два findings різної суворості з різних порогових наборів одночасно (наприклад, том з 8% вільного місця отримував і CRITICAL від basic-проходу, і WARNING від risk summary).
+- **Fix**: `src/32-Collectors-Storage.ps1` — нова централізована `Get-BravoStorageThresholds` (5% critical / 10% warning / 15% системний том) як єдине джерело порогів для обох шляхів, і чиста функція `Get-BravoStorageFreeSpaceSeverity` для класифікації тому за FreePercent. У Deep/Forensic профілях basic-прохід у `Get-BravoStorageAudit` більше не емітить власні findings — лише збирає TotalGB/FreeGB/FreePercent, а рішення про findings повністю делегується `Get-BravoStorageRiskSummary` (яка й так глибше покриває ті самі томи, включно з томами без літери диска й системним порогом). У Quick/Full профілях (де Deep audit не запускається) basic-прохід і далі сам генерує findings, але вже з тими самими централізованими порогами.
+- Категорію findings уніфіковано на `Storage.FreeSpace` в обох шляхах (раніше basic писав `Storage`, deep — `Storage.FreeSpace`); на Health Score/тести це не впливає — там враховується лише `Severity`.
+- Новий `tests/StorageThresholds.Tests.ps1` (8 тестів): чисті unit-тести `Get-BravoStorageThresholds`/`Get-BravoStorageFreeSpaceSeverity` без залежності від WMI/CIM.
+
+Усі 44 Pester-тести проходять (36 попередніх + 8 нових). `dist` перебудовано, sha512 звірено.
+
+## Unreleased — Stabilization P0-B: Windows Lifecycle data model
 
 Закриває P0.6/P0.7 з зовнішнього ТЗ на стабілізацію — **Stabilization P0 тепер повністю завершено** (P0-A виконано раніше, див. запис нижче).
 
