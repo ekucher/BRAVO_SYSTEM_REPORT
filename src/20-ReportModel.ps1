@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.6'
+    SchemaVersion = '0.6.7'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -141,6 +141,20 @@ return [ordered]@{
         }
         TLS = [ordered]@{
             Protocols = @()
+        }
+        Defender = [ordered]@{
+            Available = $null
+            AMServiceEnabled = $null
+            AntivirusEnabled = $null
+            RealTimeProtectionEnabled = $null
+            BehaviorMonitorEnabled = $null
+            AntivirusSignatureVersion = ''
+            AntivirusSignatureLastUpdated = ''
+            AntivirusSignatureAgeDays = $null
+            AMEngineVersion = ''
+            AMProductVersion = ''
+            Status = 'NotChecked'
+            Error = ''
         }
     }
     Users = [ordered]@{ LocalAdmins=@() }

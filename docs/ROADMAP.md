@@ -169,7 +169,7 @@
 - [x] SMBv1 (`Get-SmbServerConfiguration`, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Security.SMBv1.{Enabled,Status}`; WARNING-finding, якщо `EnableSMB1Protocol=$true`; модуль SmbShare відсутній -> `NotAvailable`, не помилка).
 - [ ] SMB signing / insecure guest access.
 - [x] TLS 1.0/1.1/1.2/1.3 registry status (SCHANNEL registry, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Get-BravoTlsProtocolStatus` — чиста функція, інтерпретує `Enabled`/`DisabledByDefault` DWORD -> `Enabled`/`Disabled`/`NotConfigured`, покрито `tests/TlsProtocolStatus.Tests.ps1`; `Security.TLS.Protocols[]` — Client+Server на кожен протокол; findings лише для явних відхилень від безпечного дефолту (застарілий протокол явно увімкнено / TLS 1.2 явно вимкнено), `NotConfigured` — не помилка, найпоширеніший стан).
-- [ ] Defender details: realtime protection, signature age, engine/platform version.
+- [x] Defender details: realtime protection, signature age, engine/platform version (`Get-MpComputerStatus`, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Security.Defender.{Available,AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,BehaviorMonitorEnabled,AntivirusSignatureVersion,AntivirusSignatureLastUpdated,AntivirusSignatureAgeDays,AMEngineVersion,AMProductVersion,Status}`; WARNING якщо RealTimeProtection вимкнено або сигнатури старіші 7 днів; Defender вимкнено/відсутній — штатний стан `Unavailable`/`NotAvailable`, не помилка).
 - [ ] Password policy.
 - [ ] Audit policy.
 - [ ] Autoruns.

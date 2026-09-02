@@ -1,4 +1,17 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: SMBv1 + TLS registry status
+﻿## Unreleased — v0.5.0 Deep Inventory: Defender details
+
+Шостий пункт v0.5.0 Deep Inventory (Security Baseline) — деталі Windows Defender.
+
+- `Get-MpComputerStatus` — новий блок у `src/34-Collectors-Security.ps1`, гейтовано `-Profile Full/Deep/Forensic`. Real-Time Protection, Behavior Monitor, версії сигнатур/engine/product, вік сигнатур у днях (`AntivirusSignatureAgeDays`, обчислюється з `AntivirusSignatureLastUpdated`).
+- Findings: WARNING якщо Real-Time Protection вимкнено; WARNING якщо сигнатури старіші 7 днів.
+- **Свідоме рішення**: НЕ звіряємо стан Defender з `Security.Antivirus.Product` (окрема, вже зібрана SecurityCenter2-знахідка про активний AV) — Defender у passive mode (типово, коли активний сторонній антивірус) законно показує `RealTimeProtectionEnabled=$false`, і спроба "вгадати, чи це нормально" за непрямими ознаками дала б крихкий, ненадійний результат; звіт лише констатує факт, висновок — за адміністратором.
+- Defender вимкнено GPO/сторонім антивірусом або взагалі відсутній (Server Core без feature) — штатний стан машини (`Status='Unavailable'`/`'NotAvailable'`), не помилка збору.
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Security.Defender.{Available,AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,BehaviorMonitorEnabled,AntivirusSignatureVersion,AntivirusSignatureLastUpdated,AntivirusSignatureAgeDays,AMEngineVersion,AMProductVersion,Status,Error}`. `SchemaVersion` піднято `0.6.6` → `0.6.7`.
+- HTML: нова картка "Windows Defender" на вкладці Security (`src/51-Export-Html.ps1`).
+- 2 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Defender'` (перейменовано), той самий `-Profile Deep` прогін.
+
+Усі 98 Pester-тестів проходять (96 попередніх + 2 нових). `dist` перебудовано, sha512 звірено.
+## Unreleased — v0.5.0 Deep Inventory: SMBv1 + TLS registry status
 
 П'ятий пункт v0.5.0 Deep Inventory (Security Baseline) — два класичні security-показники.
 

@@ -1,6 +1,6 @@
 ﻿# MODULE: 34-Collectors-Security.ps1
 # Збір інформації про UAC, RDP, антивірус, Windows Firewall, Secure Boot, TPM,
-# SMBv1 та TLS registry status.
+# SMBv1, TLS registry status та деталі Windows Defender.
 
 # Чиста функція: інтерпретує пару SCHANNEL registry DWORD (Enabled,
 # DisabledByDefault — HKLM:\...\SecurityProviders\SCHANNEL\Protocols\<protocol>\<Client|Server>)
@@ -192,7 +192,55 @@ function Get-BravoSecurityAudit {
                 }
             }
 
-            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status)" -ForegroundColor Green
+            # --- Defender details ---
+            if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+                try {
+                    $defenderStatus = Get-MpComputerStatus -ErrorAction Stop
+
+                    $script:Report.Security.Defender.Available = $true
+                    $script:Report.Security.Defender.AMServiceEnabled = [bool]$defenderStatus.AMServiceEnabled
+                    $script:Report.Security.Defender.AntivirusEnabled = [bool]$defenderStatus.AntivirusEnabled
+                    $script:Report.Security.Defender.RealTimeProtectionEnabled = [bool]$defenderStatus.RealTimeProtectionEnabled
+                    $script:Report.Security.Defender.BehaviorMonitorEnabled = [bool]$defenderStatus.BehaviorMonitorEnabled
+                    $script:Report.Security.Defender.AntivirusSignatureVersion = [string]$defenderStatus.AntivirusSignatureVersion
+                    $script:Report.Security.Defender.AMEngineVersion = [string]$defenderStatus.AMEngineVersion
+                    $script:Report.Security.Defender.AMProductVersion = [string]$defenderStatus.AMProductVersion
+                    $script:Report.Security.Defender.Status = 'Detected'
+
+                    if ($defenderStatus.AntivirusSignatureLastUpdated) {
+                        $script:Report.Security.Defender.AntivirusSignatureLastUpdated = $defenderStatus.AntivirusSignatureLastUpdated.ToString('yyyy-MM-dd HH:mm:ss')
+                        $script:Report.Security.Defender.AntivirusSignatureAgeDays = [Math]::Round(((Get-Date) - $defenderStatus.AntivirusSignatureLastUpdated).TotalDays)
+                    }
+
+                    # RealTimeProtectionEnabled=$false на машині зі стороннім
+                    # антивірусом (напр. цей же script:Report.Security.Antivirus.Product
+                    # показує інший продукт) — очікуваний, не тривожний стан:
+                    # Defender свідомо переходить у passive mode. Тут навмисно
+                    # НЕ звіряємо з Antivirus.Product (окрема, вже зібрана
+                    # SecurityCenter2-знахідка) — просто повідомляємо факт, без
+                    # спроби вгадати "чи це нормально", щоб не плодити хибних
+                    # WARNING/не-WARNING рішень на основі непрямих ознак.
+                    if (-not $script:Report.Security.Defender.RealTimeProtectionEnabled) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.Defender' -Message 'Windows Defender Real-Time Protection вимкнено.' -Recommendation 'Перевірте, чи це свідоме рішення (напр. активний сторонній антивірус) — якщо ні, увімкніть Real-Time Protection.'
+                    }
+
+                    if ($null -ne $script:Report.Security.Defender.AntivirusSignatureAgeDays -and $script:Report.Security.Defender.AntivirusSignatureAgeDays -gt 7) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.Defender' -Message "Сигнатури Windows Defender застарілі: $($script:Report.Security.Defender.AntivirusSignatureAgeDays) днів з останнього оновлення." -Recommendation 'Запустіть оновлення сигнатур антивіруса (Update-MpSignature) та перевірте підключення до Windows Update.'
+                    }
+                } catch {
+                    # Get-MpComputerStatus може падати, коли служба Defender
+                    # вимкнена GPO/сторонім антивірусом — штатний стан машини,
+                    # не помилка збору.
+                    $script:Report.Security.Defender.Available = $false
+                    $script:Report.Security.Defender.Status = 'Unavailable'
+                    $script:Report.Security.Defender.Error = $_.Exception.Message
+                }
+            } else {
+                $script:Report.Security.Defender.Available = $false
+                $script:Report.Security.Defender.Status = 'NotAvailable'
+            }
+
+            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status), Defender: $($script:Report.Security.Defender.Status)" -ForegroundColor Green
         }
 
         Write-Host "  $IconSecurity Безпека: RDP=$(if($script:Report.Security.RemoteAccess.RDPEnabled){'ON'}else{'OFF'}), UAC=$(if($script:Report.Security.UAC.Enabled){'ON'}else{'OFF'})" -ForegroundColor Green
