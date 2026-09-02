@@ -57,14 +57,14 @@ function Convert-BravoBytesToGB {
 
 function Get-BravoStorageDeepAudit {
     # Заповнюються нижче в цій функції: CollectedAt, LogicalDisks, Volumes,
-    # Disks, Partitions, PageFiles, BitLocker, ShadowCopies, StoragePools.
+    # Disks, Partitions, PageFiles, BitLocker, ShadowCopies, StoragePools,
+    # ReliabilityCounters, SmartPredictFailures (обидва — SMART/NVMe health,
+    # можуть лишатись порожніми, якщо апаратура/драйвер не підтримує).
     #
-    # НЕ реалізовано (завжди порожній масив @() — заплановані, ще не написані
-    # колектори; див. docs/ROADMAP.md "Storage Audit" для SMART): PhysicalDisks
-    # (не плутати з окремим, реально заповненим
-    # $script:Report.Hardware.Disks.PhysicalDisks — це різні поля з однаковою
-    # назвою в різних секціях моделі), ReliabilityCounters, StorageSubsystems,
-    # SmartPredictFailures.
+    # НЕ реалізовано (завжди порожній масив @() — не заплановано окремо,
+    # PhysicalDisks тут дублювало б $script:Report.Hardware.Disks.PhysicalDisks
+    # — це різні поля з однаковою назвою в різних секціях моделі):
+    # PhysicalDisks, StorageSubsystems.
     $storage = [ordered]@{
         CollectedAt  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         LogicalDisks = @()
@@ -305,6 +305,87 @@ function Get-BravoStorageDeepAudit {
     # Get-StoragePool відсутній (модуль Storage не встановлено, напр. деякі
     # Server Core/старіші Windows) або Storage Spaces не використовується —
     # $storage.StoragePools лишається порожнім масивом, штатний стан.
+
+    if (Get-Command Get-PhysicalDisk -ErrorAction SilentlyContinue) {
+        try {
+            $physicalDisksForReliability = Get-PhysicalDisk -ErrorAction Stop
+            foreach ($physicalDisk in $physicalDisksForReliability) {
+                try {
+                    # Get-StorageReliabilityCounter може падати для окремого
+                    # диска (напр. USB/віртуальний диск без SMART-контролера) —
+                    # обробляємо кожен диск незалежно, один збій не має гасити
+                    # решту.
+                    $counter = $physicalDisk | Get-StorageReliabilityCounter -ErrorAction Stop
+                    if (-not $counter) { continue }
+
+                    $storage.ReliabilityCounters += [PSCustomObject]@{
+                        DeviceId                = $physicalDisk.DeviceId
+                        FriendlyName             = $physicalDisk.FriendlyName
+                        MediaType                = [string]$physicalDisk.MediaType
+                        TemperatureCelsius       = $counter.Temperature
+                        TemperatureMaxCelsius    = $counter.TemperatureMax
+                        WearPercent              = $counter.Wear
+                        ReadErrorsTotal          = $counter.ReadErrorsTotal
+                        ReadErrorsUncorrected    = $counter.ReadErrorsUncorrected
+                        WriteErrorsTotal         = $counter.WriteErrorsTotal
+                        WriteErrorsUncorrected   = $counter.WriteErrorsUncorrected
+                        PowerOnHours             = $counter.PowerOnHours
+                    }
+
+                    # Некориговані помилки читання/запису — однозначний сигнал
+                    # апаратної проблеми диска (на відміну від Total, які
+                    # включають штатно-скориговані помилки і завжди >0 на
+                    # робочому диску). Wear >= 90% — SSD/NVMe близько до
+                    # кінця ресурсу за специфікацією виробника.
+                    if (($counter.ReadErrorsUncorrected -gt 0) -or ($counter.WriteErrorsUncorrected -gt 0)) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Storage.Reliability' -Message "Диск '$($physicalDisk.FriendlyName)' має некориговані помилки читання/запису (SMART reliability counters)." -Recommendation 'Перевірте стан диска (chkdsk, виробничий diagnostic tool) і за потреби замініть.'
+                    }
+                    if ($null -ne $counter.Wear -and [double]$counter.Wear -ge 90) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Storage.Reliability' -Message "Диск '$($physicalDisk.FriendlyName)' має Wear=$($counter.Wear)% — близько до кінця ресурсу SSD/NVMe." -Recommendation 'Заплануйте заміну диска та перевірте резервні копії.'
+                    }
+                } catch {
+                    Add-AuditError -Section 'StorageDeep.ReliabilityCounters' -Message $_.Exception.Message
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.ReliabilityCounters' -Message $_.Exception.Message
+        }
+    }
+    # Get-PhysicalDisk/Get-StorageReliabilityCounter відсутні (модуль Storage
+    # не встановлено) — $storage.ReliabilityCounters лишається порожнім
+    # масивом, штатний стан.
+
+    try {
+        # MSStorageDriver_FailurePredictStatus (namespace root\wmi) — легасі
+        # SMART predictive-failure API, доступний лише для деяких контролерів
+        # (переважно старі ATA/SATA, часто НЕ покриває NVMe чи RAID-контролери
+        # з власним драйвером) і вимагає прав адміністратора. Відсутність
+        # класу/інстансів — штатний стан для більшості сучасних машин, не
+        # помилка збору.
+        if ($script:UseCim) {
+            $failurePredicts = Get-CimInstance -Namespace 'root\wmi' -ClassName 'MSStorageDriver_FailurePredictStatus' -ErrorAction Stop
+        } else {
+            $failurePredicts = Get-WmiObject -Namespace 'root\wmi' -Class 'MSStorageDriver_FailurePredictStatus' -ErrorAction Stop
+        }
+
+        foreach ($predict in $failurePredicts) {
+            $storage.SmartPredictFailures += [PSCustomObject]@{
+                InstanceName   = $predict.InstanceName
+                PredictFailure = $predict.PredictFailure
+                Reason         = $predict.Reason
+            }
+
+            if ($predict.PredictFailure) {
+                Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage.SMART' -Message "SMART передбачає можливий збій диска '$($predict.InstanceName)' (PredictFailure=True)." -Recommendation 'Негайно створіть резервну копію даних і заплануйте заміну диска.'
+            }
+        }
+    } catch {
+        # Клас відсутній у namespace (WMI-провайдер SMART не встановлено/не
+        # підтримується контролером) — це не помилка збору, а обмеження
+        # апаратної/драйверної підтримки; не фіксуємо Add-AuditError, аби не
+        # створювати CollectionErrors на переважній більшості сучасних машин
+        # (NVMe/RAID), де цей клас штатно відсутній.
+    }
 
     return [PSCustomObject]$storage
 }

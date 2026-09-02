@@ -1,4 +1,18 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Shadow Copies (VSS) + Storage Spaces
+﻿## Unreleased — v0.5.0 Deep Inventory: SMART/NVMe health (останній пункт Storage Audit)
+
+**Storage Audit секцію v0.5.0 Deep Inventory тепер повністю закрито.**
+
+- **Hardware.Disks.Deep.ReliabilityCounters[]** через `Get-PhysicalDisk | Get-StorageReliabilityCounter` — Temperature/TemperatureMax/Wear/ReadErrorsTotal/ReadErrorsUncorrected/WriteErrorsTotal/WriteErrorsUncorrected/PowerOnHours на кожен фізичний диск. WARNING якщо є некориговані помилки читання/запису (однозначний сигнал апаратної проблеми, на відміну від Total-лічильників, які штатно >0) або Wear ≥ 90% (SSD/NVMe близько до кінця ресурсу).
+- **Hardware.Disks.Deep.SmartPredictFailures[]** через легасі `MSStorageDriver_FailurePredictStatus` WMI-клас (`root\wmi`) — InstanceName/PredictFailure/Reason. Клас типово відсутній на NVMe/RAID-контролерах із власним драйвером (легасі ATA/SATA SMART API) — це штатне обмеження апаратури/драйвера, свідомо НЕ фіксується як `Add-AuditError`. CRITICAL-finding при `PredictFailure=True`.
+
+Обидва — новий блок у `src/32-Collectors-Storage.ps1` (`Get-BravoStorageDeepAudit`), гейтовано `-Profile Deep/Forensic`.
+
+- Поля вже існували як завжди-порожні заглушки в моделі даних; тепер реально заповнюються — `SchemaVersion` піднято `0.6.11` → `0.6.12`.
+- HTML: нові таблиці "SMART / Reliability Counters" і "SMART Predictive Failure" на вкладці Hardware/Storage (`src/51-Export-Html.ps1`).
+- Sanitize: не потрібен — `FriendlyName` (модель диска) і `DeviceId` (індекс) не є PII.
+- 4 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / SMART'` (перейменовано), той самий `-Profile Deep` прогін.
+
+## Unreleased — v0.5.0 Deep Inventory: Shadow Copies (VSS) + Storage Spaces
 
 Два пункти v0.5.0 Deep Inventory / Storage Audit в одному PR: Shadow Copies/VSS, Storage Spaces. Заразом виявлено й позначено заднім числом уже реалізований раніше пункт "Pagefile" (`Win32_PageFileUsage`, був у коді, але не позначений у ROADMAP).
 
