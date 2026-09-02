@@ -175,6 +175,19 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # --- Scheduled tasks (Security.ScheduledTasks, v0.5.0-tail) — Author
+    # часто у форматі DOMAIN\username або COMPUTERNAME\username (реальний
+    # обліковий запис, що створив задачу) — та сама категорія ADMIN, що й
+    # LocalAdmins/AllowedUsers. Execute/Arguments можуть містити шлях з
+    # профілю користувача — категорія PATH, як і Autoruns.Command вище.
+    if ($Report.Security -and $Report.Security.ScheduledTasks) {
+        foreach ($task in @($Report.Security.ScheduledTasks)) {
+            if ($task.Author) { $task.Author = & $maskAdmin $task.Author }
+            if ($task.Execute) { $task.Execute = & $maskPath $task.Execute }
+            if ($task.Arguments) { $task.Arguments = & $maskPath $task.Arguments }
+        }
+    }
+
     # --- Приватні IPv4/gateway/DNS-сервери — лише Strict ---
     if ($Level -eq 'Strict' -and $Report.Network) {
         if ($Report.Network.IP) {

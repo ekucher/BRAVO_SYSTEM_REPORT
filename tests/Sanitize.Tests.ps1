@@ -46,6 +46,7 @@ BeforeAll {
             Security = [ordered]@{
                 RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker') }
                 Autoruns = @([PSCustomObject]@{ Name = 'OneDrive'; Command = 'C:\Users\jdoe\AppData\Local\Microsoft\OneDrive\OneDrive.exe /background'; Source = 'Run'; Hive = 'HKCU' })
+                ScheduledTasks = @([PSCustomObject]@{ Name = 'MyTask'; Path = '\'; State = 'Ready'; Author = 'CORP\jdoe'; Execute = 'C:\Users\jdoe\script.exe'; Arguments = ''; IsMicrosoftDefault = $false })
             }
             Software = [ordered]@{ Installed = @([PSCustomObject]@{ InstallLocation = 'C:\Users\jdoe\AppData\Local\SomeApp' }) }
         }
@@ -115,6 +116,12 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
     It 'маскує Command в Autoruns (v0.5.0-tail) навіть у Basic, Name лишається' {
         $script:report.Security.Autoruns[0].Command | Should -Match '^REDACTED-PATH-'
         $script:report.Security.Autoruns[0].Name | Should -Be 'OneDrive'
+    }
+
+    It 'маскує Author і Execute у ScheduledTasks (v0.5.0-tail) навіть у Basic, Name лишається' {
+        $script:report.Security.ScheduledTasks[0].Author | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Security.ScheduledTasks[0].Execute | Should -Match '^REDACTED-PATH-'
+        $script:report.Security.ScheduledTasks[0].Name | Should -Be 'MyTask'
     }
 
     It 'маскує шлях SMB share (v0.5.0-tail) навіть у Basic' {

@@ -2,8 +2,9 @@
 # Збір інформації про UAC (+full policy), RDP (+NLA/port/firewall scope/
 # allowed users), антивірус, Windows Firewall, Secure Boot, TPM, SMBv1, TLS
 # registry status, деталі Windows Defender, WinRM (listeners/auth), SMB
-# signing, password policy (net accounts), audit policy (auditpol) та
-# autoruns (Run/RunOnce ключі реєстру + папки автозавантаження).
+# signing, password policy (net accounts), audit policy (auditpol),
+# autoruns (Run/RunOnce ключі реєстру + папки автозавантаження) та
+# scheduled tasks (Get-ScheduledTask).
 
 # Чиста функція: ConsentPromptBehaviorAdmin DWORD (HKLM:\...\Policies\System)
 # -> людяний опис. Значення за документацією Microsoft (UAC group policy
@@ -639,6 +640,38 @@ function Get-BravoSecurityAudit {
             # Відсутність autorun-записів (чисте автозавантаження) — штатний
             # стан, не помилка збору; $script:Report.Security.Autoruns
             # лишається порожнім масивом.
+
+            # --- Scheduled tasks: гейтовано окремо Deep/Forensic (той самий
+            # принцип, що й Autoruns вище — суттєво більший обсяг даних, ніж
+            # решта Security-блоку). Вбудовані задачі Windows (TaskPath
+            # \Microsoft\Windows\*) — типово 200-300+ на кожній машині; замість
+            # приховування (втрата даних) або показу всіх без розбору (шум),
+            # позначаємо прапорцем IsMicrosoftDefault=true — той самий
+            # принцип "дані видимі, findings обережні", що вже застосований
+            # для ARP/Storage ReservedVolumes.
+            if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+                try {
+                    $scheduledTasks = Get-ScheduledTask -ErrorAction Stop
+                    foreach ($task in $scheduledTasks) {
+                        $firstAction = $task.Actions | Select-Object -First 1
+                        $script:Report.Security.ScheduledTasks += [PSCustomObject]@{
+                            Name               = $task.TaskName
+                            Path               = $task.TaskPath
+                            State              = [string]$task.State
+                            Author             = $task.Author
+                            Execute            = if ($firstAction) { [string]$firstAction.Execute } else { '' }
+                            Arguments          = if ($firstAction) { [string]$firstAction.Arguments } else { '' }
+                            IsMicrosoftDefault = [bool]($task.TaskPath -like '\Microsoft\Windows\*')
+                        }
+                    }
+                } catch {
+                    Add-AuditError -Section 'Security.ScheduledTasks' -Message $_.Exception.Message
+                }
+            }
+            # Get-ScheduledTask відсутній (модуль ScheduledTasks не
+            # встановлено, напр. деякі Server Core збірки) — штатний стан,
+            # $script:Report.Security.ScheduledTasks лишається порожнім
+            # масивом.
 
             Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status), Defender: $($script:Report.Security.Defender.Status), WinRM: $($script:Report.Security.WinRM.Status), Password policy: $($script:Report.Security.PasswordPolicy.Status), Audit policy: $($script:Report.Security.AuditPolicy.Status) ($($script:Report.Security.AuditPolicy.TotalCount))" -ForegroundColor Green
         }
