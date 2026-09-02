@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-02 17:13:01
+    GeneratedAt: 2026-09-02 17:36:27
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -440,7 +440,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.9'
+    SchemaVersion = '0.6.10'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -542,9 +542,11 @@ return [ordered]@{
             PublicIPv4CheckedAt=''
             PublicIPv4Status='NotChecked'
         }
-        Routing = [ordered]@{ DefaultGateway=''; DefaultGateways=@(); DNSServers=@(); DNSSuffixSearchOrder=@() }
+        Routing = [ordered]@{ DefaultGateway=''; DefaultGateways=@(); DNSServers=@(); DNSSuffixSearchOrder=@(); RoutingTable=@() }
         Adapters = @()
         Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@() }
+        ARP = @()
+        WinHttpProxy = [ordered]@{ RawOutput=@(); Status='NotChecked'; Error='' }
     }
     Security = [ordered]@{
         UAC=[ordered]@{Enabled=$false}
@@ -1461,7 +1463,8 @@ function Get-BravoStorageAudit {
 # ============================================================
 
 # MODULE: 33-Collectors-Network.ps1
-# Збір інформації про мережеві адаптери, IP, TCP-з'єднання, primary IPv4 та public IPv4.
+# Збір інформації про мережеві адаптери, IP, TCP-з'єднання, primary IPv4,
+# public IPv4, routing table, ARP-кеш та WinHTTP proxy.
 
 function Get-BravoNetworkAudit {
     [CmdletBinding()]
@@ -1542,6 +1545,72 @@ function Get-BravoNetworkAudit {
                 }
             } catch {
                 Add-AuditError -Section 'Network.AdapterDetails' -Message $_.Exception.Message
+            }
+        }
+
+        # --- Routing table / ARP / WinHTTP proxy (v0.5.0 Network Audit) ---
+        if ($Profile -in @('Full','Deep','Forensic')) {
+            if (Get-Command Get-NetRoute -ErrorAction SilentlyContinue) {
+                try {
+                    $netRoutes = Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop |
+                        Select-Object -First 200 -Property DestinationPrefix, NextHop, RouteMetric, InterfaceAlias, ifIndex
+
+                    foreach ($route in $netRoutes) {
+                        $script:Report.Network.Routing.RoutingTable += [PSCustomObject]@{
+                            DestinationPrefix = $route.DestinationPrefix
+                            NextHop           = $route.NextHop
+                            RouteMetric       = $route.RouteMetric
+                            InterfaceAlias    = $route.InterfaceAlias
+                            InterfaceIndex    = $route.ifIndex
+                        }
+                    }
+                } catch {
+                    Add-AuditError -Section 'Network.RoutingTable' -Message $_.Exception.Message
+                }
+            }
+
+            if (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue) {
+                try {
+                    # Виключаємо Unreachable/Incomplete — це не реальні записи
+                    # ARP-кешу, а тимчасові стани резолюції, шум без цінності
+                    # для аудиту.
+                    $netNeighbors = Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop |
+                        Where-Object { $_.State -notin @('Unreachable', 'Incomplete') } |
+                        Select-Object -First 200 -Property IPAddress, LinkLayerAddress, State, InterfaceAlias
+
+                    foreach ($neighbor in $netNeighbors) {
+                        $script:Report.Network.ARP += [PSCustomObject]@{
+                            IPAddress        = $neighbor.IPAddress
+                            LinkLayerAddress = $neighbor.LinkLayerAddress
+                            State            = $neighbor.State.ToString()
+                            InterfaceAlias   = $neighbor.InterfaceAlias
+                        }
+                    }
+                } catch {
+                    Add-AuditError -Section 'Network.ARP' -Message $_.Exception.Message
+                }
+            }
+
+            # WinHTTP proxy: свідомо БЕЗ парсингу/інтерпретації тексту виводу
+            # netsh (локалізований, як і net.exe/auditpol.exe раніше в цій
+            # сесії) — публікуємо сирі рядки як є, без спроби визначити
+            # Enabled/Disabled за англійськими фразами типу "Direct access".
+            if (Get-Command netsh -ErrorAction SilentlyContinue) {
+                try {
+                    $winHttpProxyOutput = & netsh winhttp show proxy 2>&1
+
+                    if ($LASTEXITCODE -eq 0) {
+                        $script:Report.Network.WinHttpProxy.RawOutput = @($winHttpProxyOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+                        $script:Report.Network.WinHttpProxy.Status = 'Detected'
+                    } else {
+                        $script:Report.Network.WinHttpProxy.Status = 'Unavailable'
+                    }
+                } catch {
+                    $script:Report.Network.WinHttpProxy.Status = 'Unavailable'
+                    $script:Report.Network.WinHttpProxy.Error = $_.Exception.Message
+                }
+            } else {
+                $script:Report.Network.WinHttpProxy.Status = 'NotAvailable'
             }
         }
 
@@ -3481,6 +3550,16 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # ARP-кеш (Network.ARP, v0.5.0) — та сама категорія MAC, що й Adapters
+    # вище: маскується завжди (Basic), незалежно від рівня. IP-адреси в ARP —
+    # приватні (сусіди в тій самій підмережі за визначенням) — маскуються
+    # нижче разом з рештою приватних IPv4, лише в Strict.
+    if ($Report.Network -and $Report.Network.ARP) {
+        foreach ($arpEntry in @($Report.Network.ARP)) {
+            if ($arpEntry.LinkLayerAddress) { $arpEntry.LinkLayerAddress = & $maskMac $arpEntry.LinkLayerAddress }
+        }
+    }
+
     # --- Серійні номери ---
     if ($Report.BIOS -and $Report.BIOS.SerialNumber) { $Report.BIOS.SerialNumber = & $maskSerial $Report.BIOS.SerialNumber }
 
@@ -3556,6 +3635,19 @@ function Invoke-BravoReportSanitization {
                 if ($adapter.IPv4) { $adapter.IPv4 = @($adapter.IPv4 | ForEach-Object { & $maskPrivateIP $_ }) }
                 if ($adapter.Gateway) { $adapter.Gateway = @($adapter.Gateway | ForEach-Object { & $maskPrivateIP $_ }) }
                 if ($adapter.DNS) { $adapter.DNS = @($adapter.DNS | ForEach-Object { & $maskPrivateIP $_ }) }
+            }
+        }
+
+        if ($Report.Network.ARP) {
+            foreach ($arpEntry in @($Report.Network.ARP)) {
+                if ($arpEntry.IPAddress) { $arpEntry.IPAddress = & $maskPrivateIP $arpEntry.IPAddress }
+            }
+        }
+
+        if ($Report.Network.Routing -and $Report.Network.Routing.RoutingTable) {
+            foreach ($routeEntry in @($Report.Network.Routing.RoutingTable)) {
+                if ($routeEntry.DestinationPrefix) { $routeEntry.DestinationPrefix = & $maskPrivateIP $routeEntry.DestinationPrefix }
+                if ($routeEntry.NextHop) { $routeEntry.NextHop = & $maskPrivateIP $routeEntry.NextHop }
             }
         }
 
@@ -3925,6 +4017,30 @@ function Export-BravoHtmlReport {
                 '<tr><td colspan="9" class="muted">Мережеві адаптери не знайдені або збір недоступний.</td></tr>'
             }
 
+            $routingTableEntries = @($script:Report.Network.Routing.RoutingTable)
+            $routingTableRows = if ($routingTableEntries.Count -gt 0) {
+                ($routingTableEntries | ForEach-Object {
+                    "<tr><td>$(ConvertTo-BravoHtmlText $_.DestinationPrefix)</td><td>$(ConvertTo-BravoHtmlText $_.NextHop)</td><td>$(ConvertTo-BravoHtmlText $_.RouteMetric)</td><td>$(ConvertTo-BravoHtmlText $_.InterfaceAlias)</td></tr>"
+                }) -join "`n"
+            } else {
+                '<tr><td colspan="4" class="muted">Routing table дані відсутні (профіль не Full/Deep/Forensic, або збір завершився з помилкою).</td></tr>'
+            }
+
+            $arpEntries = @($script:Report.Network.ARP)
+            $arpRows = if ($arpEntries.Count -gt 0) {
+                ($arpEntries | ForEach-Object {
+                    "<tr><td>$(ConvertTo-BravoHtmlText $_.IPAddress)</td><td>$(ConvertTo-BravoHtmlText $_.LinkLayerAddress)</td><td>$(ConvertTo-BravoHtmlText $_.State)</td><td>$(ConvertTo-BravoHtmlText $_.InterfaceAlias)</td></tr>"
+                }) -join "`n"
+            } else {
+                '<tr><td colspan="4" class="muted">ARP-кеш даних відсутні (профіль не Full/Deep/Forensic, або збір завершився з помилкою).</td></tr>'
+            }
+
+            $winHttpProxyText = if (@($script:Report.Network.WinHttpProxy.RawOutput).Count -gt 0) {
+                (@($script:Report.Network.WinHttpProxy.RawOutput) -join '; ')
+            } else {
+                $script:Report.Network.WinHttpProxy.Status
+            }
+
             $disksContainer = $script:Report.Hardware.Disks
             if ($disksContainer -is [System.Collections.IDictionary]) {
                 $storageDeep = $disksContainer['Deep']
@@ -4115,7 +4231,7 @@ function Export-BravoHtmlReport {
     <section id="tab-general" class="tab-panel active"><h2 class="tab-panel-title"><span class="section-icon">📌</span>General Dashboard</h2><div class="metrics-grid">$metricCardsHtml</div><div class="grid"><div class="card"><h3>Підсумок</h3>$(New-BravoInfoRowHtml 'Health Score' "$($script:Report.Health.Score)/100")$(New-BravoInfoRowHtml 'Status' $script:Report.Status)$(New-BravoInfoRowHtml 'Status reason' $script:Report.StatusReason)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)$(New-BravoInfoRowHtml 'Collection errors' $script:Report.CollectionErrors.Count)</div><div class="card"><h3>Ключова мережа</h3>$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div></div></section>
     <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml '.NET оновлення' $(if($script:Report.DotNet.UpdateAvailable){"Доступне (найновіша: $($script:Report.DotNet.LatestKnownVersion))"}else{'Немає'}))$(New-BravoInfoRowHtml 'PowerShell 7 (Core)' $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'Не встановлено'}))$(New-BravoInfoRowHtml 'PowerShell 7 оновлення' $(if($script:Report.PowerShell.Core7UpdateAvailable){"Доступне (найновіша: $($script:Report.PowerShell.Core7LatestKnown))"}else{'Немає'}))$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Service' $script:Report.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Installed hotfixes' $script:Report.WindowsUpdate.InstalledHotFixCount)$(New-BravoInfoRowHtml 'Last hotfix' "$($script:Report.WindowsUpdate.LastInstalledHotFix) ($($script:Report.WindowsUpdate.LastInstallDate))")$(New-BravoInfoRowHtml 'Pending reboot' $(if($script:Report.WindowsUpdate.PendingRebootRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Pending updates' $script:Report.WindowsUpdate.PendingCount)$(New-BravoInfoRowHtml 'Pending critical / security' "$($script:Report.WindowsUpdate.PendingCritical) / $($script:Report.WindowsUpdate.PendingSecurity)")$(New-BravoInfoRowHtml 'Search status' $script:Report.WindowsUpdate.SearchStatus)</div></div><h3>Pending Windows Updates</h3>$(New-BravoTableToolbarHtml -TableId 'table-pending-updates' -Placeholder 'Пошук по KB, назві, severity...')<div class="table-scroll"><table id="table-pending-updates" class="data-table"><thead><tr><th>KB</th><th>Назва</th><th>Severity</th><th>Категорії</th><th>Завантажено</th><th>Size MB</th><th>Посилання</th></tr></thead><tbody>$updatesPendingRows</tbody></table></div></section>
     <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div><div class="card"><h3>System / Motherboard</h3>$(New-BravoInfoRowHtml 'Manufacturer' $script:Report.Hardware.ComputerSystem.Manufacturer)$(New-BravoInfoRowHtml 'Model' $script:Report.Hardware.ComputerSystem.Model)$(New-BravoInfoRowHtml 'Chassis type' $script:Report.Hardware.ComputerSystem.ChassisType)$(New-BravoInfoRowHtml 'Motherboard' "$($script:Report.Hardware.Motherboard.Manufacturer) $($script:Report.Hardware.Motherboard.Product)")$(New-BravoInfoRowHtml 'Motherboard version' $script:Report.Hardware.Motherboard.Version)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System-reserved (без літери)</div><div class="storage-summary-value"><span class="risk risk-unknown">$reservedCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div><h3>BitLocker</h3>$(New-BravoTableToolbarHtml -TableId 'table-bitlocker' -Placeholder 'Пошук по томах, статусу захисту...')<div class="table-scroll"><table id="table-bitlocker" class="data-table"><thead><tr><th>Том</th><th>Тип</th><th>Volume Status</th><th>Protection</th><th>Encryption %</th><th>Method</th><th>Lock Status</th></tr></thead><tbody>$bitlockerRows</tbody></table></div><h3>GPU</h3>$(New-BravoTableToolbarHtml -TableId 'table-gpu' -Placeholder 'Пошук по відеокартах...')<div class="table-scroll"><table id="table-gpu" class="data-table"><thead><tr><th>Name</th><th>VRAM</th><th>Driver</th><th>Resolution</th><th>Status</th></tr></thead><tbody>$gpuRows</tbody></table></div></section>
-    <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS, driver...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th><th>Link Speed</th><th>Status</th><th>Driver</th></tr></thead><tbody>$adapterRows</tbody></table></div></section>
+    <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS, driver...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th><th>Link Speed</th><th>Status</th><th>Driver</th></tr></thead><tbody>$adapterRows</tbody></table></div><div class="grid"><div class="card"><h3>WinHTTP Proxy</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Network.WinHttpProxy.Status)$(New-BravoInfoRowHtml 'Details' $winHttpProxyText)</div></div><h3>Routing Table</h3>$(New-BravoTableToolbarHtml -TableId 'table-routing' -Placeholder 'Пошук по маршрутах...')<div class="table-scroll"><table id="table-routing" class="data-table"><thead><tr><th>Destination</th><th>Next Hop</th><th>Metric</th><th>Interface</th></tr></thead><tbody>$routingTableRows</tbody></table></div><h3>ARP Cache</h3>$(New-BravoTableToolbarHtml -TableId 'table-arp' -Placeholder 'Пошук по ARP-кешу...')<div class="table-scroll"><table id="table-arp" class="data-table"><thead><tr><th>IP Address</th><th>MAC Address</th><th>State</th><th>Interface</th></tr></thead><tbody>$arpRows</tbody></table></div></section>
     <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div><div class="card"><h3>Secure Boot / TPM / SMBv1</h3>$(New-BravoInfoRowHtml 'Secure Boot' $script:Report.Security.SecureBoot.Status)$(New-BravoInfoRowHtml 'TPM' $script:Report.Security.TPM.Status)$(New-BravoInfoRowHtml 'TPM Ready' $(if($null -eq $script:Report.Security.TPM.Ready){'N/A'}elseif($script:Report.Security.TPM.Ready){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'TPM Manufacturer' $script:Report.Security.TPM.ManufacturerId)$(New-BravoInfoRowHtml 'TPM Spec Version' $script:Report.Security.TPM.SpecVersion)$(New-BravoInfoRowHtml 'SMBv1' $script:Report.Security.SMBv1.Status)</div><div class="card"><h3>Windows Defender</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Security.Defender.Status)$(New-BravoInfoRowHtml 'Real-Time Protection' $(if($null -eq $script:Report.Security.Defender.RealTimeProtectionEnabled){'N/A'}elseif($script:Report.Security.Defender.RealTimeProtectionEnabled){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Behavior Monitor' $(if($null -eq $script:Report.Security.Defender.BehaviorMonitorEnabled){'N/A'}elseif($script:Report.Security.Defender.BehaviorMonitorEnabled){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Signature version' $script:Report.Security.Defender.AntivirusSignatureVersion)$(New-BravoInfoRowHtml 'Signature age, днів' $script:Report.Security.Defender.AntivirusSignatureAgeDays)$(New-BravoInfoRowHtml 'Engine version' $script:Report.Security.Defender.AMEngineVersion)</div><div class="card"><h3>RDP details</h3>$(New-BravoInfoRowHtml 'NLA required' $(if($null -eq $script:Report.Security.RemoteAccess.NLAEnabled){'N/A'}elseif($script:Report.Security.RemoteAccess.NLAEnabled){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Port' $script:Report.Security.RemoteAccess.Port)$(New-BravoInfoRowHtml 'Firewall scope' $script:Report.Security.RemoteAccess.FirewallScope)$(New-BravoInfoRowHtml 'Firewall profiles' $script:Report.Security.RemoteAccess.FirewallProfiles)$(New-BravoInfoRowHtml 'Allowed users' ((@($script:Report.Security.RemoteAccess.AllowedUsers) | Where-Object { $_ }) -join ', '))</div><div class="card"><h3>WinRM</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Security.WinRM.Status)$(New-BravoInfoRowHtml 'Service' $script:Report.Security.WinRM.ServiceStatus)$(New-BravoInfoRowHtml 'Basic auth' $(if($null -eq $script:Report.Security.WinRM.Auth.Basic){'N/A'}elseif($script:Report.Security.WinRM.Auth.Basic){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'CredSSP' $(if($null -eq $script:Report.Security.WinRM.Auth.CredSSP){'N/A'}elseif($script:Report.Security.WinRM.Auth.CredSSP){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Listeners' $script:Report.Security.WinRM.Listeners.Count)</div><div class="card"><h3>SMB signing</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Security.SMB.Status)$(New-BravoInfoRowHtml 'Server signing required' $(if($null -eq $script:Report.Security.SMB.ServerSigningRequired){'N/A'}elseif($script:Report.Security.SMB.ServerSigningRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Insecure guest logons' $(if($null -eq $script:Report.Security.SMB.InsecureGuestLogonsEnabled){'N/A'}elseif($script:Report.Security.SMB.InsecureGuestLogonsEnabled){'Увімкнено'}else{'Вимкнено'}))</div><div class="card"><h3>Password Policy</h3>$(New-BravoInfoRowHtml 'Min password length' $script:Report.Security.PasswordPolicy.MinPasswordLength)$(New-BravoInfoRowHtml 'Max password age, днів' $script:Report.Security.PasswordPolicy.MaxPasswordAgeDays)$(New-BravoInfoRowHtml 'Password history length' $script:Report.Security.PasswordPolicy.PasswordHistoryLength)$(New-BravoInfoRowHtml 'Lockout threshold' $script:Report.Security.PasswordPolicy.LockoutThreshold)$(New-BravoInfoRowHtml 'Lockout duration, хв' $script:Report.Security.PasswordPolicy.LockoutDurationMinutes)</div></div><h3>TLS registry status</h3>$(New-BravoTableToolbarHtml -TableId 'table-tls' -Placeholder 'Пошук по протоколах TLS...')<div class="table-scroll"><table id="table-tls" class="data-table"><thead><tr><th>Protocol</th><th>Side</th><th>Status</th></tr></thead><tbody>$tlsRows</tbody></table></div><h3>Audit Policy</h3>$(New-BravoTableToolbarHtml -TableId 'table-audit-policy' -Placeholder 'Пошук по категоріях audit policy...')<div class="table-scroll"><table id="table-audit-policy" class="data-table"><thead><tr><th>Category</th><th>Subcategory</th><th>Inclusion Setting</th></tr></thead><tbody>$auditPolicyRows</tbody></table></div></section>
     <section id="tab-services" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">⚙️</span>Services</h2><div class="grid"><div class="card"><h3>Service summary</h3>$(New-BravoInfoRowHtml 'Processes' $script:Report.Processes.Total)$(New-BravoInfoRowHtml 'Services running' "$($script:Report.Services.Running)/$($script:Report.Services.Total)")$(New-BravoInfoRowHtml 'Automatic stopped' $script:Report.Services.AutomaticStopped.Count)$(New-BravoInfoRowHtml "System errors ($EventLogDays дн.)" $script:Report.EventLogs.SystemErrors)$(New-BravoInfoRowHtml "System warnings ($EventLogDays дн.)" $script:Report.EventLogs.SystemWarnings)</div></div><h3>Automatic stopped services</h3>$(New-BravoTableToolbarHtml -TableId 'table-services-stopped' -Placeholder 'Пошук по службах...')<div class="table-scroll"><table id="table-services-stopped" class="data-table"><thead><tr><th>Name</th><th>DisplayName</th><th>StartType</th><th>Status</th></tr></thead><tbody>$serviceRows</tbody></table></div><h3>Топ джерел помилок System log ($EventLogDays дн.)</h3>$(New-BravoTableToolbarHtml -TableId 'table-events-top-sources' -Placeholder 'Пошук по джерелах помилок...')<div class="table-scroll"><table id="table-events-top-sources" class="data-table"><thead><tr><th>Source</th><th>Count</th><th>Останнє повідомлення</th></tr></thead><tbody>$eventTopErrorRows</tbody></table></div></section>
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>

@@ -31,9 +31,11 @@ BeforeAll {
                     DefaultGateways = @('192.168.1.1')
                     DNSServers = @('192.168.1.1', '192.168.1.2')
                     DNSSuffixSearchOrder = @('corp.local')
+                    RoutingTable = @([PSCustomObject]@{ DestinationPrefix = '192.168.1.0/24'; NextHop = '192.168.1.1' })
                 }
                 Adapters = @([PSCustomObject]@{ MACAddress = 'AA-BB-CC-DD-EE-FF'; IPv4 = @('192.168.1.10'); Gateway = @('192.168.1.1'); DNS = @('192.168.1.1') })
                 Connections = [ordered]@{ ListeningPorts = @([PSCustomObject]@{ LocalAddress = '192.168.1.10' }) }
+                ARP = @([PSCustomObject]@{ IPAddress = '192.168.1.1'; LinkLayerAddress = '11-22-33-44-55-66' })
             }
             Users = [ordered]@{ LocalAdmins = @('jdoe', 'Administrator') }
             Security = [ordered]@{ RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker') } }
@@ -92,6 +94,11 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Hardware.Disks.Deep.Disks[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
     }
 
+    It 'маскує MAC-адреси в ARP-кеші (v0.5.0) навіть у Basic, IP-адреса в ARP лишається' {
+        $script:report.Network.ARP[0].LinkLayerAddress | Should -Match '^REDACTED-MAC-'
+        $script:report.Network.ARP[0].IPAddress | Should -Be '192.168.1.1'
+    }
+
     It 'маскує локальних адміністраторів, дозволених RDP-користувачів і install path ПЗ' {
         $script:report.Users.LocalAdmins | Should -Match '^REDACTED-ADMIN-'
         $script:report.Security.RemoteAccess.AllowedUsers | Should -Match '^REDACTED-ADMIN-'
@@ -119,6 +126,12 @@ Describe 'Invoke-BravoReportSanitization -Level Strict' {
         $script:report.Network.Routing.DNSServers | ForEach-Object { $_ | Should -Match '^REDACTED-PRIVATE-IP-' }
         $script:report.Network.Adapters[0].IPv4[0] | Should -Match '^REDACTED-PRIVATE-IP-'
         $script:report.Network.Connections.ListeningPorts[0].LocalAddress | Should -Match '^REDACTED-PRIVATE-IP-'
+    }
+
+    It 'маскує IP-адреси в ARP-кеші і Routing table (v0.5.0), лише в Strict' {
+        $script:report.Network.ARP[0].IPAddress | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Routing.RoutingTable[0].DestinationPrefix | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Routing.RoutingTable[0].NextHop | Should -Match '^REDACTED-PRIVATE-IP-'
     }
 
     It 'той самий IPv4, що зустрічається кілька разів (masив і PrimaryIPv4), маскується в один і той самий токен' {

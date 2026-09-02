@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -416,6 +416,21 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
             $script:DeepSecurityReport.Security.AuditPolicy.TotalCount | Should -BeGreaterThan 0
             @($script:DeepSecurityReport.Security.AuditPolicy.Subcategories).Count | Should -Be $script:DeepSecurityReport.Security.AuditPolicy.TotalCount
         }
+    }
+
+    It 'Network.Routing.RoutingTable заповнена на реальній машині' {
+        @($script:DeepSecurityReport.Network.Routing.RoutingTable).Count | Should -BeGreaterThan 0
+    }
+
+    It 'Network.ARP — масив (можливо порожній на ізольованій CI-машині без сусідів), кожен запис має IPAddress' {
+        $arpEntries = @($script:DeepSecurityReport.Network.ARP)
+        foreach ($entry in $arpEntries) {
+            $entry.IPAddress | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'Network.WinHttpProxy.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Deep-профілі' {
+        $script:DeepSecurityReport.Network.WinHttpProxy.Status | Should -BeIn @('Detected', 'Unavailable', 'NotAvailable')
     }
 }
 
