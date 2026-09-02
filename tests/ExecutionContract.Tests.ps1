@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -489,6 +489,21 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
                 $matchedEntry.CriticalCount | Should -Not -BeNullOrEmpty
                 $matchedEntry.ErrorCount | Should -Not -BeNullOrEmpty
                 $matchedEntry.WarningCount | Should -Not -BeNullOrEmpty
+            }
+        }
+    }
+
+    It 'EventLogs.HardwareDiagnostics покриває всі 7 провайдерів (Disk/Ntfs/StorPort/StorNVMe/WHEA/Kernel-Power/BugCheck), кожен з валідним Status' {
+        $diagnostics = @($script:DeepSecurityReport.EventLogs.HardwareDiagnostics)
+        $diagnostics.Count | Should -Be 7
+
+        foreach ($expectedProvider in @('Disk', 'Ntfs', 'StorPort', 'StorNVMe', 'WHEA', 'Kernel-Power', 'BugCheck')) {
+            $matchedEntry = $diagnostics | Where-Object { $_.Provider -eq $expectedProvider }
+            $matchedEntry | Should -Not -BeNullOrEmpty
+            $matchedEntry.Status | Should -BeIn @('Detected', 'NotAvailable', 'Unavailable')
+
+            if ($matchedEntry.Status -eq 'Detected') {
+                $matchedEntry.Count | Should -Not -BeNullOrEmpty
             }
         }
     }
