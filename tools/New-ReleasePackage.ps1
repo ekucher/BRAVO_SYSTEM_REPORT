@@ -213,12 +213,29 @@ $ZipStream = New-Object System.IO.FileStream($ZipPath, [System.IO.FileMode]::Cre
 $ZipArchive = New-Object System.IO.Compression.ZipArchive($ZipStream, [System.IO.Compression.ZipArchiveMode]::Create)
 
 try {
-    Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
-        Sort-Object FullName |
-        ForEach-Object {
-            $EntryName = $_.FullName.Substring($StagingRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\')
-            Add-ZipEntry -Archive $ZipArchive -SourcePath $_.FullName -EntryName $EntryName
-        }
+    # Push-Location + Resolve-Path -Relative замість ручного
+    # .Substring($StagingRoot.Length): на машинах, де $OutputPath (напр.
+    # побудований з $env:TEMP) резолвиться у 8.3 коротку форму (типу
+    # "BRAVOR~1"), а Get-ChildItem повертає .FullName у довгій формі,
+    # наївна арифметика по довжині рядка з'їжджає — файли пакувались із
+    # "хвостом" шляху замість чистого відносного імені (напр.
+    # "5.1/BRAVO-SystemReport-Quick.bat" замість "BRAVO-SystemReport-Quick.bat",
+    # спостережено на self-hosted CI runner). Resolve-Path -Relative рахує
+    # відносний шлях через провайдер PowerShell від поточної локації —
+    # коректно незалежно від того, в якій формі (коротка/довга) виражені
+    # проміжні сегменти шляху.
+    Push-Location -LiteralPath $StagingRoot
+    try {
+        Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
+            Sort-Object FullName |
+            ForEach-Object {
+                $EntryName = (Resolve-Path -LiteralPath $_.FullName -Relative) -replace '^\.[\\/]', '' -replace '\\', '/'
+                Add-ZipEntry -Archive $ZipArchive -SourcePath $_.FullName -EntryName $EntryName
+            }
+    }
+    finally {
+        Pop-Location
+    }
 }
 finally {
     $ZipArchive.Dispose()
