@@ -39,6 +39,9 @@ param(
     [switch]$SkipGeoIP,
     [switch]$Offline,
     [switch]$Strict,
+    [switch]$Sanitize,
+    [ValidateSet('Basic','Strict')]
+    [string]$SanitizeLevel,
     [switch]$SkipUpdateSearch,
 
     [int]$EventLogDays = 0,

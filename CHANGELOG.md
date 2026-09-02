@@ -1,4 +1,18 @@
-﻿## Unreleased — P1/v0.4.2: -Strict (exit code 4 на CRITICAL Health.Status)
+﻿## Unreleased — P1/v0.4.3: -Sanitize / -SanitizeLevel (маскування чутливих даних)
+
+П'ятий пункт P1 / v0.4.3 Safe Sharing — маскування чутливих даних перед передачею звіту третім сторонам.
+
+- **Новий модуль `src/45-Sanitize.ps1`**: `Invoke-BravoReportSanitization -Report $script:Report -Level Basic|Strict` — одна точка застосування, що виконується в `src/90-Main.ps1` одразу після `Update-BravoHealthScore` (маскування не впливає на Score/Status — рахунок уже фінальний) і ДО будь-якого export'а. Оскільки JSON/HTML/CSV/Email усі читають той самий `$script:Report`, один прохід покриває всі формати одразу — перевірено (CSV/Email читають `$script:Report.ComputerName` напряму, не дублюють `$env:COMPUTERNAME`).
+- **`New-BravoSanitizeMasker`** — чиста функція-фабрика: кожна категорія (computer name, user, domain, DNS suffix, public IP, MAC, serial, admin, install path, private IP) отримує власний маскер із замиканням-станом. Те саме вхідне значення завжди дає той самий токен (`REDACTED-<PREFIX>-<N>`) у межах одного звіту — зберігає читабельність ("той самий MAC у трьох місцях") без розкриття реальних даних.
+- **`-Sanitize`** (`src/05-Params.ps1`) вмикає маскування; **`-SanitizeLevel Basic|Strict`** (дефолт `Basic`) визначає обсяг. `Basic` маскує: computer name, user name, domain/workgroup, DNS suffix, public IPv4, MAC-адреси, серійні номери (BIOS/RAM/PhysicalDisks/Storage Deep Audit), локальних адміністраторів, install path ПЗ. `Strict` додає: приватні IPv4 (IP-масив, PrimaryIPv4, PrimaryInterface, adapters, routing/gateway/DNS-сервери, listening ports).
+- Обидва параметри форвардяться через wrapper і elevation relaunch (`src/90-Main.ps1`), за патерном попередніх P1 параметрів.
+- **Свідомо НЕ реалізовано**: "service account names" з чекліста ТЗ — колектор служб не збирає LogOnAs/StartName, маскувати нема чого (позначено в `docs/ROADMAP.md`). Ім'я файлу звіту (`BravoSystemReport_<COMPUTERNAME>_...`) і далі містить реальну назву машини — маскується лише вміст файлів.
+- Новий `tests/Sanitize.Tests.ps1` (12 тестів): чисті unit-тести `New-BravoSanitizeMasker` і `Invoke-BravoReportSanitization` (Basic/Strict) на фейковому об'єкті звіту, без залежності від WMI/CIM.
+- Новий блок у `tests/ExecutionContract.Tests.ps1` (2 тести): наявність `-Sanitize`/`-SanitizeLevel` у wrapper; наскрізний прогін `-Sanitize` через wrapper — підтверджено, що реальна назва машини (`$env:COMPUTERNAME`) не потрапляє у JSON-файл на диску.
+
+Усі 65 Pester-тестів проходять (51 попередніх + 14 нових). `dist` перебудовано, sha512 звірено.
+
+## Unreleased — P1/v0.4.2: -Strict (exit code 4 на CRITICAL Health.Status)
 
 Четвертий пункт P1 / v0.4.2 Runtime Quality — режим strict validation.
 

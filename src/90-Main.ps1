@@ -237,6 +237,8 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($SkipGeoIP) { $arguments += '-SkipGeoIP' }
         if ($Offline) { $arguments += '-Offline' }
         if ($Strict) { $arguments += '-Strict' }
+        if ($Sanitize) { $arguments += '-Sanitize' }
+        $arguments += "-SanitizeLevel $SanitizeLevel"
         if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
         $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
@@ -339,6 +341,19 @@ Get-BravoUpdatesAudit
 # тож повторний перерахунок і пов'язаний з ним ризик (self-zip race з
 # попередніх версій) став непотрібним.
 Update-BravoHealthScore
+
+# --- Sanitize (P1/v0.4.3) ---
+# Виконується ПІСЛЯ Health Score (маскування не впливає на Score/Status —
+# рахунок уже фінальний) і ДО будь-якого export'а, щоб JSON/HTML/CSV/ZIP
+# усі отримали вже замасковані дані з одного проходу.
+if ($Sanitize) {
+    try {
+        Invoke-BravoReportSanitization -Report $script:Report -Level $SanitizeLevel | Out-Null
+        Write-Host "$IconOk Sanitize: дані замасковано (рівень $SanitizeLevel)" -ForegroundColor Yellow
+    } catch {
+        Add-ExportError -Section 'Sanitize' -Message $_.Exception.Message
+    }
+}
 
 # ============================================================
 # ЗБЕРЕЖЕННЯ ЗВІТІВ

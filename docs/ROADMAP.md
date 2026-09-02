@@ -90,23 +90,24 @@
 
 Ціль: зробити звіти безпечними для передачі третім сторонам.
 
-- [ ] Додати параметр `-Sanitize`.
-- [ ] Додати параметр `-SanitizeLevel Basic|Strict`.
+- [x] Додати параметр `-Sanitize` (P1, `src/05-Params.ps1`).
+- [x] Додати параметр `-SanitizeLevel Basic|Strict` (P1, `src/05-Params.ps1`, дефолт `Basic`).
 - [x] Додати параметр `-SkipPublicIP` (`src/05-Params.ps1`, гейтинг профілем Full/Deep/Forensic).
 - [x] Додати параметр `-SkipGeoIP` (P1, `src/05-Params.ps1`): визначає Public IPv4, але не відправляє її на geo-lookup сервіс `ipapi.co` — окремо від `-SkipPublicIP`.
 - [x] Додати параметр `-Offline` (P1, `src/05-Params.ps1`), який вимикає зовнішні HTTPS-запити — Public IPv4, GeoIP і онлайн-пошук оновлень одразу (`src/33-Collectors-Network.ps1`, `src/39-Collectors-Updates.ps1`).
-- [ ] Маскувати у JSON/HTML/CSV/TXT/Markdown:
-  - [ ] computer name;
-  - [ ] user name;
-  - [ ] domain/workgroup;
-  - [ ] DNS suffix;
-  - [ ] public IPv4;
-  - [ ] private IPv4, якщо `Strict`;
-  - [ ] MAC addresses;
-  - [ ] serial numbers;
-  - [ ] local administrators;
-  - [ ] service account names;
-  - [ ] sensitive install paths.
+- [x] Маскувати у JSON/HTML/CSV (P1, новий модуль `src/45-Sanitize.ps1`, `Invoke-BravoReportSanitization` — одна точка застосування одразу після Health Score і до будь-якого export'а, тож усі формати отримують уже замасковані дані з `$script:Report`; TXT/Markdown export ще не існує в кодовій базі — застосується автоматично, коли з'явиться):
+  - [x] computer name;
+  - [x] user name;
+  - [x] domain/workgroup;
+  - [x] DNS suffix;
+  - [x] public IPv4;
+  - [x] private IPv4, якщо `Strict` (IP-масив, PrimaryIPv4, PrimaryInterface, adapters, routing/gateway/DNS-сервери, listening ports);
+  - [x] MAC addresses;
+  - [x] serial numbers (BIOS, RAM modules, PhysicalDisks, Storage Deep Audit disks);
+  - [x] local administrators;
+  - [ ] service account names — **не реалізовано**: колектор служб (`src/36-Collectors-ProcessesServices.ps1`) не збирає LogOnAs/StartName, маскувати нема чого; додати разом зі збором цих даних, якщо колись знадобиться;
+  - [x] sensitive install paths (`Software.Installed[].InstallLocation`).
+  - Відоме обмеження: ім'я файлу звіту (`BravoSystemReport_<COMPUTERNAME>_...`) і далі містить реальне ім'я машини — маскується лише вміст файлів, не назва; поза межами явного переліку цього пункту ТЗ.
 - [ ] Додати CI validation для sanitize:
   - [ ] запуск `-Sanitize`;
   - [ ] regex scan JSON/HTML на IP/MAC/serial/user/domain literals;
