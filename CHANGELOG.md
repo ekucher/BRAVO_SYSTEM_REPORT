@@ -1,4 +1,18 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: BitLocker status
+﻿## Unreleased — v0.5.0 Deep Inventory: Chassis type, Motherboard, GPU
+
+Третій пункт v0.5.0 Deep Inventory (Hardware Inventory) — базові дані про корпус, материнську плату й відеокарти.
+
+- **Chassis type** через `Win32_SystemEnclosure.ChassisTypes[0]` + нова чиста функція `Get-BravoChassisTypeText` (SMBIOS chassis type code -> людяний опис, невідомий код -> `"Unknown ($code)"`, не помилка).
+- **Motherboard** через `Win32_BaseBoard`.
+- **GPU** через `Win32_VideoController` (масив — підтримка multi-GPU систем).
+- Усі три — новий блок у `src/31-Collectors-Hardware.ps1`, гейтовано `-Profile Full/Deep/Forensic` (той самий блок, що вже збирав `RAM.Modules`).
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Hardware.ComputerSystem.{ChassisType,ChassisTypeCode}`, `Hardware.Motherboard.{Manufacturer,Product,SerialNumber,Version}`, `Hardware.GPU[].{Name,AdapterRAMBytes,DriverVersion,VideoProcessor,CurrentResolution,Status}`. `SchemaVersion` піднято `0.6.3` → `0.6.4`.
+- **Відоме обмеження WMI** (задокументовано в коді й ROADMAP, не "виправляється" здогадками): `Win32_VideoController.AdapterRAM` — 32-bit DWORD, для карт з >4 GB VRAM значення переповнюється/спотворюється (напр. RTX 3060 12GB показує ~4GB) — публікується як є (`AdapterRAMBytes`).
+- HTML Dashboard: нова картка "System / Motherboard" і нова таблиця "GPU" на вкладці Hardware (`src/51-Export-Html.ps1`).
+- 3 нових Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Hardware Inventory'` (`tests/ExecutionContract.Tests.ps1`, перейменовано), той самий `-Profile Deep` E2E-прогін — без додаткового окремого прогону.
+
+Усі 87 Pester-тестів проходять (84 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
+## Unreleased — v0.5.0 Deep Inventory: BitLocker status
 
 Другий пункт v0.5.0 Deep Inventory (Storage Audit) — статус шифрування томів.
 
