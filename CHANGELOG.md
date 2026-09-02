@@ -1,4 +1,11 @@
-﻿## Unreleased — Security Baseline: Scheduled tasks (закриває секцію повністю)
+﻿## Unreleased — v0.7.0 CI: Parser check per-file для src/*.ps1
+
+- Новий `tests/SourceParserCheck.Tests.ps1` — синтаксична перевірка КОЖНОГО `src/*.ps1` файлу окремо через `[System.Management.Automation.Language.Parser]::ParseFile` (той самий AST-based підхід, що й уже наявний крок "PowerShell parser check for dist" у `.github/workflows/local-windows-validation.yml`, застосований до окремих модулів, а не лише до зібраного монолітного `dist/Get-BravoSystemReport.ps1`).
+- Перевага над "лише dist": помилка вказує на конкретний вихідний файл і рядок, а не на зсунуту позицію всередині згенерованого монолітного файлу.
+- Жоден `src/*.ps1` не виконується (не dot-source) — лише токенізація/AST-парсинг, безпечно для модулів із побічними ефектами й залежністю від параметрів скрипту.
+- Тест входить у звичайний `Invoke-Pester -Path tests`, тож автоматично запускається і локально, і в CI ("Run Pester tests" крок).
+
+## Unreleased — Security Baseline: Scheduled tasks (закриває секцію повністю)
 
 **Security Baseline секцію v0.5.0 Deep Inventory тепер повністю закрито.**
 

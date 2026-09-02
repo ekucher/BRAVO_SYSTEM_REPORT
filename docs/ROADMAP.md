@@ -270,7 +270,7 @@
 - [x] Public IPv4 literal scan.
 - [x] Deep runtime test з `-CSV -Zip`.
 - [x] Базовий Pester-набір (`tests/`: чисті helper-функції, консистентність build-маніфесту, наскрізний E2E-прогін), запускається і в CI, і локально через `Invoke-Pester tests/`.
-- [ ] Parser check для всіх `src/*.ps1` (окремо від `dist`).
+- [x] Parser check для всіх `src/*.ps1` (окремо від `dist`) — `tests/SourceParserCheck.Tests.ps1`, той самий AST-based `[System.Management.Automation.Language.Parser]::ParseFile` підхід, що вже застосовувався для `dist` у CI (`local-windows-validation.yml`), тепер по кожному `src/*.ps1` окремо; помилка вказує на конкретний вихідний файл і рядок, а не на зсунуту позицію всередині зібраного монолітного `dist`.
 - [x] Quick BAT test (`tests/ReleasePackage.Tests.ps1` — `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого release package, наскрізно через справжній `.bat`, не лише через wrapper).
 - [ ] Full runtime test.
 - [ ] Forensic smoke test з `-JSONOnly`.
