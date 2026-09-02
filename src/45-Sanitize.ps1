@@ -215,6 +215,22 @@ function Invoke-BravoReportSanitization {
                 if ($port.LocalAddress) { $port.LocalAddress = & $maskPrivateIP $port.LocalAddress }
             }
         }
+
+        if ($Report.Network.Connections -and $Report.Network.Connections.EstablishedConnections) {
+            foreach ($conn in @($Report.Network.Connections.EstablishedConnections)) {
+                if ($conn.LocalAddress) { $conn.LocalAddress = & $maskPrivateIP $conn.LocalAddress }
+                if ($conn.RemoteAddress) { $conn.RemoteAddress = & $maskPrivateIP $conn.RemoteAddress }
+            }
+        }
+    }
+
+    # --- SMB shares: шлях може містити username (напр. C:\Users\jdoe\Share) —
+    # та сама категорія PATH, що й Software.Installed[].InstallLocation,
+    # маскується завжди (Basic), незалежно від рівня.
+    if ($Report.Network -and $Report.Network.SmbShares) {
+        foreach ($share in @($Report.Network.SmbShares)) {
+            if ($share.Path) { $share.Path = & $maskPath $share.Path }
+        }
     }
 
     return $Report

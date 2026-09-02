@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors / ConnectionsProcessName+SmbShares' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -512,6 +512,35 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
         $monitors = @($script:DeepSecurityReport.Hardware.Monitors)
         foreach ($monitor in $monitors) {
             $monitor.InstanceName | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'Network.Connections.ListeningPorts має поле ProcessName на кожному записі' {
+        $ports = @($script:DeepSecurityReport.Network.Connections.ListeningPorts)
+        $ports.Count | Should -BeGreaterThan 0
+        foreach ($port in $ports) {
+            $port.PSObject.Properties.Name | Should -Contain 'ProcessName'
+        }
+    }
+
+    It 'Network.Connections.EstablishedConnections — масив, кожен запис має ProcessName і RemoteAddress' {
+        $connections = @($script:DeepSecurityReport.Network.Connections.EstablishedConnections)
+        foreach ($conn in $connections) {
+            $conn.PSObject.Properties.Name | Should -Contain 'ProcessName'
+            $conn.PSObject.Properties.Name | Should -Contain 'RemoteAddress'
+        }
+    }
+
+    It 'Network.SmbShares — масив (порожній, якщо модуль SmbShare відсутній), кожен непорожній запис має Name і IsAdministrative' {
+        if (-not (Get-Command Get-SmbShare -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Get-SmbShare недоступний на цій машині — нема що перевіряти'
+            return
+        }
+
+        $shares = @($script:DeepSecurityReport.Network.SmbShares)
+        foreach ($share in $shares) {
+            $share.Name | Should -Not -BeNullOrEmpty
+            $share.IsAdministrative | Should -BeIn @($true, $false)
         }
     }
 }

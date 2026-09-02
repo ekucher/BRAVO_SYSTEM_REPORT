@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.15'
+    SchemaVersion = '0.6.16'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -111,9 +111,10 @@ return [ordered]@{
         }
         Routing = [ordered]@{ DefaultGateway=''; DefaultGateways=@(); DNSServers=@(); DNSSuffixSearchOrder=@(); RoutingTable=@() }
         Adapters = @()
-        Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@() }
+        Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@(); EstablishedConnections=@() }
         ARP = @()
         WinHttpProxy = [ordered]@{ RawOutput=@(); Status='NotChecked'; Error='' }
+        SmbShares = @()
     }
     Security = [ordered]@{
         UAC=[ordered]@{Enabled=$false}

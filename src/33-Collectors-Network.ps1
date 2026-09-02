@@ -1,6 +1,27 @@
 ﻿# MODULE: 33-Collectors-Network.ps1
 # Збір інформації про мережеві адаптери, IP, TCP-з'єднання, primary IPv4,
-# public IPv4, routing table, ARP-кеш та WinHTTP proxy.
+# public IPv4, routing table, ARP-кеш, WinHTTP proxy та SMB shares.
+
+# Чиста функція: будує PID -> ProcessName lookup з масиву процесів
+# (напр. Get-Process), щоб TCP-з'єднання можна було збагатити ProcessName
+# без одного Get-Process виклику на кожне з'єднання окремо.
+function Get-BravoProcessNameLookup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        $Processes
+    )
+
+    $map = @{}
+    foreach ($process in @($Processes)) {
+        if ($process -and $null -ne $process.Id) {
+            $map[[int]$process.Id] = $process.ProcessName
+        }
+    }
+    return $map
+}
 
 function Get-BravoNetworkAudit {
     [CmdletBinding()]
@@ -153,18 +174,54 @@ function Get-BravoNetworkAudit {
         if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
             try {
                 $tcpConnections = Get-NetTCPConnection -ErrorAction Stop
-                $script:Report.Network.Connections.Established = @($tcpConnections | Where-Object { $_.State -eq 'Established' }).Count
+                $established = @($tcpConnections | Where-Object { $_.State -eq 'Established' })
+                $script:Report.Network.Connections.Established = $established.Count
                 $listening = @($tcpConnections | Where-Object { $_.State -eq 'Listen' })
                 $script:Report.Network.Connections.Listening = $listening.Count
 
                 if ($Profile -in @('Full','Deep','Forensic')) {
+                    # Один Get-Process на весь колектор — не по одному виклику
+                    # на кожне з'єднання (200+ записів кожного типу).
+                    $processNameById = Get-BravoProcessNameLookup -Processes (Get-Process -ErrorAction SilentlyContinue)
+
                     $script:Report.Network.Connections.ListeningPorts = $listening |
-                        Select-Object -First 200 -Property LocalAddress, LocalPort, OwningProcess
+                        Select-Object -First 200 -Property LocalAddress, LocalPort, OwningProcess, @{Name='ProcessName'; Expression={ $pn = $processNameById[[int]$_.OwningProcess]; if ($pn) { $pn } else { '' } }}
+
+                    $script:Report.Network.Connections.EstablishedConnections = $established |
+                        Select-Object -First 200 -Property LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess, @{Name='ProcessName'; Expression={ $pn = $processNameById[[int]$_.OwningProcess]; if ($pn) { $pn } else { '' } }}
                 }
             } catch {
                 Add-AuditError -Section 'Network.TcpConnections' -Message $_.Exception.Message
             }
         }
+
+        if (Get-Command Get-SmbShare -ErrorAction SilentlyContinue) {
+            try {
+                if ($Profile -in @('Full','Deep','Forensic')) {
+                    $smbShares = Get-SmbShare -ErrorAction Stop
+                    foreach ($share in $smbShares) {
+                        # Адміністративні шари ($-суфікс: C$, ADMIN$, IPC$ тощо)
+                        # створюються Windows автоматично на кожній машині —
+                        # не приховуємо їх (це теж корисна інформація для
+                        # аудиту), а позначаємо окремим полем, щоб споживач
+                        # звіту міг відфільтрувати штатний шум від реальних
+                        # користувацьких шар.
+                        $script:Report.Network.SmbShares += [PSCustomObject]@{
+                            Name             = $share.Name
+                            Path             = $share.Path
+                            Description      = $share.Description
+                            ShareType        = [string]$share.ShareType
+                            ScopeName        = $share.ScopeName
+                            IsAdministrative = [bool]($share.Name -match '\$$')
+                        }
+                    }
+                }
+            } catch {
+                Add-AuditError -Section 'Network.SmbShares' -Message $_.Exception.Message
+            }
+        }
+        # Get-SmbShare відсутній (модуль SmbShare не встановлено) — штатний
+        # стан, $script:Report.Network.SmbShares лишається порожнім масивом.
     # --- Впорядкування IPv4 (primary адреса першою) ---
     $bravoPrimaryNetwork = Get-BravoPrimaryNetworkInterface
     $bravoPrimaryIPv4 = $null
