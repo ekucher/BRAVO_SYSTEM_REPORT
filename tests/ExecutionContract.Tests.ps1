@@ -160,6 +160,96 @@ Describe 'P1 — -Sanitize маскує ComputerName у JSON (наскрізно
     }
 }
 
+Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    # -Profile Full, щоб зібрати всі поля, які маскує Strict (adapters/MAC,
+    # PhysicalDisks serials, listening ports) — Quick їх не збирає взагалі.
+    # -Offline вимикає Public IP/GeoIP HTTP-запити (детермінізм у CI, без
+    # мережевої залежності); структурні перевірки нижче не залежать від
+    # мережі, бо оцінюють лише приватні/локальні поля.
+    #
+    # Навмисно НЕ використовуємо "сліпий" regex-скан усього файлу на IPv4-
+    # патерн: версії встановленого ПЗ (Software.Installed[].Version, напр.
+    # "10.0.11.50") масово збігаються з форматом IPv4 і дають сотні false
+    # positive на реальній машині — перевірено вручну перед додаванням цього
+    # тесту. Замість цього — точкові перевірки конкретних полів схеми, які
+    # Invoke-BravoReportSanitization маскує (src/45-Sanitize.ps1).
+    BeforeAll {
+        $script:SanitizeStrictDir = New-BravoTestReportsDir -Name 'sanitize-strict'
+        & $script:WrapperPath -Profile Full -Sanitize -SanitizeLevel Strict -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $script:SanitizeStrictDir 2>&1 | Out-Null
+        $script:SanitizeStrictExitCode = $LASTEXITCODE
+
+        $jsonFile = Get-ChildItem -LiteralPath $script:SanitizeStrictDir -Filter '*.json' -Recurse | Select-Object -First 1
+        $htmlFile = Get-ChildItem -LiteralPath $script:SanitizeStrictDir -Filter '*.html' -Recurse | Select-Object -First 1
+        $script:SanitizeStrictRawJson = Get-Content -LiteralPath $jsonFile.FullName -Raw
+        $script:SanitizeStrictRawHtml = Get-Content -LiteralPath $htmlFile.FullName -Raw
+        $script:SanitizeStrictReport = $script:SanitizeStrictRawJson | ConvertFrom-Json
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:SanitizeStrictDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'завершується exit code 0, структура JSON не зламана маскуванням (валідний ConvertFrom-Json, CollectionErrors=0)' {
+        $script:SanitizeStrictExitCode | Should -Be 0
+        $script:SanitizeStrictReport | Should -Not -BeNullOrEmpty
+        @($script:SanitizeStrictReport.CollectionErrors).Count | Should -Be 0
+        @($script:SanitizeStrictReport.ExportErrors).Count | Should -Be 0
+    }
+
+    It 'ComputerName/UserName/UserDomainName/Hostname структурно замасковані у відповідних полях схеми' {
+        # НЕ скануємо весь сирий текст на literal $env:USERNAME/$env:COMPUTERNAME:
+        # OutputPath (звіт зберігається під $env:TEMP\...\<username>\...) свідомо
+        # НЕ маскується Sanitize — це операційний шлях збереження файлу, а не
+        # PII про аудитовану машину, і легітимно містить $env:USERNAME як частину
+        # шляху профілю Windows. Блимаючий full-text-скан тому дає false positive
+        # на кожному прогоні. Перевіряємо точково лише поля, які реально маскує
+        # Invoke-BravoReportSanitization (src/45-Sanitize.ps1).
+        $script:SanitizeStrictReport.ComputerName | Should -Match '^REDACTED-COMPUTERNAME-\d+$'
+        $script:SanitizeStrictReport.Meta.UserName | Should -Match '^REDACTED-USER-\d+$'
+        $script:SanitizeStrictReport.Meta.UserDomainName | Should -Match '^REDACTED-DOMAIN-\d+$'
+        $script:SanitizeStrictReport.Network.General.Hostname | Should -Match '^REDACTED-COMPUTERNAME-\d+$'
+        $script:SanitizeStrictReport.Dashboard.Header.ComputerName | Should -Match '^REDACTED-COMPUTERNAME-\d+$'
+    }
+
+    It 'Network.IP.IPv4/PrimaryIPv4 та адреси адаптерів замасковані (REDACTED-PRIVATE-IP-N)' {
+        foreach ($ip in @($script:SanitizeStrictReport.Network.IP.IPv4)) {
+            $ip | Should -Match '^REDACTED-PRIVATE-IP-\d+$'
+        }
+        if ($script:SanitizeStrictReport.Network.IP.PrimaryIPv4 -and $script:SanitizeStrictReport.Network.IP.PrimaryIPv4 -ne 'N/A') {
+            $script:SanitizeStrictReport.Network.IP.PrimaryIPv4 | Should -Match '^REDACTED-PRIVATE-IP-\d+$'
+        }
+        foreach ($adapter in @($script:SanitizeStrictReport.Network.Adapters)) {
+            foreach ($ip in @($adapter.IPv4)) {
+                $ip | Should -Match '^REDACTED-PRIVATE-IP-\d+$'
+            }
+        }
+    }
+
+    It 'MAC-адреси адаптерів замасковані (REDACTED-MAC-N), у сирому JSON немає жодного literal MAC-патерну' {
+        foreach ($adapter in @($script:SanitizeStrictReport.Network.Adapters)) {
+            if ($adapter.MACAddress) {
+                $adapter.MACAddress | Should -Match '^REDACTED-MAC-\d+$'
+            }
+        }
+        $script:SanitizeStrictRawJson | Should -Not -Match '([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}'
+    }
+
+    It 'серійні номери BIOS/PhysicalDisks замасковані (REDACTED-SERIAL-N)' {
+        if ($script:SanitizeStrictReport.BIOS.SerialNumber) {
+            $script:SanitizeStrictReport.BIOS.SerialNumber | Should -Match '^REDACTED-SERIAL-\d+$'
+        }
+        foreach ($disk in @($script:SanitizeStrictReport.Hardware.Disks.PhysicalDisks)) {
+            if ($disk.SerialNumber) {
+                $disk.SerialNumber | Should -Match '^REDACTED-SERIAL-\d+$'
+            }
+        }
+    }
+
+    It 'HTML-експорт містить REDACTED-токени (маскування дійшло до export-етапу, а не лише до JSON)' {
+        $script:SanitizeStrictRawHtml | Should -Match 'REDACTED-COMPUTERNAME-'
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'
