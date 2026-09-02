@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -301,6 +301,34 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker' -Skip:(-not (
         foreach ($volume in $bitlockerVolumes) {
             $volume.MountPoint | Should -Not -BeNullOrEmpty
             $volume.ProtectionStatus | Should -BeIn @('On', 'Off', 'Unknown')
+        }
+    }
+
+    It 'Hardware.ComputerSystem.ChassisType заповнений, якщо ChassisTypeCode визначено' {
+        if ($null -eq $script:DeepSecurityReport.Hardware.ComputerSystem.ChassisTypeCode) {
+            Set-ItResult -Skipped -Because 'ChassisTypeCode не визначено на цій машині (WMI Win32_SystemEnclosure недоступний/порожній) — нема що перевіряти'
+            return
+        }
+
+        $script:DeepSecurityReport.Hardware.ComputerSystem.ChassisType | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Hardware.Motherboard заповнений (Manufacturer або Product непорожні)' {
+        $manufacturer = [string]$script:DeepSecurityReport.Hardware.Motherboard.Manufacturer
+        $product = [string]$script:DeepSecurityReport.Hardware.Motherboard.Product
+        ($manufacturer -or $product) | Should -BeTrue
+    }
+
+    It 'Hardware.GPU — масив з валідними записами (Name непорожній на кожному), якщо відеокарти виявлено' {
+        $gpuList = @($script:DeepSecurityReport.Hardware.GPU)
+
+        if ($gpuList.Count -eq 0) {
+            Set-ItResult -Skipped -Because 'GPU не виявлено на цій машині (headless/деякі VM) — нема що перевіряти'
+            return
+        }
+
+        foreach ($gpu in $gpuList) {
+            $gpu.Name | Should -Not -BeNullOrEmpty
         }
     }
 }

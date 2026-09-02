@@ -1,5 +1,36 @@
 ﻿# MODULE: 31-Collectors-Hardware.ps1
-# Збір базової інформації про апаратне забезпечення.
+# Збір базової інформації про апаратне забезпечення: CPU, RAM, ComputerSystem/
+# chassis type, Motherboard, GPU.
+
+# Чиста функція: SMBIOS chassis type code (Win32_SystemEnclosure.ChassisTypes)
+# -> людяний опис. Повний перелік значно довший (SMBIOS specification,
+# System Enclosure or Chassis Types), тут — найпоширеніші коди для робочих
+# станцій/ноутбуків/серверів; невідомий код повертається як "Unknown ($code)",
+# а не помилка.
+function Get-BravoChassisTypeText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [Nullable[int]]$ChassisTypeCode
+    )
+
+    if ($null -eq $ChassisTypeCode) { return 'Unknown' }
+
+    $chassisTypeMap = @{
+        1 = 'Other'; 2 = 'Unknown'; 3 = 'Desktop'; 4 = 'Low Profile Desktop'
+        5 = 'Pizza Box'; 6 = 'Mini Tower'; 7 = 'Tower'; 8 = 'Portable'
+        9 = 'Laptop'; 10 = 'Notebook'; 11 = 'Hand Held'; 12 = 'Docking Station'
+        13 = 'All in One'; 14 = 'Sub Notebook'; 15 = 'Space-saving'; 16 = 'Lunch Box'
+        17 = 'Main System Chassis'; 18 = 'Expansion Chassis'; 19 = 'SubChassis'
+        20 = 'Bus Expansion Chassis'; 21 = 'Peripheral Chassis'; 22 = 'Storage Chassis'
+        23 = 'Rack Mount Chassis'; 24 = 'Sealed-case PC'; 30 = 'Tablet'
+        31 = 'Convertible'; 32 = 'Detachable'
+    }
+
+    if ($chassisTypeMap.ContainsKey($ChassisTypeCode)) { return $chassisTypeMap[$ChassisTypeCode] }
+    return "Unknown ($ChassisTypeCode)"
+}
 
 # --- P1: централізовані CPU/RAM thresholds ---
 # Єдине джерело порогів для Dashboard-плиток CPU/RAM і для Health.Findings —
@@ -111,6 +142,50 @@ function Get-BravoHardwareAudit {
                 }
             } catch {
                 Add-AuditError -Section 'Hardware.RAM.Modules' -Message $_.Exception.Message
+            }
+
+            try {
+                $chassisInfo = Get-AuditObject -ClassName 'Win32_SystemEnclosure' -First
+                if ($chassisInfo -and $chassisInfo.ChassisTypes -and $chassisInfo.ChassisTypes.Count -gt 0) {
+                    $chassisTypeCode = [int]$chassisInfo.ChassisTypes[0]
+                    $script:Report.Hardware.ComputerSystem.ChassisTypeCode = $chassisTypeCode
+                    $script:Report.Hardware.ComputerSystem.ChassisType = Get-BravoChassisTypeText -ChassisTypeCode $chassisTypeCode
+                }
+            } catch {
+                Add-AuditError -Section 'Hardware.ChassisType' -Message $_.Exception.Message
+            }
+
+            try {
+                $baseBoardInfo = Get-AuditObject -ClassName 'Win32_BaseBoard' -First
+                if ($baseBoardInfo) {
+                    $script:Report.Hardware.Motherboard.Manufacturer = $baseBoardInfo.Manufacturer
+                    $script:Report.Hardware.Motherboard.Product = $baseBoardInfo.Product
+                    $script:Report.Hardware.Motherboard.SerialNumber = $baseBoardInfo.SerialNumber
+                    $script:Report.Hardware.Motherboard.Version = $baseBoardInfo.Version
+                }
+            } catch {
+                Add-AuditError -Section 'Hardware.Motherboard' -Message $_.Exception.Message
+            }
+
+            try {
+                $videoControllers = Get-AuditObject -ClassName 'Win32_VideoController'
+                foreach ($videoController in $videoControllers) {
+                    $script:Report.Hardware.GPU += [PSCustomObject]@{
+                        Name           = $videoController.Name
+                        # AdapterRAM — 32-bit DWORD у WMI: для карт з >4 GB VRAM
+                        # значення переповнюється/спотворюється (відома проблема
+                        # Win32_VideoController, не баг цього колектора) —
+                        # публікуємо як є, з приміткою в docs, а не намагаємось
+                        # "виправити" здогадками.
+                        AdapterRAMBytes = $videoController.AdapterRAM
+                        DriverVersion  = $videoController.DriverVersion
+                        VideoProcessor = $videoController.VideoProcessor
+                        CurrentResolution = if ($videoController.CurrentHorizontalResolution -and $videoController.CurrentVerticalResolution) { "$($videoController.CurrentHorizontalResolution)x$($videoController.CurrentVerticalResolution)" } else { '' }
+                        Status         = $videoController.Status
+                    }
+                }
+            } catch {
+                Add-AuditError -Section 'Hardware.GPU' -Message $_.Exception.Message
             }
         }
 
