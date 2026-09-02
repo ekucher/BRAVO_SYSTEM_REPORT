@@ -1,4 +1,16 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Hardware Diagnostics (Disk/Ntfs/StorPort/StorNVMe/WHEA/Kernel-Power/BugCheck)
+﻿## Unreleased — Hardware Inventory: Monitors (закриває секцію повністю)
+
+**Hardware Inventory секцію тепер повністю закрито.**
+
+- **Hardware.Monitors[]** через `WmiMonitorID`/`WmiMonitorBasicDisplayParams` (namespace `root\wmi`) — Manufacturer/Model/SerialNumber/Active/WidthCm/HeightCm/YearOfManufacture/WeekOfManufacture. Гейтовано `-Profile Full/Deep/Forensic` (`src/31-Collectors-Hardware.ps1`).
+- Нова чиста функція `ConvertFrom-BravoWmiMonitorCharArray` конвертує EDID UInt16-масиви символів (з нульовим заповненням у хвості) у звичайний рядок — покрита 4 unit-тестами (`tests/WmiMonitorCharArray.Tests.ps1`).
+- Відсутність EDID-даних (VM/RDP-сесія без реального дисплея, або namespace недоступний) — штатний стан, свідомо НЕ `Add-AuditError`.
+- Sanitize: `Monitors[].SerialNumber` маскується тією ж категорією `SERIAL`, що й BIOS/RAM/Disks (`src/45-Sanitize.ps1`).
+- Поле існувало як завжди-порожня заглушка; тепер реально заповнюється — `SchemaVersion` піднято `0.6.14` → `0.6.15`.
+- HTML: нова таблиця 'Monitors' на вкладці Hardware.
+- Тести: +4 unit +1 Sanitize (Basic).
+
+## Unreleased — v0.5.0 Deep Inventory: Hardware Diagnostics (Disk/Ntfs/StorPort/StorNVMe/WHEA/Kernel-Power/BugCheck)
 
 **Останній пункт "Updates and Event Logs" v0.5.0 Deep Inventory. Уся секція v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs) тепер ПОВНІСТЮ закрита** (крім свідомо відкладених Autoruns/Scheduled tasks).
 

@@ -137,6 +137,15 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # Монітори (Hardware.Monitors, v0.5.0-tail) — та сама категорія SERIAL,
+    # що й BIOS/RAM/Disks: EDID SerialNumberID теж унікальний ідентифікатор
+    # фізичного пристрою.
+    if ($Report.Hardware -and $Report.Hardware.Monitors) {
+        foreach ($monitor in @($Report.Hardware.Monitors)) {
+            if ($monitor.SerialNumber) { $monitor.SerialNumber = & $maskSerial $monitor.SerialNumber }
+        }
+    }
+
     # --- Локальні адміністратори ---
     if ($Report.Users -and $Report.Users.LocalAdmins) {
         $Report.Users.LocalAdmins = @($Report.Users.LocalAdmins | ForEach-Object { & $maskAdmin $_ })

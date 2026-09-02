@@ -128,7 +128,7 @@
 - [x] TPM (`Win32_Tpm` CIM у `root\cimv2\Security\MicrosoftTpm`, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Security.TPM.{Present,Ready,Enabled,Activated,ManufacturerId,ManufacturerVersion,SpecVersion,Status}`; відсутність TPM — штатний стан `NotPresent`, не помилка збору).
 - [x] Motherboard (`Win32_BaseBoard`, `src/31-Collectors-Hardware.ps1`, гейтовано Full/Deep/Forensic; `Hardware.Motherboard.{Manufacturer,Product,SerialNumber,Version}`).
 - [x] GPU (`Win32_VideoController`, `src/31-Collectors-Hardware.ps1`, гейтовано Full/Deep/Forensic; `Hardware.GPU[]` — Name/AdapterRAMBytes/DriverVersion/VideoProcessor/CurrentResolution/Status; відоме обмеження WMI: `AdapterRAM` — 32-bit DWORD, для карт з >4 GB VRAM значення переповнюється/спотворюється, публікується як є).
-- [ ] Monitors.
+- [x] Monitors (`WmiMonitorID`/`WmiMonitorBasicDisplayParams`, namespace `root\wmi`, `src/31-Collectors-Hardware.ps1`, гейтовано Full/Deep/Forensic; `Hardware.Monitors[]` — Manufacturer/Model/SerialNumber/Active/WidthCm/HeightCm/Year/WeekOfManufacture; нова чиста функція `ConvertFrom-BravoWmiMonitorCharArray` конвертує EDID UInt16-масиви в рядок; відсутність EDID-даних, напр. на VM/RDP без реального дисплея — штатний стан, не помилка).
 
 ### Storage Audit
 

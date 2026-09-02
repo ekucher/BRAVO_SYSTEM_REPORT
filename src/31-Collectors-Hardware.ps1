@@ -1,6 +1,23 @@
 ﻿# MODULE: 31-Collectors-Hardware.ps1
 # Збір базової інформації про апаратне забезпечення: CPU, RAM, ComputerSystem/
-# chassis type, Motherboard, GPU.
+# chassis type, Motherboard, GPU, Monitors.
+
+# Чиста функція: EDID-текстові поля WmiMonitorID (ManufacturerName/
+# UserFriendlyName/SerialNumberID) приходять як масив UInt16-кодів символів
+# з нульовим заповненням у хвості фіксованої довжини — конвертує в звичайний
+# рядок, відкидаючи нульові байти.
+function ConvertFrom-BravoWmiMonitorCharArray {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [array]$Value
+    )
+
+    if (-not $Value) { return '' }
+    return -join ([char[]]($Value | Where-Object { $_ -ne 0 }))
+}
 
 # Чиста функція: SMBIOS chassis type code (Win32_SystemEnclosure.ChassisTypes)
 # -> людяний опис. Повний перелік значно довший (SMBIOS specification,
@@ -186,6 +203,46 @@ function Get-BravoHardwareAudit {
                 }
             } catch {
                 Add-AuditError -Section 'Hardware.GPU' -Message $_.Exception.Message
+            }
+
+            if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
+                try {
+                    # WmiMonitorID (namespace root\wmi) — EDID-дані фізичних
+                    # моніторів, доступні лише через CIM/WMI (не WMI-класи в
+                    # root\cimv2, тому не через Get-AuditObject/-UseCim wrapper).
+                    # Текстові поля EDID приходять як масиви UInt16-кодів
+                    # символів з нульовим заповненням у хвості — конвертуємо
+                    # чистою функцією, щоб не тягнути нулі в рядок.
+                    $monitorIds = Get-CimInstance -Namespace 'root\wmi' -ClassName 'WmiMonitorID' -ErrorAction Stop
+                    $monitorParams = @{}
+                    try {
+                        Get-CimInstance -Namespace 'root\wmi' -ClassName 'WmiMonitorBasicDisplayParams' -ErrorAction Stop | ForEach-Object {
+                            $monitorParams[$_.InstanceName] = $_
+                        }
+                    } catch {
+                        # Фізичні розміри — необов'язковий бонус, відсутність
+                        # цього класу не має валити збір моніторів взагалі.
+                    }
+
+                    foreach ($monitorId in $monitorIds) {
+                        $displayParams = $monitorParams[$monitorId.InstanceName]
+                        $script:Report.Hardware.Monitors += [PSCustomObject]@{
+                            InstanceName        = $monitorId.InstanceName
+                            Active              = $monitorId.Active
+                            Manufacturer        = ConvertFrom-BravoWmiMonitorCharArray -Value $monitorId.ManufacturerName
+                            Model               = ConvertFrom-BravoWmiMonitorCharArray -Value $monitorId.UserFriendlyName
+                            SerialNumber        = ConvertFrom-BravoWmiMonitorCharArray -Value $monitorId.SerialNumberID
+                            YearOfManufacture   = $monitorId.YearOfManufacture
+                            WeekOfManufacture   = $monitorId.WeekOfManufacture
+                            WidthCm             = if ($displayParams) { $displayParams.MaxHorizontalImageSize } else { $null }
+                            HeightCm            = if ($displayParams) { $displayParams.MaxVerticalImageSize } else { $null }
+                        }
+                    }
+                } catch {
+                    # Namespace root\wmi/WmiMonitorID може бути недоступний
+                    # (напр. віртуальна машина без реального дисплея, RDP-сесія
+                    # без monitor EDID) — штатний стан, не помилка збору.
+                }
             }
         }
 
