@@ -100,6 +100,16 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # ARP-кеш (Network.ARP, v0.5.0) — та сама категорія MAC, що й Adapters
+    # вище: маскується завжди (Basic), незалежно від рівня. IP-адреси в ARP —
+    # приватні (сусіди в тій самій підмережі за визначенням) — маскуються
+    # нижче разом з рештою приватних IPv4, лише в Strict.
+    if ($Report.Network -and $Report.Network.ARP) {
+        foreach ($arpEntry in @($Report.Network.ARP)) {
+            if ($arpEntry.LinkLayerAddress) { $arpEntry.LinkLayerAddress = & $maskMac $arpEntry.LinkLayerAddress }
+        }
+    }
+
     # --- Серійні номери ---
     if ($Report.BIOS -and $Report.BIOS.SerialNumber) { $Report.BIOS.SerialNumber = & $maskSerial $Report.BIOS.SerialNumber }
 
@@ -175,6 +185,19 @@ function Invoke-BravoReportSanitization {
                 if ($adapter.IPv4) { $adapter.IPv4 = @($adapter.IPv4 | ForEach-Object { & $maskPrivateIP $_ }) }
                 if ($adapter.Gateway) { $adapter.Gateway = @($adapter.Gateway | ForEach-Object { & $maskPrivateIP $_ }) }
                 if ($adapter.DNS) { $adapter.DNS = @($adapter.DNS | ForEach-Object { & $maskPrivateIP $_ }) }
+            }
+        }
+
+        if ($Report.Network.ARP) {
+            foreach ($arpEntry in @($Report.Network.ARP)) {
+                if ($arpEntry.IPAddress) { $arpEntry.IPAddress = & $maskPrivateIP $arpEntry.IPAddress }
+            }
+        }
+
+        if ($Report.Network.Routing -and $Report.Network.Routing.RoutingTable) {
+            foreach ($routeEntry in @($Report.Network.Routing.RoutingTable)) {
+                if ($routeEntry.DestinationPrefix) { $routeEntry.DestinationPrefix = & $maskPrivateIP $routeEntry.DestinationPrefix }
+                if ($routeEntry.NextHop) { $routeEntry.NextHop = & $maskPrivateIP $routeEntry.NextHop }
             }
         }
 

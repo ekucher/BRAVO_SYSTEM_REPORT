@@ -1,4 +1,21 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Password policy + Audit policy
+﻿## Unreleased — v0.5.0 Deep Inventory: Routing table + ARP + WinHTTP proxy
+
+Три пункти v0.5.0 Deep Inventory / Network Audit в одному PR: Routing table, ARP/Neighbor table, WinHTTP proxy.
+
+- **Routing table** через `Get-NetRoute` — `Network.Routing.RoutingTable[]` (до 200 записів).
+- **ARP/Neighbor table** через `Get-NetNeighbor` — `Network.ARP[]` (до 200 записів, виключено Unreachable/Incomplete — тимчасові стани резолюції, не реальні записи кешу).
+- **WinHTTP proxy** через `netsh winhttp show proxy` — `Network.WinHttpProxy.{RawOutput,Status}`.
+
+Усі три — новий блок у `src/33-Collectors-Network.ps1`, гейтовано `-Profile Full/Deep/Forensic`.
+
+- **Свідоме рішення (WinHTTP proxy)**: публікуємо сирий текстовий вивід `netsh` БЕЗ інтерпретації/парсингу — той самий локалізований-CLI принцип, що вже застосовувався для `auditpol` у попередньому PR: судити "проксі увімкнено/вимкнено" за англійською фразою на кшталт "Direct access (no proxy server)" було б ненадійно на не-EN системах.
+- **Sanitize**: нові поля `Network.ARP[]`/`Network.Routing.RoutingTable[]` тепер теж маскуються (`src/45-Sanitize.ps1`) — MAC у ARP завжди (та сама категорія, що й `Adapters[].MACAddress`), IP-адреси в ARP і `DestinationPrefix`/`NextHop` у Routing table — лише в Strict (та сама категорія, що й решта приватних IPv4). Нові тест-кейси в `tests/Sanitize.Tests.ps1` (Basic і Strict).
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Network.Routing.RoutingTable`, `Network.ARP`, `Network.WinHttpProxy.{RawOutput,Status,Error}`. `SchemaVersion` піднято `0.6.9` → `0.6.10`.
+- HTML: нова картка "WinHTTP Proxy" + нові таблиці "Routing Table" і "ARP Cache" на вкладці Network (`src/51-Export-Html.ps1`).
+- 3 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Routing+ARP+Proxy'` (перейменовано), той самий `-Profile Deep` прогін.
+
+Усі 111 Pester-тестів проходять (106 попередніх + 5 нових). `dist` перебудовано, sha512 звірено.
+## Unreleased — v0.5.0 Deep Inventory: Password policy + Audit policy
 
 Десятий і одинадцятий пункти v0.5.0 Deep Inventory (Security Baseline) — останні два класичні compliance-показники цього розділу.
 

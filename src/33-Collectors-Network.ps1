@@ -1,5 +1,6 @@
 ﻿# MODULE: 33-Collectors-Network.ps1
-# Збір інформації про мережеві адаптери, IP, TCP-з'єднання, primary IPv4 та public IPv4.
+# Збір інформації про мережеві адаптери, IP, TCP-з'єднання, primary IPv4,
+# public IPv4, routing table, ARP-кеш та WinHTTP proxy.
 
 function Get-BravoNetworkAudit {
     [CmdletBinding()]
@@ -80,6 +81,72 @@ function Get-BravoNetworkAudit {
                 }
             } catch {
                 Add-AuditError -Section 'Network.AdapterDetails' -Message $_.Exception.Message
+            }
+        }
+
+        # --- Routing table / ARP / WinHTTP proxy (v0.5.0 Network Audit) ---
+        if ($Profile -in @('Full','Deep','Forensic')) {
+            if (Get-Command Get-NetRoute -ErrorAction SilentlyContinue) {
+                try {
+                    $netRoutes = Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop |
+                        Select-Object -First 200 -Property DestinationPrefix, NextHop, RouteMetric, InterfaceAlias, ifIndex
+
+                    foreach ($route in $netRoutes) {
+                        $script:Report.Network.Routing.RoutingTable += [PSCustomObject]@{
+                            DestinationPrefix = $route.DestinationPrefix
+                            NextHop           = $route.NextHop
+                            RouteMetric       = $route.RouteMetric
+                            InterfaceAlias    = $route.InterfaceAlias
+                            InterfaceIndex    = $route.ifIndex
+                        }
+                    }
+                } catch {
+                    Add-AuditError -Section 'Network.RoutingTable' -Message $_.Exception.Message
+                }
+            }
+
+            if (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue) {
+                try {
+                    # Виключаємо Unreachable/Incomplete — це не реальні записи
+                    # ARP-кешу, а тимчасові стани резолюції, шум без цінності
+                    # для аудиту.
+                    $netNeighbors = Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop |
+                        Where-Object { $_.State -notin @('Unreachable', 'Incomplete') } |
+                        Select-Object -First 200 -Property IPAddress, LinkLayerAddress, State, InterfaceAlias
+
+                    foreach ($neighbor in $netNeighbors) {
+                        $script:Report.Network.ARP += [PSCustomObject]@{
+                            IPAddress        = $neighbor.IPAddress
+                            LinkLayerAddress = $neighbor.LinkLayerAddress
+                            State            = $neighbor.State.ToString()
+                            InterfaceAlias   = $neighbor.InterfaceAlias
+                        }
+                    }
+                } catch {
+                    Add-AuditError -Section 'Network.ARP' -Message $_.Exception.Message
+                }
+            }
+
+            # WinHTTP proxy: свідомо БЕЗ парсингу/інтерпретації тексту виводу
+            # netsh (локалізований, як і net.exe/auditpol.exe раніше в цій
+            # сесії) — публікуємо сирі рядки як є, без спроби визначити
+            # Enabled/Disabled за англійськими фразами типу "Direct access".
+            if (Get-Command netsh -ErrorAction SilentlyContinue) {
+                try {
+                    $winHttpProxyOutput = & netsh winhttp show proxy 2>&1
+
+                    if ($LASTEXITCODE -eq 0) {
+                        $script:Report.Network.WinHttpProxy.RawOutput = @($winHttpProxyOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+                        $script:Report.Network.WinHttpProxy.Status = 'Detected'
+                    } else {
+                        $script:Report.Network.WinHttpProxy.Status = 'Unavailable'
+                    }
+                } catch {
+                    $script:Report.Network.WinHttpProxy.Status = 'Unavailable'
+                    $script:Report.Network.WinHttpProxy.Error = $_.Exception.Message
+                }
+            } else {
+                $script:Report.Network.WinHttpProxy.Status = 'NotAvailable'
             }
         }
 

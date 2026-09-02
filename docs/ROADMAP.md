@@ -149,11 +149,11 @@
 - [x] Public IPv4 detection без виводу значення у консоль.
 - [x] Listening ports з OwningProcess.
 - [x] Network adapters: name, MAC, speed, status, driver (name/MAC вже збирались; `Get-NetAdapter` у `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic, збагачує наявні записи `Network.Adapters[]` за MAC-адресою — `LinkSpeed`/`Status`/`DriverVersion`/`DriverProvider`; НЕ додає нові рядки для адаптерів без IP, щоб не змінювати семантику "Adapters" з "інтерфейси з IP" на "усі мережеві інтерфейси в системі").
-- [ ] Routing table.
-- [ ] ARP/Neighbor table.
+- [x] Routing table (`Get-NetRoute`, `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic; `Network.Routing.RoutingTable[]`, до 200 записів).
+- [x] ARP/Neighbor table (`Get-NetNeighbor`, `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic; `Network.ARP[]`, виключено Unreachable/Incomplete записи, до 200; MAC маскується Sanitize завжди, IP — лише Strict).
 - [ ] Listening ports з ProcessName.
 - [ ] Established connections з ProcessName.
-- [ ] WinHTTP proxy.
+- [x] WinHTTP proxy (`netsh winhttp show proxy`, `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic; `Network.WinHttpProxy.{RawOutput,Status}`; свідомо публікується сирий текст без інтерпретації — локалізований вивід netsh, той самий принцип, що й audit policy).
 - [ ] SMB shares.
 
 ### Security Baseline
