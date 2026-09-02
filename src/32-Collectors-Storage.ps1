@@ -216,7 +216,13 @@ function Get-BravoStorageDeepAudit {
                 # прогоні (той самий принцип, що й з WinRE/EFI-розділами
                 # раніше в цій сесії); системний том — інша вага ризику.
                 if ($volume.VolumeType -eq 'OperatingSystem' -and [string]$volume.ProtectionStatus -eq 'Off') {
-                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage.BitLocker' -Message "Системний том $($volume.MountPoint) не захищений BitLocker (ProtectionStatus=Off)." -Recommendation 'Розгляньте увімкнення BitLocker для системного тому, особливо на портативних пристроях.'
+                    # INFO, не WARNING: відсутність BitLocker на системному
+                    # томі — поширений і часто свідомий вибір (dev-машини,
+                    # десктопи без фізичного ризику крадіжки, альтернативне
+                    # шифрування) — не впливає на Health Score/Status, лише
+                    # фіксується в звіті як факт стану (той самий принцип, що
+                    # й Secure Boot/TPM: "не є помилкою", лише публікація стану).
+                    Add-AuditFinding -Severity 'INFO' -Category 'Storage.BitLocker' -Message "Системний том $($volume.MountPoint) не захищений BitLocker (ProtectionStatus=Off)." -Recommendation 'Розгляньте увімкнення BitLocker для системного тому, особливо на портативних пристроях.'
                 }
             }
         } catch {
