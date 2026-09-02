@@ -17,7 +17,7 @@
 
 - Не комітити сформовані звіти в Git.
 - Не публікувати HTML/JSON-звіти у відкритому доступі.
-- Для передачі третім сторонам використовувати майбутній параметр `-Sanitize`.
+- Для передачі третім сторонам використовувати параметр `-Sanitize` (`-SanitizeLevel Basic|Strict`) — маскує computer name, user name, domain/DNS suffix, public IPv4, MAC-адреси, серійні номери, локальних адміністраторів, install paths; `Strict` додатково маскує приватні IPv4/gateway/DNS. Деталі: `CHANGELOG.md` P1/v0.4.3, `src/45-Sanitize.ps1`.
 - Не збирати паролі, токени, private keys, cookies або browser credentials.
 - Не експортувати секретні registry-гілки без явної потреби.
 
