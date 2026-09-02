@@ -199,7 +199,7 @@
 - [ ] HTML filters/collapsible sections.
 - [x] Findings grouped by severity/category (`Get-BravoFindingsGrouped`, `src/40-Health.ps1` — чиста функція, сортує CRITICAL→WARNING→INFO, потім за Category; вкладка Findings у HTML-звіті тепер сортована за цим порядком + плитки-лічильники Critical/Warning/Info зверху таблиці; та сама функція буде перевикористана для TXT/Markdown summary).
 - [ ] Copy-friendly support summary.
-- [ ] JSON schema documentation.
+- [x] JSON schema documentation (`docs/SCHEMA.md` — навігація по всіх розділах `$script:Report`, посилання на відповідні `src/3X-Collectors-*.ps1`, опис `SchemaVersion` і правила його бампу).
 
 ## v0.6.1 Interactive HTML Dashboard & Tabs
 
@@ -284,7 +284,7 @@
 
 - [x] Усунути плутанину між `src/Get-BravoSystemReport.ps1` і модульним runtime у `dist` — застарілий моноліт видалено, `powershell-static-check.yml` більше не посилається на нього.
 - [x] Уніфікувати версії `ScriptVersion`, `SchemaVersion`, README, CHANGELOG — README/ROADMAP синхронізовані з фактичними версіями (release package все ще потребує окремої перевірки, див. v0.4.1 Release Stabilization вище).
-- [ ] Додати `docs/SCHEMA.md`.
+- [x] Додати `docs/SCHEMA.md` (той самий пункт, що й "JSON schema documentation" у v0.6.0 вище).
 - [ ] Додати `docs/TESTING.md` (базовий Pester-набір уже є в `tests/`, документ ще не написаний).
 - [x] Додати `docs/RELEASE.md` (див. v0.4.1 Release Stabilization вище).
 - [ ] Описати правила сумісності Windows PowerShell 5.1 / PowerShell 7.
