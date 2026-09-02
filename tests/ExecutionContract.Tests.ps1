@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors / ConnectionsProcessName+SmbShares' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors / ConnectionsProcessName+SmbShares / UacFullPolicy' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -542,6 +542,16 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
             $share.Name | Should -Not -BeNullOrEmpty
             $share.IsAdministrative | Should -BeIn @($true, $false)
         }
+    }
+
+    It 'Security.UAC full policy — коректні типи полів, якщо UAC.Enabled визначено' {
+        if ($null -eq $script:DeepSecurityReport.Security.UAC.Enabled) {
+            Set-ItResult -Skipped -Because 'UAC-ключ реєстру недоступний на цій машині — нема що перевіряти'
+            return
+        }
+
+        $script:DeepSecurityReport.Security.UAC.ConsentPromptBehaviorAdminText | Should -Not -BeNullOrEmpty
+        $script:DeepSecurityReport.Security.UAC.ConsentPromptBehaviorUserText | Should -Not -BeNullOrEmpty
     }
 }
 

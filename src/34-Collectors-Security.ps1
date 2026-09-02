@@ -1,8 +1,41 @@
 ﻿# MODULE: 34-Collectors-Security.ps1
-# Збір інформації про UAC, RDP (+NLA/port/firewall scope/allowed users),
-# антивірус, Windows Firewall, Secure Boot, TPM, SMBv1, TLS registry status,
-# деталі Windows Defender, WinRM (listeners/auth), SMB signing, password
-# policy (net accounts) та audit policy (auditpol).
+# Збір інформації про UAC (+full policy), RDP (+NLA/port/firewall scope/
+# allowed users), антивірус, Windows Firewall, Secure Boot, TPM, SMBv1, TLS
+# registry status, деталі Windows Defender, WinRM (listeners/auth), SMB
+# signing, password policy (net accounts) та audit policy (auditpol).
+
+# Чиста функція: ConsentPromptBehaviorAdmin DWORD (HKLM:\...\Policies\System)
+# -> людяний опис. Значення за документацією Microsoft (UAC group policy
+# settings); невідомий код повертається як "Unknown ($code)", не помилка.
+function Get-BravoUacAdminPromptText {
+    [CmdletBinding()]
+    param([AllowNull()][Nullable[int]]$Code)
+
+    switch ($Code) {
+        0 { return 'Elevate without prompting' }
+        1 { return 'Prompt for credentials on the secure desktop' }
+        2 { return 'Prompt for consent on the secure desktop' }
+        3 { return 'Prompt for credentials' }
+        4 { return 'Prompt for consent' }
+        5 { return 'Prompt for consent for non-Windows binaries' }
+        $null { return 'Unknown (not set)' }
+        default { return "Unknown ($Code)" }
+    }
+}
+
+# Чиста функція: ConsentPromptBehaviorUser DWORD -> людяний опис.
+function Get-BravoUacUserPromptText {
+    [CmdletBinding()]
+    param([AllowNull()][Nullable[int]]$Code)
+
+    switch ($Code) {
+        0 { return 'Automatically deny elevation requests' }
+        1 { return 'Prompt for credentials on the secure desktop' }
+        3 { return 'Prompt for credentials' }
+        $null { return 'Unknown (not set)' }
+        default { return "Unknown ($Code)" }
+    }
+}
 
 # Чиста функція: інтерпретує пару SCHANNEL registry DWORD (Enabled,
 # DisabledByDefault — HKLM:\...\SecurityProviders\SCHANNEL\Protocols\<protocol>\<Client|Server>)
@@ -86,6 +119,28 @@ function Get-BravoSecurityAudit {
 
             if (-not $script:Report.Security.UAC.Enabled) {
                 Add-AuditFinding -Severity 'WARNING' -Category 'Security' -Message 'UAC вимкнено.' -Recommendation 'Увімкніть UAC, якщо немає обґрунтованого винятку.'
+            }
+
+            # UAC full policy: значення нижче — типово $null, якщо адміністратор
+            # ніколи не змінював дефолт групової політики (Windows тоді діє за
+            # вбудованим дефолтом ConsentPromptBehaviorAdmin=5/User=3) — це
+            # штатний стан, не помилка, публікуємо як є без Add-AuditFinding на
+            # "не налаштовано".
+            $adminPromptCode = if ($null -ne $uac.ConsentPromptBehaviorAdmin) { [int]$uac.ConsentPromptBehaviorAdmin } else { $null }
+            $userPromptCode = if ($null -ne $uac.ConsentPromptBehaviorUser) { [int]$uac.ConsentPromptBehaviorUser } else { $null }
+            $script:Report.Security.UAC.ConsentPromptBehaviorAdminCode = $adminPromptCode
+            $script:Report.Security.UAC.ConsentPromptBehaviorAdminText = Get-BravoUacAdminPromptText -Code $adminPromptCode
+            $script:Report.Security.UAC.ConsentPromptBehaviorUserCode = $userPromptCode
+            $script:Report.Security.UAC.ConsentPromptBehaviorUserText = Get-BravoUacUserPromptText -Code $userPromptCode
+            $script:Report.Security.UAC.PromptOnSecureDesktop = if ($null -ne $uac.PromptOnSecureDesktop) { [bool]$uac.PromptOnSecureDesktop } else { $null }
+            $script:Report.Security.UAC.FilterAdministratorToken = if ($null -ne $uac.FilterAdministratorToken) { [bool]$uac.FilterAdministratorToken } else { $null }
+
+            # Найризикованіша конфігурація UAC для адміністратора — "Elevate
+            # without prompting" (код 0): підвищення привілеїв відбувається без
+            # жодного запиту, повністю нівелює захист UAC для admin-облікових
+            # записів. Значення 1-5 (усі варіанти "Prompt for...") — прийнятні.
+            if ($script:Report.Security.UAC.Enabled -and $adminPromptCode -eq 0) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Security.UAC' -Message 'UAC налаштовано на "Elevate without prompting" для адміністраторів (ConsentPromptBehaviorAdmin=0) — підвищення привілеїв без запиту.' -Recommendation 'Змініть ConsentPromptBehaviorAdmin на значення 1-5 (запит підтвердження/облікових даних), якщо немає обґрунтованого винятку.'
             }
         } else {
             Add-AuditError -Section 'Security.UAC' -Message 'Не вдалося прочитати ключ реєстру EnableLUA — стан UAC невідомий.'

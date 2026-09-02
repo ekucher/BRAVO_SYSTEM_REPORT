@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.16'
+    SchemaVersion = '0.6.17'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -117,7 +117,15 @@ return [ordered]@{
         SmbShares = @()
     }
     Security = [ordered]@{
-        UAC=[ordered]@{Enabled=$false}
+        UAC=[ordered]@{
+            Enabled=$false
+            ConsentPromptBehaviorAdminCode=$null
+            ConsentPromptBehaviorAdminText=''
+            ConsentPromptBehaviorUserCode=$null
+            ConsentPromptBehaviorUserText=''
+            PromptOnSecureDesktop=$null
+            FilterAdministratorToken=$null
+        }
         RemoteAccess=[ordered]@{
             RDPEnabled=$false
             NLAEnabled=$null
