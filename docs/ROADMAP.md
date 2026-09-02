@@ -273,11 +273,11 @@
 - [x] Parser check для всіх `src/*.ps1` (окремо від `dist`) — `tests/SourceParserCheck.Tests.ps1`, той самий AST-based `[System.Management.Automation.Language.Parser]::ParseFile` підхід, що вже застосовувався для `dist` у CI (`local-windows-validation.yml`), тепер по кожному `src/*.ps1` окремо; помилка вказує на конкретний вихідний файл і рядок, а не на зсунуту позицію всередині зібраного монолітного `dist`.
 - [x] Quick BAT test (`tests/ReleasePackage.Tests.ps1` — `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого release package, наскрізно через справжній `.bat`, не лише через wrapper).
 - [x] Full runtime test (`tests/ExecutionContract.Tests.ps1`, `Describe 'v0.7.0 CI/Quality Gates — Full runtime test'` — наскрізний прогін `-Profile Full -Offline`, перевіряє exit code 0/CollectionErrors=0/ExportErrors=0 та Full-специфічні поля, яких немає на Quick, — Network.Adapters.Status і Hardware.Motherboard).
-- [ ] Forensic smoke test з `-JSONOnly`.
+- [x] Forensic smoke test з `-JSONOnly` (`tests/ExecutionContract.Tests.ps1`, `Describe 'v0.7.0 CI/Quality Gates — Forensic -JSONOnly smoke test / HTML-JSONOnly validation'` — exit code 0, JSON валідний, `Profile='Forensic'`, `CollectionErrors=0`).
 - [x] Release package build test (`tests/ReleasePackage.Tests.ps1`).
 - [x] Release package unpack-and-run test (`tests/ReleasePackage.Tests.ps1`).
 - [x] ZIP content validation (`tests/ReleasePackage.Tests.ps1`: sha256 ZIP, sha512 runtime всередині пакета, наявність усіх `.bat`/`MANIFEST.txt`).
-- [ ] HTML generated / JSONOnly no HTML validation.
+- [x] HTML generated / JSONOnly no HTML validation (той самий Describe: `-JSONOnly` -> HTML файл відсутній; звичайний прогін без `-JSONOnly` -> і JSON, і HTML присутні).
 - [x] Sanitize validation після реалізації `-Sanitize` (`tests/ExecutionContract.Tests.ps1`, `Describe 'P1 — CI validation для -SanitizeLevel Strict'`).
 
 ## Технічний борг

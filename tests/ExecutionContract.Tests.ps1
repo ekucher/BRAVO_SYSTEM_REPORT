@@ -630,6 +630,43 @@ Describe 'v0.7.0 CI/Quality Gates — Full runtime test' -Skip:(-not (Test-Path 
     }
 }
 
+Describe 'v0.7.0 CI/Quality Gates — Forensic -JSONOnly smoke test / HTML-JSONOnly validation' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    It '-Profile Forensic -JSONOnly -> exit code 0, JSON створено й валідний, HTML НЕ створено' {
+        $dir = New-BravoTestReportsDir -Name 'forensic-jsononly'
+        & $script:WrapperPath -Profile Forensic -JSONOnly -Offline -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+
+        $jsonFile = Get-ChildItem -LiteralPath $dir -Filter '*.json' -Recurse | Select-Object -First 1
+        $htmlFile = Get-ChildItem -LiteralPath $dir -Filter '*.html' -Recurse | Select-Object -First 1
+
+        $exitCode | Should -Be 0
+        $jsonFile | Should -Not -BeNullOrEmpty
+        $htmlFile | Should -BeNullOrEmpty
+
+        $report = Get-Content -LiteralPath $jsonFile.FullName -Raw | ConvertFrom-Json
+        $report | Should -Not -BeNullOrEmpty
+        $report.Profile | Should -Be 'Forensic'
+        @($report.CollectionErrors).Count | Should -Be 0
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'звичайний прогін БЕЗ -JSONOnly створює і JSON, і HTML' {
+        $dir = New-BravoTestReportsDir -Name 'quick-jsonandhtml'
+        & $script:WrapperPath -Profile Quick -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+
+        $jsonFile = Get-ChildItem -LiteralPath $dir -Filter '*.json' -Recurse | Select-Object -First 1
+        $htmlFile = Get-ChildItem -LiteralPath $dir -Filter '*.html' -Recurse | Select-Object -First 1
+
+        $exitCode | Should -Be 0
+        $jsonFile | Should -Not -BeNullOrEmpty
+        $htmlFile | Should -Not -BeNullOrEmpty
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'

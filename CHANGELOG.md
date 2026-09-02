@@ -1,4 +1,13 @@
-﻿## Unreleased — v0.7.0 CI: Full runtime test
+﻿## Unreleased — v0.7.0 CI: Forensic -JSONOnly smoke test + HTML/JSONOnly validation (закриває v0.7.0 CI/Quality Gates повністю)
+
+**v0.7.0 CI/Quality Gates тепер повністю закрито.**
+
+- Новий `Describe 'v0.7.0 CI/Quality Gates — Forensic -JSONOnly smoke test / HTML-JSONOnly validation'` (`tests/ExecutionContract.Tests.ps1`), два `It`:
+  - `-Profile Forensic -JSONOnly` -> exit code 0, JSON створено й валідний, HTML НЕ створено, `Profile='Forensic'`, `CollectionErrors=0`.
+  - звичайний прогін БЕЗ `-JSONOnly` (`-Profile Quick`) -> і JSON, і HTML присутні.
+- Без змін коду `src/`, без rebuild `dist`.
+
+## Unreleased — v0.7.0 CI: Full runtime test
 
 - Новий `Describe 'v0.7.0 CI/Quality Gates — Full runtime test'` (`tests/ExecutionContract.Tests.ps1`) — окремий наскрізний прогін `-Profile Full -Offline` (не Deep/Forensic, які вже переперевикористовуються всіма v0.5.0 Deep Inventory Describe-блоками). Перевіряє exit code 0, `CollectionErrors=0`/`ExportErrors=0`, JSON валідний, `Profile='Full'` у звіті, та Full-специфічні поля реально заповнені (не залишились дефолтом Quick): `Network.Adapters[].Status` (збагачення `Get-NetAdapter`, PR #60), `Hardware.Motherboard` (PR #59).
 - М'яке твердження для Motherboard (Manufacturer АБО Product непорожні) — той самий принцип, що й у аналогічному Deep-тесті вище, деякі VM/hypervisor лишають `Manufacturer` порожнім.
