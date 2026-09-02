@@ -2,7 +2,8 @@
 # Збір інформації про UAC (+full policy), RDP (+NLA/port/firewall scope/
 # allowed users), антивірус, Windows Firewall, Secure Boot, TPM, SMBv1, TLS
 # registry status, деталі Windows Defender, WinRM (listeners/auth), SMB
-# signing, password policy (net accounts) та audit policy (auditpol).
+# signing, password policy (net accounts), audit policy (auditpol) та
+# autoruns (Run/RunOnce ключі реєстру + папки автозавантаження).
 
 # Чиста функція: ConsentPromptBehaviorAdmin DWORD (HKLM:\...\Policies\System)
 # -> людяний опис. Значення за документацією Microsoft (UAC group policy
@@ -35,6 +36,34 @@ function Get-BravoUacUserPromptText {
         $null { return 'Unknown (not set)' }
         default { return "Unknown ($Code)" }
     }
+}
+
+# Чиста функція: витягує Name/Value пари з об'єкта, поверненого
+# Get-ItemProperty, відкидаючи службові PS*-метавластивості (PSPath/
+# PSParentPath/PSChildName/PSDrive/PSProvider), які завжди присутні на
+# результаті Get-ItemProperty поряд з реальними значеннями реєстрового
+# ключа. Винесено окремо від I/O, щоб покрити unit-тестами без реального
+# реєстру.
+function ConvertFrom-BravoRegistryKeyProperties {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        $PropertiesObject
+    )
+
+    $result = @()
+    if (-not $PropertiesObject) { return $result }
+
+    foreach ($propName in $PropertiesObject.PSObject.Properties.Name) {
+        if ($propName -match '^PS(Path|ParentPath|ChildName|Drive|Provider)$') { continue }
+        $result += [PSCustomObject]@{
+            Name  = $propName
+            Value = [string]$PropertiesObject.$propName
+        }
+    }
+
+    return $result
 }
 
 # Чиста функція: інтерпретує пару SCHANNEL registry DWORD (Enabled,
@@ -543,6 +572,73 @@ function Get-BravoSecurityAudit {
             } else {
                 $script:Report.Security.AuditPolicy.Status = 'NotAvailable'
             }
+
+            # --- Autoruns: реєстрові Run/RunOnce (HKLM/HKCU + Wow6432Node на
+            # 64-bit) + папки автозавантаження (User/AllUsers Startup).
+            # Гейтовано окремо Deep/Forensic (не Full) — набагато більший
+            # обсяг даних, ніж решта Security-блоку вище.
+            if ($Profile -in @('Deep','Forensic')) {
+                try {
+                    $autorunRegistryTargets = @(
+                        [PSCustomObject]@{ Hive = 'HKLM'; Source = 'Run';     Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' }
+                        [PSCustomObject]@{ Hive = 'HKLM'; Source = 'RunOnce'; Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' }
+                        [PSCustomObject]@{ Hive = 'HKLM'; Source = 'Run (Wow6432Node)';     Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run' }
+                        [PSCustomObject]@{ Hive = 'HKLM'; Source = 'RunOnce (Wow6432Node)'; Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce' }
+                        [PSCustomObject]@{ Hive = 'HKCU'; Source = 'Run';     Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' }
+                        [PSCustomObject]@{ Hive = 'HKCU'; Source = 'RunOnce'; Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' }
+                    )
+
+                    foreach ($target in $autorunRegistryTargets) {
+                        if (-not (Test-Path -LiteralPath $target.Path)) { continue }
+                        try {
+                            $keyProperties = Get-ItemProperty -LiteralPath $target.Path -ErrorAction Stop
+                            $entries = ConvertFrom-BravoRegistryKeyProperties -PropertiesObject $keyProperties
+                            foreach ($entry in $entries) {
+                                $script:Report.Security.Autoruns += [PSCustomObject]@{
+                                    Name    = $entry.Name
+                                    Command = $entry.Value
+                                    Source  = $target.Source
+                                    Hive    = $target.Hive
+                                }
+                            }
+                        } catch {
+                            Add-AuditError -Section "Security.Autoruns.$($target.Source)" -Message $_.Exception.Message
+                        }
+                    }
+
+                    # Папки автозавантаження — окремий механізм autorun, не
+                    # реєстровий; WOW6432Node-варіанту тут немає (шлях на
+                    # файловій системі однаковий для 32/64-bit процесів).
+                    $startupFolders = @(
+                        [PSCustomObject]@{ Hive = 'HKCU'; Source = 'StartupFolder (User)';     Path = [Environment]::GetFolderPath('Startup') }
+                        [PSCustomObject]@{ Hive = 'HKLM'; Source = 'StartupFolder (AllUsers)'; Path = [Environment]::GetFolderPath('CommonStartup') }
+                    )
+
+                    foreach ($folder in $startupFolders) {
+                        if (-not $folder.Path -or -not (Test-Path -LiteralPath $folder.Path)) { continue }
+                        try {
+                            $files = Get-ChildItem -LiteralPath $folder.Path -File -ErrorAction Stop
+                            foreach ($file in $files) {
+                                # desktop.ini — штатний системний файл папки, не autorun-запис.
+                                if ($file.Name -eq 'desktop.ini') { continue }
+                                $script:Report.Security.Autoruns += [PSCustomObject]@{
+                                    Name    = $file.BaseName
+                                    Command = $file.FullName
+                                    Source  = $folder.Source
+                                    Hive    = $folder.Hive
+                                }
+                            }
+                        } catch {
+                            Add-AuditError -Section "Security.Autoruns.$($folder.Source)" -Message $_.Exception.Message
+                        }
+                    }
+                } catch {
+                    Add-AuditError -Section 'Security.Autoruns' -Message $_.Exception.Message
+                }
+            }
+            # Відсутність autorun-записів (чисте автозавантаження) — штатний
+            # стан, не помилка збору; $script:Report.Security.Autoruns
+            # лишається порожнім масивом.
 
             Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status), Defender: $($script:Report.Security.Defender.Status), WinRM: $($script:Report.Security.WinRM.Status), Password policy: $($script:Report.Security.PasswordPolicy.Status), Audit policy: $($script:Report.Security.AuditPolicy.Status) ($($script:Report.Security.AuditPolicy.TotalCount))" -ForegroundColor Green
         }

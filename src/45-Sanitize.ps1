@@ -166,6 +166,15 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # --- Autoruns (Security.Autoruns, v0.5.0-tail) — Command часто містить
+    # повний шлях виконуваного файлу з профілю користувача (C:\Users\jdoe\...)
+    # — та сама категорія PATH, що й InstallLocation, маскується завжди (Basic).
+    if ($Report.Security -and $Report.Security.Autoruns) {
+        foreach ($autorun in @($Report.Security.Autoruns)) {
+            if ($autorun.Command) { $autorun.Command = & $maskPath $autorun.Command }
+        }
+    }
+
     # --- Приватні IPv4/gateway/DNS-сервери — лише Strict ---
     if ($Level -eq 'Strict' -and $Report.Network) {
         if ($Report.Network.IP) {

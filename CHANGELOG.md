@@ -1,4 +1,14 @@
-﻿## Unreleased — Security Baseline: UAC full policy
+﻿## Unreleased — Security Baseline: Autoruns
+
+- **Security.Autoruns[]** — реєстрові ключі Run/RunOnce у HKLM/HKCU (+ Wow6432Node на 64-bit) та папки автозавантаження User/AllUsers Startup. Кожен запис: Name/Command/Source/Hive. Гейтовано окремо `-Profile Deep/Forensic` (не Full — суттєво більший обсяг даних, ніж решта Security-блоку).
+- Нова чиста функція `ConvertFrom-BravoRegistryKeyProperties` (`src/34-Collectors-Security.ps1`) витягує реальні Name/Value пари з `Get-ItemProperty`, відкидаючи службові `PS*`-метавластивості (`PSPath`/`PSParentPath`/`PSChildName`/`PSDrive`/`PSProvider`) — покрита 3 unit-тестами (`tests/RegistryKeyProperties.Tests.ps1`).
+- `desktop.ini` у папках автозавантаження виключено — системний файл, не autorun-запис.
+- Sanitize: `Autoruns[].Command` — категорія PATH (та сама, що й `Software.Installed[].InstallLocation`), маскується завжди (Basic) — команда часто містить повний шлях з профілю користувача.
+- Поле існувало як завжди-порожня заглушка; тепер реально заповнюється — `SchemaVersion` піднято `0.6.17` → `0.6.18`.
+- HTML: нова таблиця 'Autoruns' на вкладці Security.
+- Тести: +3 unit +1 Sanitize +1 E2E.
+
+## Unreleased — Security Baseline: UAC full policy
 
 - **Security.UAC** розширено повною політикою (`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`): `ConsentPromptBehaviorAdminCode`/`ConsentPromptBehaviorAdminText`, `ConsentPromptBehaviorUserCode`/`ConsentPromptBehaviorUserText`, `PromptOnSecureDesktop`, `FilterAdministratorToken`.
 - Дві нові чисті функції `Get-BravoUacAdminPromptText`/`Get-BravoUacUserPromptText` (`src/34-Collectors-Security.ps1`) мапують DWORD-код у людяний опис (Elevate without prompting / Prompt for credentials/consent / ...) — покриті 6 unit-тестами (`tests/UacPromptText.Tests.ps1`).
