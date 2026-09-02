@@ -1,5 +1,30 @@
 ﻿# MODULE: 34-Collectors-Security.ps1
-# Збір інформації про UAC, RDP, антивірус, Windows Firewall, Secure Boot та TPM.
+# Збір інформації про UAC, RDP, антивірус, Windows Firewall, Secure Boot, TPM,
+# SMBv1 та TLS registry status.
+
+# Чиста функція: інтерпретує пару SCHANNEL registry DWORD (Enabled,
+# DisabledByDefault — HKLM:\...\SecurityProviders\SCHANNEL\Protocols\<protocol>\<Client|Server>)
+# у людяний статус. Семантика за документацією Microsoft:
+# - обидва ключі відсутні -> адміністратор нічого не налаштовував, діє
+#   вбудований дефолт ОС (залежить від версії Windows) -> 'NotConfigured';
+# - Enabled=0 -> явно вимкнено, незалежно від DisabledByDefault;
+# - DisabledByDefault=1 (і Enabled не 0) -> вимкнено за замовчуванням;
+# - інакше (Enabled=1 або відсутній, DisabledByDefault=0 або відсутній) ->
+#   явно чи неявно увімкнено -> 'Enabled'.
+function Get-BravoTlsProtocolStatus {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [Nullable[int]]$Enabled,
+        [AllowNull()]
+        [Nullable[int]]$DisabledByDefault
+    )
+
+    if ($null -eq $Enabled -and $null -eq $DisabledByDefault) { return 'NotConfigured' }
+    if ($null -ne $Enabled -and $Enabled -eq 0) { return 'Disabled' }
+    if ($null -ne $DisabledByDefault -and $DisabledByDefault -eq 1) { return 'Disabled' }
+    return 'Enabled'
+}
 
 function Get-BravoSecurityAudit {
     [CmdletBinding()]
@@ -114,7 +139,60 @@ function Get-BravoSecurityAudit {
                 $script:Report.Security.TPM.Error = $_.Exception.Message
             }
 
-            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status)" -ForegroundColor Green
+            # --- SMBv1 ---
+            if (Get-Command Get-SmbServerConfiguration -ErrorAction SilentlyContinue) {
+                try {
+                    $smbConfig = Get-SmbServerConfiguration -ErrorAction Stop
+                    $script:Report.Security.SMBv1.Enabled = [bool]$smbConfig.EnableSMB1Protocol
+                    $script:Report.Security.SMBv1.Status = if ($smbConfig.EnableSMB1Protocol) { 'Enabled' } else { 'Disabled' }
+
+                    if ($smbConfig.EnableSMB1Protocol) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.SMBv1' -Message 'SMBv1 увімкнено — застарілий, вразливий протокол (EternalBlue/WannaCry).' -Recommendation 'Вимкніть SMBv1: Set-SmbServerConfiguration -EnableSMB1Protocol $false, якщо немає застарілих пристроїв, що вимагають саме SMBv1.'
+                    }
+                } catch {
+                    Add-AuditError -Section 'Security.SMBv1' -Message $_.Exception.Message
+                }
+            } else {
+                # Get-SmbServerConfiguration відсутній (застарілий Windows без
+                # модуля SmbShare) — штатний стан, не помилка збору.
+                $script:Report.Security.SMBv1.Status = 'NotAvailable'
+            }
+
+            # --- TLS registry status ---
+            $tlsProtocolNames = @('TLS 1.0', 'TLS 1.1', 'TLS 1.2', 'TLS 1.3')
+            foreach ($tlsProtocolName in $tlsProtocolNames) {
+                foreach ($tlsSide in @('Client', 'Server')) {
+                    $tlsRegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\$tlsProtocolName\$tlsSide"
+                    $tlsProperties = Get-ItemProperty -Path $tlsRegistryPath -ErrorAction SilentlyContinue
+
+                    $tlsEnabledValue = if ($tlsProperties -and $null -ne $tlsProperties.Enabled) { [int]$tlsProperties.Enabled } else { $null }
+                    $tlsDisabledByDefaultValue = if ($tlsProperties -and $null -ne $tlsProperties.DisabledByDefault) { [int]$tlsProperties.DisabledByDefault } else { $null }
+                    $tlsStatus = Get-BravoTlsProtocolStatus -Enabled $tlsEnabledValue -DisabledByDefault $tlsDisabledByDefaultValue
+
+                    $script:Report.Security.TLS.Protocols += [PSCustomObject]@{
+                        Protocol           = $tlsProtocolName
+                        Side               = $tlsSide
+                        Enabled            = $tlsEnabledValue
+                        DisabledByDefault  = $tlsDisabledByDefaultValue
+                        Status             = $tlsStatus
+                    }
+
+                    # Застарілі протоколи (1.0/1.1) явно увімкнені реєстром —
+                    # адміністратор свідомо переозначив ОС-дефолт у бік менш
+                    # безпечного стану. TLS 1.2 явно вимкнений — навпаки,
+                    # ризик сумісності (більшість сучасних клієнтів/серверів
+                    # вимагають мінімум 1.2). 'NotConfigured' (найпоширеніший
+                    # стан на реальних машинах — ОС-дефолт) НЕ породжує
+                    # finding: адмін нічого не змінював, немає що звинувачувати.
+                    if ($tlsProtocolName -in @('TLS 1.0', 'TLS 1.1') -and $tlsStatus -eq 'Enabled' -and $tlsEnabledValue -eq 1) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.TLS' -Message "$tlsProtocolName ($tlsSide) явно увімкнено через реєстр — застарілий протокол." -Recommendation 'Вимкніть застарілі TLS-версії через SCHANNEL registry, якщо немає застарілих клієнтів/серверів, що вимагають саме цю версію.'
+                    } elseif ($tlsProtocolName -eq 'TLS 1.2' -and $tlsStatus -eq 'Disabled') {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.TLS' -Message "TLS 1.2 ($tlsSide) вимкнено через реєстр — ризик сумісності з сучасними клієнтами/серверами." -Recommendation 'Перевірте, чи це свідоме рішення; TLS 1.2 зазвичай мінімально необхідна версія для сучасних з''єднань.'
+                    }
+                }
+            }
+
+            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status)" -ForegroundColor Green
         }
 
         Write-Host "  $IconSecurity Безпека: RDP=$(if($script:Report.Security.RemoteAccess.RDPEnabled){'ON'}else{'OFF'}), UAC=$(if($script:Report.Security.UAC.Enabled){'ON'}else{'OFF'})" -ForegroundColor Green

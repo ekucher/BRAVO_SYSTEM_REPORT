@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -347,6 +347,23 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
         # тож на реальній машині принаймні один має бути активним і мати
         # непорожній Status після збагачення через Get-NetAdapter.
         ($adapters | Where-Object { $_.Status }).Count | Should -BeGreaterThan 0
+    }
+
+    It 'Security.SMBv1.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Deep-профілі' {
+        $script:DeepSecurityReport.Security.SMBv1.Status | Should -BeIn @('Enabled', 'Disabled', 'NotAvailable')
+    }
+
+    It 'Security.TLS.Protocols покриває TLS 1.0/1.1/1.2/1.3 для Client і Server (8 записів), кожен з валідним Status' {
+        $tlsProtocols = @($script:DeepSecurityReport.Security.TLS.Protocols)
+        $tlsProtocols.Count | Should -Be 8
+
+        foreach ($expectedProtocol in @('TLS 1.0', 'TLS 1.1', 'TLS 1.2', 'TLS 1.3')) {
+            foreach ($expectedSide in @('Client', 'Server')) {
+                $matchedEntry = $tlsProtocols | Where-Object { $_.Protocol -eq $expectedProtocol -and $_.Side -eq $expectedSide }
+                $matchedEntry | Should -Not -BeNullOrEmpty
+                $matchedEntry.Status | Should -BeIn @('Enabled', 'Disabled', 'NotConfigured')
+            }
+        }
     }
 }
 

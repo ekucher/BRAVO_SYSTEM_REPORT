@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.5'
+    SchemaVersion = '0.6.6'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -133,6 +133,14 @@ return [ordered]@{
             SpecVersion = ''
             Status = 'NotChecked'
             Error = ''
+        }
+        SMBv1 = [ordered]@{
+            Enabled = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        TLS = [ordered]@{
+            Protocols = @()
         }
     }
     Users = [ordered]@{ LocalAdmins=@() }

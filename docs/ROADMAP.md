@@ -166,9 +166,9 @@
 - [ ] UAC full policy.
 - [ ] RDP NLA, port, firewall scope, allowed users.
 - [ ] WinRM listeners and auth.
-- [ ] SMBv1.
+- [x] SMBv1 (`Get-SmbServerConfiguration`, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Security.SMBv1.{Enabled,Status}`; WARNING-finding, якщо `EnableSMB1Protocol=$true`; модуль SmbShare відсутній -> `NotAvailable`, не помилка).
 - [ ] SMB signing / insecure guest access.
-- [ ] TLS 1.0/1.1/1.2/1.3 registry status.
+- [x] TLS 1.0/1.1/1.2/1.3 registry status (SCHANNEL registry, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Get-BravoTlsProtocolStatus` — чиста функція, інтерпретує `Enabled`/`DisabledByDefault` DWORD -> `Enabled`/`Disabled`/`NotConfigured`, покрито `tests/TlsProtocolStatus.Tests.ps1`; `Security.TLS.Protocols[]` — Client+Server на кожен протокол; findings лише для явних відхилень від безпечного дефолту (застарілий протокол явно увімкнено / TLS 1.2 явно вимкнено), `NotConfigured` — не помилка, найпоширеніший стан).
 - [ ] Defender details: realtime protection, signature age, engine/platform version.
 - [ ] Password policy.
 - [ ] Audit policy.
