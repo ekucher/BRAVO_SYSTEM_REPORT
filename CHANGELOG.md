@@ -1,4 +1,15 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Event Logs summary (System/Application/Setup/Security)
+﻿## Unreleased — v0.5.0 Deep Inventory: Hardware Diagnostics (Disk/Ntfs/StorPort/StorNVMe/WHEA/Kernel-Power/BugCheck)
+
+**Останній пункт "Updates and Event Logs" v0.5.0 Deep Inventory. Уся секція v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs) тепер ПОВНІСТЮ закрита** (крім свідомо відкладених Autoruns/Scheduled tasks).
+
+- **EventLogs.HardwareDiagnostics[]** — провайдер-специфічний зріз System log за 7 критичними драйверами/апаратними підсистемами: `disk`, `Ntfs`, `Microsoft-Windows-StorPort`, `stornvme`, `Microsoft-Windows-WHEA-Logger`, `Microsoft-Windows-Kernel-Power`, `Microsoft-Windows-WER-SystemErrorReporting` (BugCheck/краш-дампи). Гейтовано `-Profile Full/Deep/Forensic`.
+- **Свідоме рішення**: кожен провайдер запитується ОКРЕМИМ `Get-WinEvent`-викликом, а не одним `FilterHashtable` з масивом `ProviderName` — перевірено локальним репро, що один незареєстрований провайдер (напр. `stornvme` на машині без NVMe) валить `NoMatchingProvidersFound` увесь комбінований запит, ховаючи дані решти провайдерів.
+- `Status='NotAvailable'`, якщо провайдер не зареєстрований у системі (штатна апаратна відмінність — напр. немає ні StorPort, ні StorNVMe одночасно, залежно від контролера). `Status='Detected'` з `Count=0`, якщо провайдер є, але Critical/Error/Warning подій за період немає (здоровий стан). WARNING-finding при `Count>0`.
+- Поле існувало як завжди-порожня заглушка; тепер реально заповнюється — `SchemaVersion` піднято `0.6.13` → `0.6.14`.
+- HTML: нова таблиця 'Hardware Diagnostics' на вкладці Services.
+- Тести: +1 E2E (`ExecutionContract.Tests.ps1`, той самий `-Profile Deep` прогін, перейменовано на `.../HardwareDiagnostics`).
+
+## Unreleased — v0.5.0 Deep Inventory: Event Logs summary (System/Application/Setup/Security)
 
 Три пункти v0.5.0 Deep Inventory / Updates and Event Logs в одному PR: per-log summary (System/Application/Setup/Security), Provider summary, Critical/Error/Warning grouping.
 

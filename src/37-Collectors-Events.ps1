@@ -145,5 +145,76 @@ function Get-BravoEventLogsAudit {
                 }
             }
         }
+
+        # --- Hardware diagnostics: Disk/Ntfs/storport/stornvme/WHEA/
+        # Kernel-Power/BugCheck — провайдер-специфічний зріз System log
+        # для критичних апаратних/драйверних проблем (диски, storage-стек,
+        # апаратні помилки WHEA, неочікувані вимкнення живлення, крахи ОС).
+        # Кожен провайдер запитується ОКРЕМО (не одним FilterHashtable з
+        # масивом ProviderName): якщо хоча б один провайдер не зареєстрований
+        # у системі (Get-WinEvent кидає NoMatchingProvidersFound на весь
+        # запит одразу), решта провайдерів не мали б зібратись взагалі —
+        # перевірено локальним репро (Get-WinEvent з масивом провайдерів,
+        # один з яких відсутній, валить весь запит).
+        $hardwareDiagnosticProviders = @(
+            [PSCustomObject]@{ Label = 'Disk'; ProviderName = 'disk' }
+            [PSCustomObject]@{ Label = 'Ntfs'; ProviderName = 'Ntfs' }
+            [PSCustomObject]@{ Label = 'StorPort'; ProviderName = 'Microsoft-Windows-StorPort' }
+            [PSCustomObject]@{ Label = 'StorNVMe'; ProviderName = 'stornvme' }
+            [PSCustomObject]@{ Label = 'WHEA'; ProviderName = 'Microsoft-Windows-WHEA-Logger' }
+            [PSCustomObject]@{ Label = 'Kernel-Power'; ProviderName = 'Microsoft-Windows-Kernel-Power' }
+            [PSCustomObject]@{ Label = 'BugCheck'; ProviderName = 'Microsoft-Windows-WER-SystemErrorReporting' }
+        )
+
+        foreach ($diagProvider in $hardwareDiagnosticProviders) {
+            try {
+                $providerEvents = Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = $diagProvider.ProviderName; StartTime = $eventLogStart; Level = 1, 2, 3 } -ErrorAction Stop
+
+                $lastMessage = ($providerEvents | Select-Object -First 1).Message
+                $script:Report.EventLogs.HardwareDiagnostics += [PSCustomObject]@{
+                    Provider     = $diagProvider.Label
+                    Status       = 'Detected'
+                    Count        = @($providerEvents).Count
+                    LastMessage  = $lastMessage
+                }
+
+                if (@($providerEvents).Count -gt 0) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'EventLogs.HardwareDiagnostics' -Message "Провайдер '$($diagProvider.Label)' залишив $(@($providerEvents).Count) Critical/Error/Warning подій у System log за $EventLogDays днів." -Recommendation 'Перегляньте System log за цим провайдером — можливі проблеми диска/storage-стека/апаратного забезпечення.'
+                }
+            } catch {
+                if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') {
+                    # Провайдер зареєстрований, але за період немає жодної
+                    # Critical/Error/Warning події — штатний, здоровий стан.
+                    $script:Report.EventLogs.HardwareDiagnostics += [PSCustomObject]@{
+                        Provider    = $diagProvider.Label
+                        Status      = 'Detected'
+                        Count       = 0
+                        LastMessage = ''
+                    }
+                } elseif ($_.FullyQualifiedErrorId -match 'NoMatchingProvidersFound|LogsAndProvidersDontOverlap') {
+                    # NoMatchingProvidersFound: провайдер не зареєстрований у
+                    # системі (напр. stornvme на машині без NVMe-диска).
+                    # LogsAndProvidersDontOverlap: провайдер зареєстрований,
+                    # але не пише події в System log (напр. StorPort на
+                    # системі, де активний лише stornvme, чи навпаки —
+                    # перевірено локальним репро). Обидва — штатна апаратна/
+                    # драйверна відмінність, не помилка збору.
+                    $script:Report.EventLogs.HardwareDiagnostics += [PSCustomObject]@{
+                        Provider    = $diagProvider.Label
+                        Status      = 'NotAvailable'
+                        Count       = $null
+                        LastMessage = ''
+                    }
+                } else {
+                    $script:Report.EventLogs.HardwareDiagnostics += [PSCustomObject]@{
+                        Provider    = $diagProvider.Label
+                        Status      = 'Unavailable'
+                        Count       = $null
+                        LastMessage = ''
+                    }
+                    Add-AuditError -Section "EventLogs.HardwareDiagnostics.$($diagProvider.Label)" -Message $_.Exception.Message
+                }
+            }
+        }
     }
 }

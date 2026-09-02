@@ -184,7 +184,7 @@
 - [x] Event logs: System, Application, Setup, Security summary (`ConvertTo-BravoEventLogSummary` + `Get-WinEvent -FilterHashtable`, `src/37-Collectors-Events.ps1`, гейтовано Full/Deep/Forensic; `EventLogs.LogSummaries[]` — LogName/Status/CriticalCount/ErrorCount/WarningCount/TopProviders; benign "немає записів" розпізнається за locale-незалежним `FullyQualifiedErrorId` (`NoMatchingEventsFound`), не за текстом повідомлення).
 - [x] Provider summary (топ-10 провайдерів на кожен журнал, `EventLogs.LogSummaries[].TopProviders`, той самий колектор).
 - [x] Critical/Error/Warning grouping (той самий колектор; CRITICAL-finding при Critical-подіях у будь-якому з 4 журналів).
-- [ ] Disk/Ntfs/storport/WHEA/Kernel-Power/BugCheck diagnostics.
+- [x] Disk/Ntfs/storport/WHEA/Kernel-Power/BugCheck diagnostics (`src/37-Collectors-Events.ps1`, гейтовано Full/Deep/Forensic; `EventLogs.HardwareDiagnostics[]` — по одному запису на 7 провайдерів (disk/Ntfs/Microsoft-Windows-StorPort/stornvme/Microsoft-Windows-WHEA-Logger/Microsoft-Windows-Kernel-Power/Microsoft-Windows-WER-SystemErrorReporting), кожен провайдер запитується окремо через `Get-WinEvent -FilterHashtable` — один незареєстрований провайдер у масиві ламає весь запит, перевірено локальним репро; `Status=NotAvailable`, якщо провайдер не зареєстрований на машині (штатна апаратна відмінність), `Status=Detected` з `Count=0`, якщо провайдер є, але подій немає).
 
 ## v0.6.0 Reports and UX
 

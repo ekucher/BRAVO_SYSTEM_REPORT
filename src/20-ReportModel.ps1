@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.13'
+    SchemaVersion = '0.6.14'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -201,7 +201,7 @@ return [ordered]@{
     Users = [ordered]@{ LocalAdmins=@() }
     Processes = [ordered]@{ Total=0; TopMemory=@() }
     Services = [ordered]@{ Total=0; Running=0; AutomaticStopped=@() }
-    EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0; TopErrorSources=@(); LogSummaries=@() }
+    EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0; TopErrorSources=@(); LogSummaries=@(); HardwareDiagnostics=@() }
     # Software.WindowsFeatures та USBDevices: заплановані, ще не реалізовані
     # колектори (жоден src/*.ps1 їх наразі не заповнює) — завжди порожній
     # масив у звіті, не помилка збору.
