@@ -725,6 +725,36 @@ Describe 'v0.6.1 — Edge CLI PDF (-ExportPdf)' -Skip:(-not (Test-Path (Join-Pat
     }
 }
 
+Describe 'v0.6.0 — TXT summary (-TXT)' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    It '-TXT створює .txt з очікуваними маркерами (ComputerName, Health Score, Findings-секція)' {
+        $dir = New-BravoTestReportsDir -Name 'exporttxt'
+        & $script:WrapperPath -Profile Quick -TXT -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+
+        $txtFile = Get-ChildItem -LiteralPath $dir -Filter '*.txt' -Recurse | Select-Object -First 1
+        $exitCode | Should -Be 0
+        $txtFile | Should -Not -BeNullOrEmpty
+
+        $txtContent = Get-Content -LiteralPath $txtFile.FullName -Raw
+        $txtContent | Should -Match 'Computer:'
+        $txtContent | Should -Match 'Health Score:'
+        $txtContent | Should -Match 'Findings \('
+        $txtContent | Should -Match 'SchemaVersion'
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'без -TXT .txt НЕ створюється (фіча опційна, не дефолт)' {
+        $dir = New-BravoTestReportsDir -Name 'notxt'
+        & $script:WrapperPath -Profile Quick -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+
+        $txtFile = Get-ChildItem -LiteralPath $dir -Filter '*.txt' -Recurse | Select-Object -First 1
+        $txtFile | Should -BeNullOrEmpty
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'

@@ -28,6 +28,7 @@ param(
 
     [switch]$JSONOnly,
     [switch]$CSV,
+    [switch]$TXT,
     [switch]$Zip,
     [switch]$NoZip,
     [switch]$NoEmoji,

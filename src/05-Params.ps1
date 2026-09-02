@@ -10,6 +10,7 @@ param(
 
     [switch]$JSONOnly,
     [switch]$CSV,
+    [switch]$TXT,
     [switch]$Zip = $true,
     [switch]$NoZip,
     [switch]$NoEmoji,
