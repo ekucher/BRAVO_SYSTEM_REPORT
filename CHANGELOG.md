@@ -12,6 +12,17 @@
 
 Без змін контракту моделі, без бампу SchemaVersion.
 
+## Unreleased — Network Audit: ProcessName для з'єднань + SMB shares (закриває секцію повністю)
+
+**Network Audit секцію тепер повністю закрито.**
+
+- **ProcessName** для `Network.Connections.ListeningPorts[]` і нового **`Network.Connections.EstablishedConnections[]`** (LocalAddress/LocalPort/RemoteAddress/RemotePort/OwningProcess/ProcessName, до 200 записів, гейтовано Full/Deep/Forensic). Нова чиста функція `Get-BravoProcessNameLookup` будує PID->Name lookup з одного `Get-Process`-виклику (не по виклику на кожне з'єднання) — покрита 4 unit-тестами (`tests/ProcessNameLookup.Tests.ps1`).
+- **Network.SmbShares[]** через `Get-SmbShare` — Name/Path/Description/ShareType/ScopeName/IsAdministrative. Адміністративні $-шари (C$/ADMIN$/IPC$) не приховуються — позначаються `IsAdministrative=true` (визначається як `Name -match '\$$'`), окрема корисна інформація для аудиту.
+- Sanitize: `EstablishedConnections[].{LocalAddress,RemoteAddress}` — приватні IPv4, лише Strict (та сама категорія, що й `ListeningPorts[].LocalAddress`). `SmbShares[].Path` — категорія PATH (та сама, що й `Software.Installed[].InstallLocation`), маскується завжди (Basic) — шлях шари може містити username (`C:\Users\jdoe\Share`).
+- Поля існували як завжди-порожні заглушки; тепер реально заповнюються — `SchemaVersion` піднято `0.6.15` → `0.6.16`.
+- HTML: нові таблиці 'Listening Ports', 'Established Connections', 'SMB Shares' на вкладці Network.
+- Тести: +4 unit (lookup) +2 Sanitize +3 E2E.
+
 ## Unreleased — Hardware Inventory: Monitors (закриває секцію повністю)
 
 **Hardware Inventory секцію тепер повністю закрито.**

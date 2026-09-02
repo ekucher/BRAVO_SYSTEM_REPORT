@@ -151,10 +151,10 @@
 - [x] Network adapters: name, MAC, speed, status, driver (name/MAC вже збирались; `Get-NetAdapter` у `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic, збагачує наявні записи `Network.Adapters[]` за MAC-адресою — `LinkSpeed`/`Status`/`DriverVersion`/`DriverProvider`; НЕ додає нові рядки для адаптерів без IP, щоб не змінювати семантику "Adapters" з "інтерфейси з IP" на "усі мережеві інтерфейси в системі").
 - [x] Routing table (`Get-NetRoute`, `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic; `Network.Routing.RoutingTable[]`, до 200 записів).
 - [x] ARP/Neighbor table (`Get-NetNeighbor`, `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic; `Network.ARP[]`, виключено Unreachable/Incomplete записи, до 200; MAC маскується Sanitize завжди, IP — лише Strict).
-- [ ] Listening ports з ProcessName.
-- [ ] Established connections з ProcessName.
+- [x] Listening ports з ProcessName (`Get-BravoProcessNameLookup` — чиста функція, будує PID->Name lookup з одного `Get-Process`, не по виклику на кожне з'єднання; `src/33-Collectors-Network.ps1`; `Network.Connections.ListeningPorts[].ProcessName`).
+- [x] Established connections з ProcessName (той самий lookup; новий `Network.Connections.EstablishedConnections[]` — LocalAddress/LocalPort/RemoteAddress/RemotePort/OwningProcess/ProcessName, до 200 записів, гейтовано Full/Deep/Forensic).
 - [x] WinHTTP proxy (`netsh winhttp show proxy`, `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic; `Network.WinHttpProxy.{RawOutput,Status}`; свідомо публікується сирий текст без інтерпретації — локалізований вивід netsh, той самий принцип, що й audit policy).
-- [ ] SMB shares.
+- [x] SMB shares (`Get-SmbShare`, `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic; `Network.SmbShares[]` — Name/Path/Description/ShareType/ScopeName/IsAdministrative; адміністративні $-шари (C$/ADMIN$/IPC$) не приховуються, а позначаються `IsAdministrative=true` — окрема інформація для аудиту, не шум).
 
 ### Security Baseline
 
