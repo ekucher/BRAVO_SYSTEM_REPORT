@@ -52,14 +52,14 @@
   - [x] `dist/Get-BravoSystemReport.ps1`;
   - [x] `dist/Get-BravoSystemReport.ps1.sha512`.
   (скрипт до цього фіксу взагалі не запускався — посилався на видалений `src/Get-BravoSystemReport.ps1`; тепер додатково звіряє sha512 перед пакуванням і використовує `src/90-Main.ps1` для визначення версії).
-- [ ] Додати перевірку release package:
-  - [ ] створити ZIP;
-  - [ ] розпакувати у temporary directory;
-  - [ ] запустити `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого пакета;
-  - [ ] перевірити створення JSON/HTML.
+- [x] Додати перевірку release package (`tests/ReleasePackage.Tests.ps1`, 5 тестів, входить у звичайний `Invoke-Pester -Path tests`):
+  - [x] створити ZIP (`tools/New-ReleasePackage.ps1`);
+  - [x] розпакувати у temporary directory;
+  - [x] запустити `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого пакета;
+  - [x] перевірити створення JSON/HTML (+ що JSON валідно парситься, sha512 runtime всередині пакета відповідає файлу, sha256 самого ZIP коректний, усі 5 `.bat`-лаунчерів і `MANIFEST.txt` присутні).
 - [x] Визначити долю старого моноліту `src/Get-BravoSystemReport.ps1`: видалено (весь runtime формується з `src/*.ps1` модулів через `Build-BRAVO-SystemReport.ps1`).
 - [x] Оновити `examples/README.md` відповідно до поточного wrapper/dist flow (`-Zip` за замовчуванням, `-NoZip` для вимкнення).
-- [ ] Додати `docs/RELEASE.md` з описом створення й перевірки release package.
+- [x] Додати `docs/RELEASE.md` з описом створення й перевірки release package (локальний флоу + як фактично працює `.github/workflows/release.yml`: resolve version, build, quick runtime test, package, verify, publish; таблиця типових причин падіння).
 
 ## v0.4.2 Runtime Quality
 
@@ -335,14 +335,14 @@
 - [x] Deep runtime test з `-CSV -Zip`.
 - [x] Базовий Pester-набір (`tests/`: чисті helper-функції, консистентність build-маніфесту, наскрізний E2E-прогін), запускається і в CI, і локально через `Invoke-Pester tests/`.
 - [ ] Parser check для всіх `src/*.ps1` (окремо від `dist`).
-- [ ] Quick BAT test.
+- [x] Quick BAT test (`tests/ReleasePackage.Tests.ps1` — `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого release package, наскрізно через справжній `.bat`, не лише через wrapper).
 - [ ] Full runtime test.
 - [ ] Forensic smoke test з `-JSONOnly`.
-- [ ] Release package build test.
-- [ ] Release package unpack-and-run test.
-- [ ] ZIP content validation.
+- [x] Release package build test (`tests/ReleasePackage.Tests.ps1`).
+- [x] Release package unpack-and-run test (`tests/ReleasePackage.Tests.ps1`).
+- [x] ZIP content validation (`tests/ReleasePackage.Tests.ps1`: sha256 ZIP, sha512 runtime всередині пакета, наявність усіх `.bat`/`MANIFEST.txt`).
 - [ ] HTML generated / JSONOnly no HTML validation.
-- [ ] Sanitize validation після реалізації `-Sanitize`.
+- [x] Sanitize validation після реалізації `-Sanitize` (`tests/ExecutionContract.Tests.ps1`, `Describe 'P1 — CI validation для -SanitizeLevel Strict'`).
 
 ## Технічний борг
 
@@ -350,7 +350,7 @@
 - [x] Уніфікувати версії `ScriptVersion`, `SchemaVersion`, README, CHANGELOG — README/ROADMAP синхронізовані з фактичними версіями (release package все ще потребує окремої перевірки, див. v0.4.1 Release Stabilization вище).
 - [ ] Додати `docs/SCHEMA.md`.
 - [ ] Додати `docs/TESTING.md` (базовий Pester-набір уже є в `tests/`, документ ще не написаний).
-- [ ] Додати `docs/RELEASE.md`.
+- [x] Додати `docs/RELEASE.md` (див. v0.4.1 Release Stabilization вище).
 - [ ] Описати правила сумісності Windows PowerShell 5.1 / PowerShell 7.
 
 ## Правило виконання етапів
