@@ -49,7 +49,9 @@ param(
 
     [string]$EmailTo,
     [string]$EmailFrom,
-    [string]$SmtpServer
+    [string]$SmtpServer,
+
+    [switch]$ExportPdf
 )
 
 $ErrorActionPreference = 'Stop'

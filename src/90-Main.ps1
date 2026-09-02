@@ -244,6 +244,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
         if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
         if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
+        if ($ExportPdf) { $arguments += '-ExportPdf' }
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = 'powershell.exe'
@@ -389,6 +390,14 @@ Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
 # HTML
 Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+
+# PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
+# виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
+# встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
+# взагалі, тож PDF теж пропускається (нема з чого конвертувати).
+if ($ExportPdf -and -not $JSONOnly) {
+    Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
+}
 
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV

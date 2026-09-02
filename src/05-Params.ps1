@@ -32,5 +32,7 @@ param(
 
     [string]$EmailTo,
     [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
-    [string]$SmtpServer = ''
+    [string]$SmtpServer = '',
+
+    [switch]$ExportPdf
 )

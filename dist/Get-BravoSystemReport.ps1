@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-02 23:11:31
+    GeneratedAt: 2026-09-02 23:36:49
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -54,7 +54,9 @@ param(
 
     [string]$EmailTo,
     [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
-    [string]$SmtpServer = ''
+    [string]$SmtpServer = '',
+
+    [switch]$ExportPdf
 )
 
 
@@ -5164,6 +5166,82 @@ function Export-BravoHtmlReport {
     }
 }
 
+# Чиста-по-суті функція локалізації msedge.exe: спершу PATH (Get-Command),
+# потім два стандартних шляхи встановлення (64-bit і 32-bit under
+# Program Files (x86) — Edge типово встановлюється як 32-bit застосунок
+# навіть на 64-bit Windows). Повертає $null, якщо Edge не знайдено —
+# виклик далі трактує це як штатну відсутність опційної залежності, не
+# помилку.
+function Get-BravoEdgeExecutablePath {
+    [CmdletBinding()]
+    param()
+
+    $pathCommand = Get-Command msedge.exe -ErrorAction SilentlyContinue
+    $candidates = @(
+        if ($pathCommand) { $pathCommand.Source }
+        'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
+        'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+
+    return $null
+}
+
+# v0.6.1 Advanced UX: автоматична конвертація HTML-звіту в PDF через
+# headless Microsoft Edge (`--print-to-pdf`). Опційна фіча (-ExportPdf) —
+# відсутність Edge на машині НЕ є помилкою збору чи експорту (лише
+# Write-Host Warning), оскільки PDF не є обов'язковим форматом звіту.
+function Export-BravoPdfReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$OutputDir,
+        [Parameter(Mandatory = $true)]
+        [string]$BaseFileName
+    )
+
+    $htmlPath = Join-Path $OutputDir "$BaseFileName.html"
+    if (-not (Test-Path -LiteralPath $htmlPath)) {
+        # Нема з чого конвертувати (HTML не створено/помилка HTML-етапу) —
+        # той HTML-етап уже зафіксував власну ExportError, тут дублювати
+        # не потрібно.
+        return
+    }
+
+    $edgePath = Get-BravoEdgeExecutablePath
+    if (-not $edgePath) {
+        Write-Host "  [INFO] Edge CLI PDF: msedge.exe не знайдено на цій машині — PDF пропущено (не помилка, опційна фіча)." -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        $pdfPath = Join-Path $OutputDir "$BaseFileName.pdf"
+        $htmlUri = ([Uri]$htmlPath).AbsoluteUri
+        $edgeArguments = @(
+            '--headless'
+            '--disable-gpu'
+            "--print-to-pdf=`"$pdfPath`""
+            '--print-to-pdf-no-header'
+            $htmlUri
+        )
+
+        $process = Start-Process -FilePath $edgePath -ArgumentList $edgeArguments -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+
+        if ($process.ExitCode -eq 0 -and (Test-Path -LiteralPath $pdfPath)) {
+            $script:Report.GeneratedFiles += $pdfPath
+            Write-Host "  $IconHtml PDF: $BaseFileName.pdf" -ForegroundColor White
+        } else {
+            Add-ExportError -Section 'Export.Pdf' -Message "msedge.exe --print-to-pdf завершився з exit code $($process.ExitCode), PDF-файл не з'явився."
+        }
+    } catch {
+        Add-ExportError -Section 'Export.Pdf' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка PDF: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
 
 # ============================================================
 # MODULE: src/52-Export-Csv.ps1
@@ -5624,6 +5702,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
         if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
         if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
+        if ($ExportPdf) { $arguments += '-ExportPdf' }
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = 'powershell.exe'
@@ -5769,6 +5848,14 @@ Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
 # HTML
 Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+
+# PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
+# виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
+# встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
+# взагалі, тож PDF теж пропускається (нема з чого конвертувати).
+if ($ExportPdf -and -not $JSONOnly) {
+    Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
+}
 
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV

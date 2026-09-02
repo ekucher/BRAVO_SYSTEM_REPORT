@@ -763,3 +763,79 @@ function Export-BravoHtmlReport {
         }
     }
 }
+
+# Чиста-по-суті функція локалізації msedge.exe: спершу PATH (Get-Command),
+# потім два стандартних шляхи встановлення (64-bit і 32-bit under
+# Program Files (x86) — Edge типово встановлюється як 32-bit застосунок
+# навіть на 64-bit Windows). Повертає $null, якщо Edge не знайдено —
+# виклик далі трактує це як штатну відсутність опційної залежності, не
+# помилку.
+function Get-BravoEdgeExecutablePath {
+    [CmdletBinding()]
+    param()
+
+    $pathCommand = Get-Command msedge.exe -ErrorAction SilentlyContinue
+    $candidates = @(
+        if ($pathCommand) { $pathCommand.Source }
+        'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
+        'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+
+    return $null
+}
+
+# v0.6.1 Advanced UX: автоматична конвертація HTML-звіту в PDF через
+# headless Microsoft Edge (`--print-to-pdf`). Опційна фіча (-ExportPdf) —
+# відсутність Edge на машині НЕ є помилкою збору чи експорту (лише
+# Write-Host Warning), оскільки PDF не є обов'язковим форматом звіту.
+function Export-BravoPdfReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$OutputDir,
+        [Parameter(Mandatory = $true)]
+        [string]$BaseFileName
+    )
+
+    $htmlPath = Join-Path $OutputDir "$BaseFileName.html"
+    if (-not (Test-Path -LiteralPath $htmlPath)) {
+        # Нема з чого конвертувати (HTML не створено/помилка HTML-етапу) —
+        # той HTML-етап уже зафіксував власну ExportError, тут дублювати
+        # не потрібно.
+        return
+    }
+
+    $edgePath = Get-BravoEdgeExecutablePath
+    if (-not $edgePath) {
+        Write-Host "  [INFO] Edge CLI PDF: msedge.exe не знайдено на цій машині — PDF пропущено (не помилка, опційна фіча)." -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        $pdfPath = Join-Path $OutputDir "$BaseFileName.pdf"
+        $htmlUri = ([Uri]$htmlPath).AbsoluteUri
+        $edgeArguments = @(
+            '--headless'
+            '--disable-gpu'
+            "--print-to-pdf=`"$pdfPath`""
+            '--print-to-pdf-no-header'
+            $htmlUri
+        )
+
+        $process = Start-Process -FilePath $edgePath -ArgumentList $edgeArguments -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+
+        if ($process.ExitCode -eq 0 -and (Test-Path -LiteralPath $pdfPath)) {
+            $script:Report.GeneratedFiles += $pdfPath
+            Write-Host "  $IconHtml PDF: $BaseFileName.pdf" -ForegroundColor White
+        } else {
+            Add-ExportError -Section 'Export.Pdf' -Message "msedge.exe --print-to-pdf завершився з exit code $($process.ExitCode), PDF-файл не з'явився."
+        }
+    } catch {
+        Add-ExportError -Section 'Export.Pdf' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка PDF: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
