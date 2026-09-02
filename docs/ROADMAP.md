@@ -124,8 +124,8 @@
 - [x] RAM modules: slot, vendor, serial, speed, size.
 - [~] CPU: cores, logical processors, max clock; socket — наступний етап.
 - [ ] ComputerSystem: chassis type.
-- [ ] Secure Boot.
-- [ ] TPM.
+- [x] Secure Boot (`Confirm-SecureBootUEFI`, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Security.SecureBoot.{Supported,Enabled,Status}`; Legacy BIOS/VM без UEFI — штатний стан `NotSupported`, не помилка збору).
+- [x] TPM (`Win32_Tpm` CIM у `root\cimv2\Security\MicrosoftTpm`, `src/34-Collectors-Security.ps1`, гейтовано Full/Deep/Forensic; `Security.TPM.{Present,Ready,Enabled,Activated,ManufacturerId,ManufacturerVersion,SpecVersion,Status}`; відсутність TPM — штатний стан `NotPresent`, не помилка збору).
 - [ ] Motherboard.
 - [ ] GPU.
 - [ ] Monitors.

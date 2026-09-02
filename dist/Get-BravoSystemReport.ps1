@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-02 13:23:05
+    GeneratedAt: 2026-09-02 13:56:42
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -544,7 +544,29 @@ return [ordered]@{
         Adapters = @()
         Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@() }
     }
-    Security = [ordered]@{ UAC=[ordered]@{Enabled=$false}; RemoteAccess=[ordered]@{RDPEnabled=$false}; Antivirus=[ordered]@{Product=''}; Firewall=[ordered]@{} }
+    Security = [ordered]@{
+        UAC=[ordered]@{Enabled=$false}
+        RemoteAccess=[ordered]@{RDPEnabled=$false}
+        Antivirus=[ordered]@{Product=''}
+        Firewall=[ordered]@{}
+        SecureBoot = [ordered]@{
+            Supported = $null
+            Enabled = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        TPM = [ordered]@{
+            Present = $null
+            Ready = $null
+            Enabled = $null
+            Activated = $null
+            ManufacturerId = ''
+            ManufacturerVersion = ''
+            SpecVersion = ''
+            Status = 'NotChecked'
+            Error = ''
+        }
+    }
     Users = [ordered]@{ LocalAdmins=@() }
     Processes = [ordered]@{ Total=0; TopMemory=@() }
     Services = [ordered]@{ Total=0; Running=0; AutomaticStopped=@() }
@@ -1423,7 +1445,7 @@ function Get-BravoNetworkAudit {
 # ============================================================
 
 # MODULE: 34-Collectors-Security.ps1
-# Збір інформації про UAC, RDP, антивірус та Windows Firewall.
+# Збір інформації про UAC, RDP, антивірус, Windows Firewall, Secure Boot та TPM.
 
 function Get-BravoSecurityAudit {
     [CmdletBinding()]
@@ -1481,6 +1503,64 @@ function Get-BravoSecurityAudit {
             } catch {
                 Add-AuditError -Section 'Security.Firewall' -Message $_.Exception.Message
             }
+        }
+
+        # --- Secure Boot / TPM (Deep Security, v0.5.0) ---
+        # Гейтовано Full/Deep/Forensic: не критично для Quick-профілю, і на
+        # частині машин (VM без vTPM, Legacy BIOS) обидва запити стабільно
+        # "не підтримується" — щоб не подовжувати найшвидший профіль зайвими
+        # WMI/cmdlet-викликами без цінності.
+        if ($Profile -in @('Full','Deep','Forensic')) {
+            try {
+                $secureBootEnabled = Confirm-SecureBootUEFI -ErrorAction Stop
+                $script:Report.Security.SecureBoot.Supported = $true
+                $script:Report.Security.SecureBoot.Enabled = [bool]$secureBootEnabled
+                $script:Report.Security.SecureBoot.Status = if ($secureBootEnabled) { 'Enabled' } else { 'Disabled' }
+
+                if (-not $secureBootEnabled) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
+                }
+            } catch {
+                # Confirm-SecureBootUEFI кидає виняток і на Legacy BIOS (немає
+                # UEFI — Secure Boot фізично неможливий), і на частині VM —
+                # це штатний стан машини, не помилка збору (Add-AuditError
+                # НЕ викликається, щоб не давати хибний exit code 1 на кожній
+                # Legacy BIOS/VM-машині).
+                $script:Report.Security.SecureBoot.Supported = $false
+                $script:Report.Security.SecureBoot.Status = 'NotSupported'
+                $script:Report.Security.SecureBoot.Error = $_.Exception.Message
+            }
+
+            try {
+                $tpmInfo = Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftTpm' -ClassName 'Win32_Tpm' -ErrorAction Stop | Select-Object -First 1
+
+                if ($tpmInfo) {
+                    $script:Report.Security.TPM.Present = $true
+                    $script:Report.Security.TPM.Enabled = [bool]$tpmInfo.IsEnabled_InitialValue
+                    $script:Report.Security.TPM.Activated = [bool]$tpmInfo.IsActivated_InitialValue
+                    $script:Report.Security.TPM.Ready = $script:Report.Security.TPM.Enabled -and $script:Report.Security.TPM.Activated
+                    $script:Report.Security.TPM.ManufacturerId = [string]$tpmInfo.ManufacturerId
+                    $script:Report.Security.TPM.ManufacturerVersion = [string]$tpmInfo.ManufacturerVersion
+                    $script:Report.Security.TPM.SpecVersion = [string]$tpmInfo.SpecVersion
+                    $script:Report.Security.TPM.Status = 'Detected'
+
+                    if (-not $script:Report.Security.TPM.Ready) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.TPM' -Message 'TPM присутній, але не увімкнений/не активований повністю.' -Recommendation 'Увімкніть і активуйте TPM у UEFI/BIOS — потрібен для BitLocker, Windows Hello, Credential Guard.'
+                    }
+                } else {
+                    $script:Report.Security.TPM.Present = $false
+                    $script:Report.Security.TPM.Status = 'NotPresent'
+                }
+            } catch {
+                # Клас Win32_Tpm/namespace відсутній — типово означає відсутність
+                # фізичного/firmware TPM (старе обладнання, VM без vTPM), не
+                # помилка збору (та сама логіка, що й для Secure Boot вище).
+                $script:Report.Security.TPM.Present = $false
+                $script:Report.Security.TPM.Status = 'NotPresent'
+                $script:Report.Security.TPM.Error = $_.Exception.Message
+            }
+
+            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status)" -ForegroundColor Green
         }
 
         Write-Host "  $IconSecurity Безпека: RDP=$(if($script:Report.Security.RemoteAccess.RDPEnabled){'ON'}else{'OFF'}), UAC=$(if($script:Report.Security.UAC.Enabled){'ON'}else{'OFF'})" -ForegroundColor Green
@@ -3404,7 +3484,7 @@ function Export-BravoHtmlReport {
     <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml '.NET оновлення' $(if($script:Report.DotNet.UpdateAvailable){"Доступне (найновіша: $($script:Report.DotNet.LatestKnownVersion))"}else{'Немає'}))$(New-BravoInfoRowHtml 'PowerShell 7 (Core)' $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'Не встановлено'}))$(New-BravoInfoRowHtml 'PowerShell 7 оновлення' $(if($script:Report.PowerShell.Core7UpdateAvailable){"Доступне (найновіша: $($script:Report.PowerShell.Core7LatestKnown))"}else{'Немає'}))$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Service' $script:Report.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Installed hotfixes' $script:Report.WindowsUpdate.InstalledHotFixCount)$(New-BravoInfoRowHtml 'Last hotfix' "$($script:Report.WindowsUpdate.LastInstalledHotFix) ($($script:Report.WindowsUpdate.LastInstallDate))")$(New-BravoInfoRowHtml 'Pending reboot' $(if($script:Report.WindowsUpdate.PendingRebootRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Pending updates' $script:Report.WindowsUpdate.PendingCount)$(New-BravoInfoRowHtml 'Pending critical / security' "$($script:Report.WindowsUpdate.PendingCritical) / $($script:Report.WindowsUpdate.PendingSecurity)")$(New-BravoInfoRowHtml 'Search status' $script:Report.WindowsUpdate.SearchStatus)</div></div><h3>Pending Windows Updates</h3>$(New-BravoTableToolbarHtml -TableId 'table-pending-updates' -Placeholder 'Пошук по KB, назві, severity...')<div class="table-scroll"><table id="table-pending-updates" class="data-table"><thead><tr><th>KB</th><th>Назва</th><th>Severity</th><th>Категорії</th><th>Завантажено</th><th>Size MB</th><th>Посилання</th></tr></thead><tbody>$updatesPendingRows</tbody></table></div></section>
     <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System-reserved (без літери)</div><div class="storage-summary-value"><span class="risk risk-unknown">$reservedCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div></section>
     <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th></tr></thead><tbody>$adapterRows</tbody></table></div></section>
-    <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div></div></section>
+    <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div><div class="card"><h3>Secure Boot / TPM</h3>$(New-BravoInfoRowHtml 'Secure Boot' $script:Report.Security.SecureBoot.Status)$(New-BravoInfoRowHtml 'TPM' $script:Report.Security.TPM.Status)$(New-BravoInfoRowHtml 'TPM Ready' $(if($null -eq $script:Report.Security.TPM.Ready){'N/A'}elseif($script:Report.Security.TPM.Ready){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'TPM Manufacturer' $script:Report.Security.TPM.ManufacturerId)$(New-BravoInfoRowHtml 'TPM Spec Version' $script:Report.Security.TPM.SpecVersion)</div></div></section>
     <section id="tab-services" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">⚙️</span>Services</h2><div class="grid"><div class="card"><h3>Service summary</h3>$(New-BravoInfoRowHtml 'Processes' $script:Report.Processes.Total)$(New-BravoInfoRowHtml 'Services running' "$($script:Report.Services.Running)/$($script:Report.Services.Total)")$(New-BravoInfoRowHtml 'Automatic stopped' $script:Report.Services.AutomaticStopped.Count)$(New-BravoInfoRowHtml "System errors ($EventLogDays дн.)" $script:Report.EventLogs.SystemErrors)$(New-BravoInfoRowHtml "System warnings ($EventLogDays дн.)" $script:Report.EventLogs.SystemWarnings)</div></div><h3>Automatic stopped services</h3>$(New-BravoTableToolbarHtml -TableId 'table-services-stopped' -Placeholder 'Пошук по службах...')<div class="table-scroll"><table id="table-services-stopped" class="data-table"><thead><tr><th>Name</th><th>DisplayName</th><th>StartType</th><th>Status</th></tr></thead><tbody>$serviceRows</tbody></table></div><h3>Топ джерел помилок System log ($EventLogDays дн.)</h3>$(New-BravoTableToolbarHtml -TableId 'table-events-top-sources' -Placeholder 'Пошук по джерелах помилок...')<div class="table-scroll"><table id="table-events-top-sources" class="data-table"><thead><tr><th>Source</th><th>Count</th><th>Останнє повідомлення</th></tr></thead><tbody>$eventTopErrorRows</tbody></table></div></section>
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>
     <section id="tab-updates" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔄</span>Updates</h2><div class="grid"><div class="card"><h3>Життєвий цикл ОС</h3>$(New-BravoInfoRowHtml 'Продукт' $script:Report.Updates.OS.Product)$(New-BravoInfoRowHtml 'Версія' $script:Report.Updates.OS.DisplayVersion)$(New-BravoInfoRowHtml 'Версія з реєстру' $script:Report.Updates.OS.RegistryDisplayVersion)$(New-BravoInfoRowHtml 'Full build' $script:Report.Updates.OS.FullBuild)$(New-BravoInfoRowHtml 'Канал' $script:Report.Updates.OS.Channel)$(New-BravoInfoRowHtml 'EditionID' $script:Report.Updates.OS.EditionId)$(New-BravoInfoRowHtml 'Кінець підтримки' $script:Report.Updates.OS.SupportEndDate)$(New-BravoInfoRowHtml 'Днів до кінця підтримки' $script:Report.Updates.OS.DaysToEndOfSupport)<div class="info-row"><span class="info-label">Статус підтримки</span><span class="info-value"><span class="status-pill $updatesSupportStatusClass">$(ConvertTo-BravoHtmlText $updatesSupportStatusText)</span></span></div>$(New-BravoInfoRowHtml 'Дані lifecycle від' $script:Report.Updates.OS.LifecycleDataUpdatedAt)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Служба wuauserv' $script:Report.Updates.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Тип запуску' $script:Report.Updates.WindowsUpdate.ServiceStartType)$(New-BravoInfoRowHtml 'Політика оновлень' $script:Report.Updates.WindowsUpdate.AutoUpdateOption)$(New-BravoInfoRowHtml 'WSUS' $(if($script:Report.Updates.WindowsUpdate.ManagedByWSUS){$script:Report.Updates.WindowsUpdate.WSUSServer}else{'Ні'}))$(New-BravoInfoRowHtml 'Останній пошук' $script:Report.Updates.WindowsUpdate.LastDetectSuccess)$(New-BravoInfoRowHtml 'Остання установка' $script:Report.Updates.WindowsUpdate.LastInstallSuccess)$(New-BravoInfoRowHtml 'Потрібне перезавантаження' $pendingRebootText)$(New-BravoInfoRowHtml 'Статус пошуку' $updatesSearchStatusText)$(New-BravoInfoRowHtml 'Тривалість пошуку, сек' $script:Report.Updates.Search.DurationSeconds)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Потрібно встановити</div><div class="storage-summary-value">$($script:Report.Updates.Pending.Total)$(if($script:Report.Updates.Pending.IsTruncated){" <span class=`"risk risk-warning`">детально: $($script:Report.Updates.Pending.Detailed)</span>"})</div></div><div class="storage-summary-item"><div class="storage-summary-label">Security</div><div class="storage-summary-value"><span class="risk risk-critical">$($script:Report.Updates.Pending.Security)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Драйвери</div><div class="storage-summary-value"><span class="risk risk-warning">$($script:Report.Updates.Pending.Driver)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Завантажено</div><div class="storage-summary-value"><span class="risk risk-ok">$($script:Report.Updates.Pending.Downloaded)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Обсяг, MB</div><div class="storage-summary-value">$($script:Report.Updates.Pending.TotalSizeMB)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Встановлено оновлень</div><div class="storage-summary-value">$($script:Report.Updates.Installed.Total)</div></div></div><h3>Оновлення, які потрібно встановити</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-pending' -Placeholder 'Пошук по назві, KB, категорії...')<div class="table-scroll"><table id="table-updates-pending" class="data-table"><thead><tr><th>Title</th><th>KB</th><th>Categories</th><th>Severity</th><th>Size MB</th><th>Downloaded</th><th>Released</th></tr></thead><tbody>$pendingUpdatesRows</tbody></table></div><h3>Останні встановлені оновлення</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-installed' -Placeholder 'Пошук по KB, опису, користувачу...')<div class="table-scroll"><table id="table-updates-installed" class="data-table"><thead><tr><th>HotFixID</th><th>Description</th><th>Installed by</th><th>Installed on</th></tr></thead><tbody>$installedUpdatesRows</tbody></table></div></section>
@@ -3529,6 +3609,8 @@ function Export-BravoCsvReport {
                 [PSCustomObject]@{Parameter='IPv4'; Value=($script:Report.Network.IP.IPv4 -join '; ')}
                 [PSCustomObject]@{Parameter='RDP_Enabled'; Value=$script:Report.Security.RemoteAccess.RDPEnabled}
                 [PSCustomObject]@{Parameter='UAC_Enabled'; Value=$script:Report.Security.UAC.Enabled}
+                [PSCustomObject]@{Parameter='SecureBoot_Status'; Value=$script:Report.Security.SecureBoot.Status}
+                [PSCustomObject]@{Parameter='TPM_Status'; Value=$script:Report.Security.TPM.Status}
                 [PSCustomObject]@{Parameter='Processes'; Value=$script:Report.Processes.Total}
                 [PSCustomObject]@{Parameter='Running_Services'; Value=$script:Report.Services.Running}
                 [PSCustomObject]@{Parameter='AutomaticStoppedServices'; Value=$script:Report.Services.AutomaticStopped.Count}
