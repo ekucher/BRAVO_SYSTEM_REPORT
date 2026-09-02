@@ -197,7 +197,7 @@
 - [ ] TXT summary.
 - [ ] Markdown summary для Redmine/GitHub.
 - [ ] HTML filters/collapsible sections.
-- [ ] Findings grouped by severity/category.
+- [x] Findings grouped by severity/category (`Get-BravoFindingsGrouped`, `src/40-Health.ps1` — чиста функція, сортує CRITICAL→WARNING→INFO, потім за Category; вкладка Findings у HTML-звіті тепер сортована за цим порядком + плитки-лічильники Critical/Warning/Info зверху таблиці; та сама функція буде перевикористана для TXT/Markdown summary).
 - [ ] Copy-friendly support summary.
 - [ ] JSON schema documentation.
 

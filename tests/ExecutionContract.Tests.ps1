@@ -685,6 +685,11 @@ Describe 'v0.6.1 — Dark Mode markers присутні в HTML-виводі' -S
         $script:DarkModeHtml | Should -Match ':root\[data-theme="dark"\]'
         $script:DarkModeHtml | Should -Match 'prefers-color-scheme:\s*dark'
     }
+
+    It 'вкладка Findings містить згруповані Critical/Warning/Info плитки (v0.6.0 Reports and UX)' {
+        $script:DarkModeHtml | Should -Match 'tab-findings'
+        $script:DarkModeHtml | Should -Match 'storage-summary-grid'
+    }
 }
 
 Describe 'v0.6.1 — Edge CLI PDF (-ExportPdf)' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {

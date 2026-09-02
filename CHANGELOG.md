@@ -1,4 +1,11 @@
-﻿## Unreleased — v0.6.1: Edge CLI PDF (закриває v0.6.1 повністю)
+﻿## Unreleased — v0.6.0: Findings grouped by severity/category
+
+- Нова чиста функція `Get-BravoFindingsGrouped` (`src/40-Health.ps1`) — сортує `Health.Findings` за severity (`CRITICAL` → `WARNING` → `INFO`, невідомий severity в кінець), потім за `Category`; рахує підсумкові лічильники `CriticalCount`/`WarningCount`/`InfoCount`. Покрита 5 unit-тестами (`tests/FindingsGrouped.Tests.ps1`).
+- Вкладка Findings у HTML-звіті тепер показує findings у сортованому порядку (раніше — у порядку збору, без структури) + нові плитки-лічильники Critical/Warning/Info зверху таблиці (той самий стиль `storage-summary-grid`, що й на вкладці Hardware/Storage).
+- Функція спроєктована для перевикористання в TXT/Markdown summary (наступні пункти v0.6.0 Reports and UX) — єдина точка групування для всіх форматів звіту.
+- Тести: +5 unit +1 E2E (перевикористовує наявний Dark Mode E2E-прогін, без додаткового запуску).
+
+## Unreleased — v0.6.1: Edge CLI PDF (закриває v0.6.1 повністю)
 
 **v0.6.1 Interactive HTML Dashboard & Tabs секцію тепер повністю закрито.**
 

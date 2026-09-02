@@ -1,6 +1,34 @@
 ﻿# MODULE: 40-Health.ps1
 # Розрахунок підсумкової оцінки стану машини.
 
+# Чиста функція: сортує findings за severity (CRITICAL -> WARNING -> INFO ->
+# невідомий severity в кінець), потім за Category — і рахує підсумкові
+# лічильники по severity. Використовується і HTML-звітом (вкладка Findings),
+# і TXT/Markdown summary (v0.6.0 Reports and UX) — єдина точка групування,
+# щоб усі формати показували ту саму сортовану/згруповану картину.
+function Get-BravoFindingsGrouped {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        $Findings
+    )
+
+    $severityOrder = @{ CRITICAL = 0; WARNING = 1; INFO = 2 }
+
+    $sorted = @($Findings) | Sort-Object -Property `
+        @{ Expression = { if ($severityOrder.ContainsKey($_.Severity)) { $severityOrder[$_.Severity] } else { 99 } } }, `
+        @{ Expression = { [string]$_.Category } }
+
+    return [PSCustomObject]@{
+        Sorted        = $sorted
+        CriticalCount = @($sorted | Where-Object { $_.Severity -eq 'CRITICAL' }).Count
+        WarningCount  = @($sorted | Where-Object { $_.Severity -eq 'WARNING' }).Count
+        InfoCount     = @($sorted | Where-Object { $_.Severity -eq 'INFO' }).Count
+    }
+}
+
 function Update-BravoHealthScore {
     [CmdletBinding()]
     param()
