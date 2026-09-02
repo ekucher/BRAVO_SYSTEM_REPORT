@@ -1,4 +1,13 @@
-﻿## Unreleased — fix: BitLocker/Secure Boot вимкнено — INFO, не WARNING; Storage Deep таблиця узгоджена з Findings
+﻿## Unreleased — Security Baseline: UAC full policy
+
+- **Security.UAC** розширено повною політикою (`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`): `ConsentPromptBehaviorAdminCode`/`ConsentPromptBehaviorAdminText`, `ConsentPromptBehaviorUserCode`/`ConsentPromptBehaviorUserText`, `PromptOnSecureDesktop`, `FilterAdministratorToken`.
+- Дві нові чисті функції `Get-BravoUacAdminPromptText`/`Get-BravoUacUserPromptText` (`src/34-Collectors-Security.ps1`) мапують DWORD-код у людяний опис (Elevate without prompting / Prompt for credentials/consent / ...) — покриті 6 unit-тестами (`tests/UacPromptText.Tests.ps1`).
+- WARNING лише для найризикованішого `ConsentPromptBehaviorAdmin=0` ("Elevate without prompting" — підвищення привілеїв без запиту, повністю нівелює захист UAC). Відсутність налаштування (`$null`) — штатний дефолт групової політики, не помилка.
+- Поля існували як завжди-порожня заглушка (`UAC=[ordered]@{Enabled=$false}`); тепер реально заповнюються — `SchemaVersion` піднято `0.6.16` → `0.6.17`.
+- HTML: нова картка 'UAC full policy' на вкладці Security.
+- Тести: +6 unit +1 E2E.
+
+## Unreleased — fix: BitLocker/Secure Boot вимкнено — INFO, не WARNING; Storage Deep таблиця узгоджена з Findings
 
 За результатами аналізу Health Score на реальному звіті виявлено дві проблеми:
 
