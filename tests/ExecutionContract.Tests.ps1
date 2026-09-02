@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -330,6 +330,23 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
         foreach ($gpu in $gpuList) {
             $gpu.Name | Should -Not -BeNullOrEmpty
         }
+    }
+
+    It 'Network.Adapters мають нові поля LinkSpeed/Status/DriverVersion/DriverProvider, і хоча б один адаптер має непорожній Status' {
+        $adapters = @($script:DeepSecurityReport.Network.Adapters)
+        $adapters.Count | Should -BeGreaterThan 0
+
+        foreach ($adapter in $adapters) {
+            $adapter.PSObject.Properties.Name | Should -Contain 'LinkSpeed'
+            $adapter.PSObject.Properties.Name | Should -Contain 'Status'
+            $adapter.PSObject.Properties.Name | Should -Contain 'DriverVersion'
+            $adapter.PSObject.Properties.Name | Should -Contain 'DriverProvider'
+        }
+
+        # Report.Network.Adapters збирається лише для адаптерів з IPEnabled=True,
+        # тож на реальній машині принаймні один має бути активним і мати
+        # непорожній Status після збагачення через Get-NetAdapter.
+        ($adapters | Where-Object { $_.Status }).Count | Should -BeGreaterThan 0
     }
 }
 

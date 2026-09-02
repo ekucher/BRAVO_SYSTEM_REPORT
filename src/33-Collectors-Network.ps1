@@ -43,6 +43,43 @@ function Get-BravoNetworkAudit {
                 Gateway     = @($adapterConfig.DefaultIPGateway)
                 DNS         = @($adapterConfig.DNSServerSearchOrder)
                 DNSSuffixSearchOrder = @($adapterConfig.DNSDomainSuffixSearchOrder)
+                LinkSpeed      = ''
+                Status         = ''
+                DriverVersion  = ''
+                DriverProvider = ''
+            }
+        }
+
+        # --- Збагачення адаптерів: link speed, status, driver (v0.5.0 Network
+        # Audit) ---
+        # Get-NetAdapter покриває всі мережеві інтерфейси (включно з тими, що
+        # не мають IP — вимкнені/від'єднані), тоді як цикл вище йде лише по
+        # Win32_NetworkAdapterConfiguration з IPEnabled=True. Тому збагачуємо
+        # ЛИШЕ вже наявні записи (адаптери з IP) за MAC-адресою — не додаємо
+        # нові рядки з Get-NetAdapter, щоб не змінювати семантику "Adapters" з
+        # "інтерфейси з IP" на "усі мережеві інтерфейси в системі" (це окрема
+        # задача, якщо колись знадобиться). Гейтовано Full/Deep/Forensic —
+        # той самий принцип, що й RAM.Modules/Chassis/Motherboard/GPU.
+        if ($Profile -in @('Full','Deep','Forensic') -and (Get-Command Get-NetAdapter -ErrorAction SilentlyContinue)) {
+            try {
+                $netAdapterByMac = @{}
+                foreach ($netAdapter in (Get-NetAdapter -ErrorAction Stop)) {
+                    $normalizedMac = ([string]$netAdapter.MacAddress) -replace '[:\-]', ''
+                    if ($normalizedMac) { $netAdapterByMac[$normalizedMac] = $netAdapter }
+                }
+
+                foreach ($adapterEntry in $script:Report.Network.Adapters) {
+                    $normalizedMac = ([string]$adapterEntry.MACAddress) -replace '[:\-]', ''
+                    if ($normalizedMac -and $netAdapterByMac.ContainsKey($normalizedMac)) {
+                        $matchedNetAdapter = $netAdapterByMac[$normalizedMac]
+                        $adapterEntry.LinkSpeed      = [string]$matchedNetAdapter.LinkSpeed
+                        $adapterEntry.Status         = [string]$matchedNetAdapter.Status
+                        $adapterEntry.DriverVersion  = [string]$matchedNetAdapter.DriverVersion
+                        $adapterEntry.DriverProvider = [string]$matchedNetAdapter.DriverProvider
+                    }
+                }
+            } catch {
+                Add-AuditError -Section 'Network.AdapterDetails' -Message $_.Exception.Message
             }
         }
 
