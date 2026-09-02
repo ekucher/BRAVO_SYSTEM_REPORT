@@ -1,4 +1,18 @@
-﻿## Unreleased — Hardware Inventory: Monitors (закриває секцію повністю)
+﻿## Unreleased — fix: BitLocker/Secure Boot вимкнено — INFO, не WARNING; Storage Deep таблиця узгоджена з Findings
+
+За результатами аналізу Health Score на реальному звіті виявлено дві проблеми:
+
+1. **Дві знахідки штрафували Health Score/Status як реальні проблеми**, хоча є поширеним свідомим станом машини (dev-машина, десктоп без фізичного ризику крадіжки, обґрунтований виняток):
+   - `Storage.BitLocker` — "Системний том C: не захищений BitLocker" (`src/32-Collectors-Storage.ps1`).
+   - `Security.SecureBoot` — "Secure Boot підтримується, але вимкнено" (`src/34-Collectors-Security.ps1`).
+
+   Обидві знахідки понижено з `WARNING` до `INFO` — інформація й далі публікується в звіті (`Health.Findings`), але `Update-BravoHealthScore` рахує в Score/Status лише `CRITICAL`/`WARNING`, тож `INFO`-знахідки більше не знижують оцінку і не переводять Status у `WARNING`.
+
+2. **HTML-таблиця "Storage Deep" незалежно рахувала WARNING/CRITICAL** для томів без літери диска (WinRE/EFI/MSR), розбігаючись із Findings-зведенням вище на тій самій сторінці — `Get-BravoStorageRiskSummary` (`src/32-Collectors-Storage.ps1`, PR #54) вже виключає такі томи як `ReservedVolumes`, але сама таблиця "Storage Deep" (`src/51-Export-Html.ps1`) рахувала risk по тому самому FreePercent-порогу для ВСІХ томів, включно з майже завжди заповненим WinRE (~0.88 GB, 5.98% вільно → хибний WARNING). Виправлено: том без `DriveLetter` тепер отримує `RESERVED` (клас `risk-unknown`, той самий, що й "System-reserved" плитка в summary), а не `CRITICAL`/`WARNING` за порогом.
+
+Без змін контракту моделі, без бампу SchemaVersion.
+
+## Unreleased — Hardware Inventory: Monitors (закриває секцію повністю)
 
 **Hardware Inventory секцію тепер повністю закрито.**
 

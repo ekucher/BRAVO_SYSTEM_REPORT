@@ -141,7 +141,11 @@ function Get-BravoSecurityAudit {
                 $script:Report.Security.SecureBoot.Status = if ($secureBootEnabled) { 'Enabled' } else { 'Disabled' }
 
                 if (-not $secureBootEnabled) {
-                    Add-AuditFinding -Severity 'WARNING' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
+                    # INFO, не WARNING: Secure Boot вимкнений — поширений
+                    # свідомий вибір (dual-boot, старіше/специфічне обладнання,
+                    # dev-машини) — не впливає на Health Score/Status, лише
+                    # фіксується в звіті як факт стану.
+                    Add-AuditFinding -Severity 'INFO' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
                 }
             } catch {
                 # Confirm-SecureBootUEFI кидає виняток і на Legacy BIOS (немає
