@@ -1,4 +1,18 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: SMART/NVMe health (останній пункт Storage Audit)
+﻿## Unreleased — v0.5.0 Deep Inventory: Event Logs summary (System/Application/Setup/Security)
+
+Три пункти v0.5.0 Deep Inventory / Updates and Event Logs в одному PR: per-log summary (System/Application/Setup/Security), Provider summary, Critical/Error/Warning grouping.
+
+- Нова чиста функція `ConvertTo-BravoEventLogSummary` (`src/37-Collectors-Events.ps1`) групує вже отримані `Get-WinEvent`-записи в Critical/Error/Warning-лічильники й топ-10 провайдерів — винесена окремо від I/O, покрита 4 unit-тестами (`tests/EventLogSummary.Tests.ps1`).
+- **EventLogs.LogSummaries[]** — по одному запису на кожен з 4 журналів (System/Application/Setup/Security): LogName/Status/CriticalCount/ErrorCount/WarningCount/TopProviders. Гейтовано `-Profile Full/Deep/Forensic` (4 окремих `Get-WinEvent`-запити дорожчі за Quick-профільний бюджет часу).
+- **Свідоме рішення (locale-safety)**: "за період немає жодного запису" — штатний benign-результат `Get-WinEvent`, розпізнається за locale-незалежним `FullyQualifiedErrorId` (`NoMatchingEventsFound,Microsoft.PowerShell.Commands.GetWinEventCommand`), а НЕ за текстом винятку `.Exception.Message` (локалізується разом з MUI-пакетом Windows) — той самий принцип, що вже застосовувався для `Get-EventLog` вище в тому самому файлі.
+- CRITICAL-finding, якщо будь-який з 4 журналів містить хоча б одну Critical-подію за період.
+- Журнал відсутній (напр. Setup log на деяких Server Core збірках) або недоступний — `Status='Unavailable'`, окремо для цього журналу, решта журналів продовжують оброблятись.
+- Поле вже існувало як завжди-порожня заглушка (`EventLogs.LogSummaries=@()`); тепер реально заповнюється — `SchemaVersion` піднято `0.6.12` → `0.6.13`.
+- HTML: нові таблиці 'Event Logs: System / Application / Setup / Security' і 'Provider Summary' на вкладці Services.
+- Sanitize: НЕ додано — узгоджено з уже наявним `EventLogs.TopErrorSources[].LastMessage` (System log), який теж не маскується; повідомлення подій журналів свідомо поза межами поточної Sanitize-моделі (як і раніше).
+- Тести: +4 unit + 1 E2E (`ExecutionContract.Tests.ps1`, той самий `-Profile Deep` прогін, перейменовано на `.../EventLogSummary`).
+
+## Unreleased — v0.5.0 Deep Inventory: SMART/NVMe health (останній пункт Storage Audit)
 
 **Storage Audit секцію v0.5.0 Deep Inventory тепер повністю закрито.**
 
