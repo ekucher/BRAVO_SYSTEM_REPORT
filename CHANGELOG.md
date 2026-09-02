@@ -1,4 +1,9 @@
-﻿## Unreleased — v0.7.0 CI: Parser check per-file для src/*.ps1
+﻿## Unreleased — v0.7.0 CI: Full runtime test
+
+- Новий `Describe 'v0.7.0 CI/Quality Gates — Full runtime test'` (`tests/ExecutionContract.Tests.ps1`) — окремий наскрізний прогін `-Profile Full -Offline` (не Deep/Forensic, які вже переперевикористовуються всіма v0.5.0 Deep Inventory Describe-блоками). Перевіряє exit code 0, `CollectionErrors=0`/`ExportErrors=0`, JSON валідний, `Profile='Full'` у звіті, та Full-специфічні поля реально заповнені (не залишились дефолтом Quick): `Network.Adapters[].Status` (збагачення `Get-NetAdapter`, PR #60), `Hardware.Motherboard` (PR #59).
+- М'яке твердження для Motherboard (Manufacturer АБО Product непорожні) — той самий принцип, що й у аналогічному Deep-тесті вище, деякі VM/hypervisor лишають `Manufacturer` порожнім.
+
+## Unreleased — v0.7.0 CI: Parser check per-file для src/*.ps1
 
 - Новий `tests/SourceParserCheck.Tests.ps1` — синтаксична перевірка КОЖНОГО `src/*.ps1` файлу окремо через `[System.Management.Automation.Language.Parser]::ParseFile` (той самий AST-based підхід, що й уже наявний крок "PowerShell parser check for dist" у `.github/workflows/local-windows-validation.yml`, застосований до окремих модулів, а не лише до зібраного монолітного `dist/Get-BravoSystemReport.ps1`).
 - Перевага над "лише dist": помилка вказує на конкретний вихідний файл і рядок, а не на зсунуту позицію всередині згенерованого монолітного файлу.
