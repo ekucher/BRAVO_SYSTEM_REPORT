@@ -272,7 +272,7 @@
 - [x] Базовий Pester-набір (`tests/`: чисті helper-функції, консистентність build-маніфесту, наскрізний E2E-прогін), запускається і в CI, і локально через `Invoke-Pester tests/`.
 - [x] Parser check для всіх `src/*.ps1` (окремо від `dist`) — `tests/SourceParserCheck.Tests.ps1`, той самий AST-based `[System.Management.Automation.Language.Parser]::ParseFile` підхід, що вже застосовувався для `dist` у CI (`local-windows-validation.yml`), тепер по кожному `src/*.ps1` окремо; помилка вказує на конкретний вихідний файл і рядок, а не на зсунуту позицію всередині зібраного монолітного `dist`.
 - [x] Quick BAT test (`tests/ReleasePackage.Tests.ps1` — `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого release package, наскрізно через справжній `.bat`, не лише через wrapper).
-- [ ] Full runtime test.
+- [x] Full runtime test (`tests/ExecutionContract.Tests.ps1`, `Describe 'v0.7.0 CI/Quality Gates — Full runtime test'` — наскрізний прогін `-Profile Full -Offline`, перевіряє exit code 0/CollectionErrors=0/ExportErrors=0 та Full-специфічні поля, яких немає на Quick, — Network.Adapters.Status і Hardware.Motherboard).
 - [ ] Forensic smoke test з `-JSONOnly`.
 - [x] Release package build test (`tests/ReleasePackage.Tests.ps1`).
 - [x] Release package unpack-and-run test (`tests/ReleasePackage.Tests.ps1`).

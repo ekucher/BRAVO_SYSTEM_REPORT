@@ -584,6 +584,52 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
     }
 }
 
+Describe 'v0.7.0 CI/Quality Gates — Full runtime test' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    # Окремий наскрізний прогін -Profile Full (не Deep/Forensic) — перевіряє,
+    # що середній за обсягом профіль реально працює end-to-end, а не лише
+    # Quick (базовий CI-гейт) і Deep (переперевикористовується для всіх
+    # v0.5.0 Deep Inventory Describe-блоків вище). Full не гейтує деякі
+    # Deep/Forensic-only колектори (Autoruns/ScheduledTasks/SMART/тощо), тому
+    # їх тут навмисно НЕ перевіряємо — лише поля, які штатно збираються вже
+    # на Full.
+    BeforeAll {
+        $script:FullRuntimeDir = New-BravoTestReportsDir -Name 'full-runtime'
+        & $script:WrapperPath -Profile Full -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $script:FullRuntimeDir 2>&1 | Out-Null
+        $script:FullRuntimeExitCode = $LASTEXITCODE
+
+        $jsonFile = Get-ChildItem -LiteralPath $script:FullRuntimeDir -Filter '*.json' -Recurse | Select-Object -First 1
+        $script:FullRuntimeReport = Get-Content -LiteralPath $jsonFile.FullName -Raw | ConvertFrom-Json
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:FullRuntimeDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'завершується exit code 0, JSON валідний, CollectionErrors=0' {
+        $script:FullRuntimeExitCode | Should -Be 0
+        $script:FullRuntimeReport | Should -Not -BeNullOrEmpty
+        @($script:FullRuntimeReport.CollectionErrors).Count | Should -Be 0
+        @($script:FullRuntimeReport.ExportErrors).Count | Should -Be 0
+    }
+
+    It 'Profile у звіті дорівнює Full, і Full-специфічні поля реально заповнені (не залишились дефолтом Quick)' {
+        $script:FullRuntimeReport.Profile | Should -Be 'Full'
+
+        # Network.Adapters збагачується LinkSpeed/Status лише на Full/Deep/
+        # Forensic (Get-NetAdapter, PR #60) — на Quick цих полів взагалі
+        # немає в наявних записах.
+        $adaptersWithStatus = @($script:FullRuntimeReport.Network.Adapters | Where-Object { $_.Status })
+        $adaptersWithStatus.Count | Should -BeGreaterThan 0
+
+        # Chassis/Motherboard — Full/Deep/Forensic-only (PR #59). М'яке
+        # твердження (Manufacturer АБО Product), як і в аналогічному
+        # Deep-тесті вище — деякі VM/hypervisor лишають Manufacturer порожнім.
+        $manufacturer = [string]$script:FullRuntimeReport.Hardware.Motherboard.Manufacturer
+        $product = [string]$script:FullRuntimeReport.Hardware.Motherboard.Product
+        ($manufacturer -or $product) | Should -BeTrue
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'
