@@ -1,4 +1,16 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Network adapters speed/status/driver
+﻿## Unreleased — v0.5.0 Deep Inventory: SMBv1 + TLS registry status
+
+П'ятий пункт v0.5.0 Deep Inventory (Security Baseline) — два класичні security-показники.
+
+- **SMBv1** через `Get-SmbServerConfiguration` (`EnableSMB1Protocol`) — новий блок у `src/34-Collectors-Security.ps1`, гейтовано `-Profile Full/Deep/Forensic`. WARNING-finding, якщо увімкнено (застарілий, вразливий протокол — EternalBlue/WannaCry). Модуль `SmbShare` відсутній (застарілий Windows) -> `Security.SMBv1.Status='NotAvailable'`, не помилка збору.
+- **TLS registry status** (TLS 1.0/1.1/1.2/1.3, Client+Server — 8 записів) через SCHANNEL registry (`HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\<protocol>\<side>`). Нова чиста функція `Get-BravoTlsProtocolStatus` інтерпретує пару `Enabled`/`DisabledByDefault` DWORD у `Enabled`/`Disabled`/`NotConfigured` за документованою Microsoft семантикою; покрито 6 unit-тестами (`tests/TlsProtocolStatus.Tests.ps1`).
+- Findings лише для явних відхилень від безпечного дефолту: TLS 1.0/1.1 явно увімкнено через реєстр (WARNING) або TLS 1.2 явно вимкнено (WARNING, ризик сумісності). `NotConfigured` (найпоширеніший стан — адмін нічого не змінював, діє ОС-дефолт) НЕ породжує finding.
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Security.SMBv1.{Enabled,Status,Error}`, `Security.TLS.Protocols[].{Protocol,Side,Enabled,DisabledByDefault,Status}`. `SchemaVersion` піднято `0.6.5` → `0.6.6`.
+- HTML Dashboard: SMBv1 додано до картки "Secure Boot / TPM / SMBv1", нова таблиця "TLS registry status" на вкладці Security (`src/51-Export-Html.ps1`).
+- 2 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / SMBv1 / TLS'` (перейменовано), той самий `-Profile Deep` прогін.
+
+Усі 96 Pester-тестів проходять (88 попередніх + 6 unit + 2 E2E). `dist` перебудовано, sha512 звірено.
+## Unreleased — v0.5.0 Deep Inventory: Network adapters speed/status/driver
 
 Четвертий пункт v0.5.0 Deep Inventory (Network Audit) — деталі мережевих адаптерів.
 
