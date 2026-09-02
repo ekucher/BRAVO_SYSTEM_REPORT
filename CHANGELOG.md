@@ -1,4 +1,11 @@
-﻿## Unreleased — v0.6.0: Findings grouped by severity/category
+﻿## Unreleased — v0.6.0: JSON schema documentation
+
+- Новий `docs/SCHEMA.md` — навігаційна документація структури `$script:Report`: кожен верхньорівневий розділ моделі (`Meta`, `Dashboard`, `Health`, `OS`, `Hardware`, `Network`, `Security`, `EventLogs`, `Software`, `Updates` тощо) з коротким описом призначення, ключовими полями та посиланням на відповідний `src/3X-Collectors-*.ps1`. Не документує кожне поле дослівно — фокус на навігації для розробника, що вперше бачить схему.
+- Розділ про `SchemaVersion` (поточне значення, семантика PATCH-інкременту) і явно сформульоване правило "нова/змінена форма моделі → бампнути SchemaVersion в тому самому коміті" — те саме правило, яке вже застосовувалось у кожному PR цієї сесії, тепер задокументоване в одному місці.
+- Закриває одночасно два пункти ROADMAP: "JSON schema documentation" (v0.6.0 Reports and UX) і "Додати `docs/SCHEMA.md`" (Технічний борг) — той самий документ.
+- Тести: +3 sanity (`tests/DocsSchema.Tests.ps1` — файл існує, згадує `SchemaVersion`, згадує кожен верхньорівневий розділ моделі).
+
+## Unreleased — v0.6.0: Findings grouped by severity/category
 
 - Нова чиста функція `Get-BravoFindingsGrouped` (`src/40-Health.ps1`) — сортує `Health.Findings` за severity (`CRITICAL` → `WARNING` → `INFO`, невідомий severity в кінець), потім за `Category`; рахує підсумкові лічильники `CriticalCount`/`WarningCount`/`InfoCount`. Покрита 5 unit-тестами (`tests/FindingsGrouped.Tests.ps1`).
 - Вкладка Findings у HTML-звіті тепер показує findings у сортованому порядку (раніше — у порядку збору, без структури) + нові плитки-лічильники Critical/Warning/Info зверху таблиці (той самий стиль `storage-summary-grid`, що й на вкладці Hardware/Storage).
