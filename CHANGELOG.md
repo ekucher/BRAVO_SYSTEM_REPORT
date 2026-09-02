@@ -1,4 +1,15 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Chassis type, Motherboard, GPU
+﻿## Unreleased — v0.5.0 Deep Inventory: Network adapters speed/status/driver
+
+Четвертий пункт v0.5.0 Deep Inventory (Network Audit) — деталі мережевих адаптерів.
+
+- `Get-NetAdapter` у `src/33-Collectors-Network.ps1`, гейтовано `-Profile Full/Deep/Forensic` (той самий принцип, що й RAM.Modules/Chassis/Motherboard/GPU у попередніх PR цієї сесії) — збагачує вже наявні записи `Network.Adapters[]` (побудовані з `Win32_NetworkAdapterConfiguration`, `IPEnabled=True`) за MAC-адресою: `LinkSpeed`, `Status`, `DriverVersion`, `DriverProvider`.
+- **Свідоме архітектурне рішення**: збагачення відбувається лише для вже наявних адаптерів (з IP), НЕ додає нові рядки з `Get-NetAdapter` для адаптерів без IP (вимкнені/від'єднані) — інакше змінилась би семантика поля "Adapters" з "інтерфейси з IP" на "усі мережеві інтерфейси в системі", що є окремою потенційною задачею, не цим пунктом ROADMAP.
+- `SchemaVersion` піднято `0.6.4` → `0.6.5`.
+- HTML: таблиця Network Adapters отримала колонки Link Speed/Status/Driver (`src/51-Export-Html.ps1`).
+- 1 новий Pester-тест у тому самому `Describe 'v0.5.0 Deep Inventory — ... / Network Adapters'` (перейменовано), той самий `-Profile Deep` E2E-прогін.
+
+Усі 88 Pester-тестів проходять (87 попередніх + 1 новий). `dist` перебудовано, sha512 звірено.
+## Unreleased — v0.5.0 Deep Inventory: Chassis type, Motherboard, GPU
 
 Третій пункт v0.5.0 Deep Inventory (Hardware Inventory) — базові дані про корпус, материнську плату й відеокарти.
 

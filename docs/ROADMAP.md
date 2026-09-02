@@ -148,7 +148,7 @@
 - [x] Primary IPv4 detection.
 - [x] Public IPv4 detection без виводу значення у консоль.
 - [x] Listening ports з OwningProcess.
-- [ ] Network adapters: name, MAC, speed, status, driver.
+- [x] Network adapters: name, MAC, speed, status, driver (name/MAC вже збирались; `Get-NetAdapter` у `src/33-Collectors-Network.ps1`, гейтовано Full/Deep/Forensic, збагачує наявні записи `Network.Adapters[]` за MAC-адресою — `LinkSpeed`/`Status`/`DriverVersion`/`DriverProvider`; НЕ додає нові рядки для адаптерів без IP, щоб не змінювати семантику "Adapters" з "інтерфейси з IP" на "усі мережеві інтерфейси в системі").
 - [ ] Routing table.
 - [ ] ARP/Neighbor table.
 - [ ] Listening ports з ProcessName.
