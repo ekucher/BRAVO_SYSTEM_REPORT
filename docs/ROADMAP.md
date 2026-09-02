@@ -140,7 +140,7 @@
 - [x] Pagefile (`Win32_PageFileUsage`, `src/32-Collectors-Storage.ps1`, вже було реалізовано в `Get-BravoStorageDeepAudit` — `Hardware.Disks.Deep.PageFiles[]`; помічено при перегляді ROADMAP і позначено заднім числом).
 - [x] Shadow Copies / VSS (`Win32_ShadowCopy`, `src/32-Collectors-Storage.ps1`, гейтовано Deep/Forensic через `Get-BravoStorageDeepAudit`; `Hardware.Disks.Deep.ShadowCopies[]` — ID/VolumeName/InstallDate/ClientAccessible/Persistent; відсутність точок відновлення — штатний стан, не помилка).
 - [x] Storage Spaces (`Get-StoragePool`, `src/32-Collectors-Storage.ps1`, гейтовано Deep/Forensic; `Hardware.Disks.Deep.StoragePools[]` — FriendlyName/HealthStatus/OperationalStatus/SizeGB/AllocatedGB/IsReadOnly; виключено `IsPrimordial` пул — прихований "сирий" пул фізичних дисків, не реальний Storage Spaces; WARNING якщо HealthStatus не Healthy; модуль Storage відсутній або Storage Spaces не використовується — штатний стан, порожній масив).
-- [ ] SMART/NVMe health, якщо доступно штатними засобами.
+- [x] SMART/NVMe health, якщо доступно штатними засобами (`src/32-Collectors-Storage.ps1`, гейтовано Deep/Forensic; `Hardware.Disks.Deep.ReliabilityCounters[]` через `Get-PhysicalDisk | Get-StorageReliabilityCounter` — Temperature/Wear/ReadErrorsUncorrected/WriteErrorsUncorrected/PowerOnHours, WARNING на некоригованих помилках або Wear≥90%; `Hardware.Disks.Deep.SmartPredictFailures[]` через легасі `MSStorageDriver_FailurePredictStatus` WMI-клас у `root\wmi` — типово недоступний на NVMe/RAID-контролерах, це штатне обмеження драйвера, не помилка збору; CRITICAL-finding при PredictFailure=True).
 
 ### Network Audit
 
