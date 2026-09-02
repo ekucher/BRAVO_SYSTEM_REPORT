@@ -36,6 +36,7 @@ BeforeAll {
                 Connections = [ordered]@{ ListeningPorts = @([PSCustomObject]@{ LocalAddress = '192.168.1.10' }) }
             }
             Users = [ordered]@{ LocalAdmins = @('jdoe', 'Administrator') }
+            Security = [ordered]@{ RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker') } }
             Software = [ordered]@{ Installed = @([PSCustomObject]@{ InstallLocation = 'C:\Users\jdoe\AppData\Local\SomeApp' }) }
         }
     }
@@ -91,8 +92,9 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Hardware.Disks.Deep.Disks[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
     }
 
-    It 'маскує локальних адміністраторів і install path ПЗ' {
+    It 'маскує локальних адміністраторів, дозволених RDP-користувачів і install path ПЗ' {
         $script:report.Users.LocalAdmins | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Security.RemoteAccess.AllowedUsers | Should -Match '^REDACTED-ADMIN-'
         $script:report.Software.Installed[0].InstallLocation | Should -Match '^REDACTED-PATH-'
     }
 

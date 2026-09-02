@@ -1,6 +1,7 @@
 ﻿# MODULE: 34-Collectors-Security.ps1
-# Збір інформації про UAC, RDP, антивірус, Windows Firewall, Secure Boot, TPM,
-# SMBv1, TLS registry status та деталі Windows Defender.
+# Збір інформації про UAC, RDP (+NLA/port/firewall scope/allowed users),
+# антивірус, Windows Firewall, Secure Boot, TPM, SMBv1, TLS registry status,
+# деталі Windows Defender, WinRM (listeners/auth) та SMB signing.
 
 # Чиста функція: інтерпретує пару SCHANNEL registry DWORD (Enabled,
 # DisabledByDefault — HKLM:\...\SecurityProviders\SCHANNEL\Protocols\<protocol>\<Client|Server>)
@@ -52,7 +53,7 @@ function Get-BravoSecurityAudit {
             $script:Report.Security.RemoteAccess.RDPEnabled = ($rdp.fDenyTSConnections -eq 0)
 
             if ($script:Report.Security.RemoteAccess.RDPEnabled) {
-                Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Перевірте NLA, firewall scope і список дозволених користувачів.'
+                Add-AuditFinding -Severity 'INFO' -Category 'RemoteAccess' -Message 'RDP увімкнено.' -Recommendation 'Деталі NLA/firewall scope/дозволених користувачів — див. Security.RemoteAccess у звіті (Full/Deep/Forensic профілі); окремі WARNING породжуються автоматично, якщо NLA не вимагається або firewall-scope занадто широкий.'
             }
         } else {
             Add-AuditError -Section 'Security.RemoteAccess' -Message 'Не вдалося прочитати ключ реєстру fDenyTSConnections — стан RDP невідомий.'
@@ -240,7 +241,128 @@ function Get-BravoSecurityAudit {
                 $script:Report.Security.Defender.Status = 'NotAvailable'
             }
 
-            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status), Defender: $($script:Report.Security.Defender.Status)" -ForegroundColor Green
+            # --- RDP details: NLA, port, firewall scope, allowed users ---
+            if ($script:Report.Security.RemoteAccess.RDPEnabled) {
+                try {
+                    $rdpTcpConfig = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -ErrorAction SilentlyContinue
+                    if ($rdpTcpConfig) {
+                        $script:Report.Security.RemoteAccess.NLAEnabled = ($rdpTcpConfig.UserAuthentication -eq 1)
+                        $script:Report.Security.RemoteAccess.Port = $rdpTcpConfig.PortNumber
+
+                        if (-not $script:Report.Security.RemoteAccess.NLAEnabled) {
+                            Add-AuditFinding -Severity 'WARNING' -Category 'RemoteAccess' -Message 'RDP увімкнено, але Network Level Authentication (NLA) не вимагається.' -Recommendation 'Увімкніть вимогу NLA для RDP (UserAuthentication=1), якщо немає застарілих клієнтів, що не підтримують NLA.'
+                        }
+                    }
+                } catch {
+                    Add-AuditError -Section 'Security.RemoteAccess.NLA' -Message $_.Exception.Message
+                }
+
+                # RemoteDesktop-UserMode-In-TCP — вбудоване, НЕ локалізоване ім'я
+                # правила (на відміну від DisplayGroup/DisplayName, які на
+                # неанглійських збірках Windows перекладені й ненадійні для
+                # програмного пошуку).
+                if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
+                    try {
+                        $rdpFirewallRule = Get-NetFirewallRule -Name 'RemoteDesktop-UserMode-In-TCP' -ErrorAction Stop
+                        $script:Report.Security.RemoteAccess.FirewallProfiles = $rdpFirewallRule.Profile.ToString()
+
+                        if ($rdpFirewallRule.Enabled) {
+                            $rdpAddressFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rdpFirewallRule -ErrorAction Stop
+                            $script:Report.Security.RemoteAccess.FirewallScope = ($rdpAddressFilter.RemoteAddress -join ', ')
+
+                            if ($script:Report.Security.RemoteAccess.FirewallScope -eq 'Any' -and $rdpFirewallRule.Profile.ToString() -match 'Public') {
+                                Add-AuditFinding -Severity 'WARNING' -Category 'RemoteAccess' -Message 'RDP firewall-правило дозволяє підключення з будь-якої адреси (RemoteAddress=Any) у Public-профілі.' -Recommendation 'Обмежте RemoteAddress конкретними підмережами/VPN-діапазоном, особливо для Public-профілю фаєрвола.'
+                            }
+                        }
+                    } catch {
+                        # Вбудоване правило відсутнє/перейменоване (нетипова
+                        # конфігурація) — не помилка збору, просто немає даних.
+                    }
+                }
+
+                if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
+                    try {
+                        $rdpGroupMembers = Get-LocalGroupMember -Group 'Remote Desktop Users' -ErrorAction Stop
+                        $script:Report.Security.RemoteAccess.AllowedUsers = @($rdpGroupMembers | ForEach-Object { $_.Name })
+                    } catch {
+                        # Група "Remote Desktop Users" може не існувати
+                        # (локалізована назва на не-EN збірках, або взагалі
+                        # відсутня) — не помилка збору.
+                    }
+                }
+            }
+
+            # --- WinRM: listeners, auth ---
+            $winrmService = Get-Service -Name 'WinRM' -ErrorAction SilentlyContinue
+            if ($winrmService) {
+                $script:Report.Security.WinRM.ServiceStatus = $winrmService.Status.ToString()
+
+                if ($winrmService.Status -eq 'Running') {
+                    try {
+                        $winrmListeners = Get-ChildItem 'WSMan:\localhost\Listener' -ErrorAction Stop
+                        foreach ($listener in $winrmListeners) {
+                            $listenerProps = Get-ChildItem $listener.PSPath -ErrorAction Stop
+                            $script:Report.Security.WinRM.Listeners += [PSCustomObject]@{
+                                Transport = ($listenerProps | Where-Object { $_.Name -eq 'Transport' }).Value
+                                Port      = ($listenerProps | Where-Object { $_.Name -eq 'Port' }).Value
+                                Enabled   = ($listenerProps | Where-Object { $_.Name -eq 'Enabled' }).Value
+                            }
+                        }
+
+                        $winrmAuth = Get-ChildItem 'WSMan:\localhost\Service\Auth' -ErrorAction Stop
+                        foreach ($authSetting in @('Basic', 'Kerberos', 'Negotiate', 'Certificate', 'CredSSP')) {
+                            $matchedAuthSetting = $winrmAuth | Where-Object { $_.Name -eq $authSetting }
+                            if ($matchedAuthSetting) {
+                                $script:Report.Security.WinRM.Auth[$authSetting] = [System.Convert]::ToBoolean($matchedAuthSetting.Value)
+                            }
+                        }
+
+                        $script:Report.Security.WinRM.Status = 'Detected'
+
+                        if ($script:Report.Security.WinRM.Auth.Basic -eq $true) {
+                            Add-AuditFinding -Severity 'WARNING' -Category 'Security.WinRM' -Message 'WinRM Basic authentication увімкнено.' -Recommendation 'Вимкніть Basic auth для WinRM, якщо немає обґрунтованої потреби — креденшели передаються без надійного захисту поза HTTPS-транспортом.'
+                        }
+
+                        if ($script:Report.Security.WinRM.Auth.CredSSP -eq $true) {
+                            Add-AuditFinding -Severity 'WARNING' -Category 'Security.WinRM' -Message 'WinRM CredSSP authentication увімкнено.' -Recommendation 'CredSSP дозволяє делегування креденшелів (ризик relay/pass-the-hash) — вимкніть, якщо не потрібен саме подвійний hop.'
+                        }
+                    } catch {
+                        Add-AuditError -Section 'Security.WinRM' -Message $_.Exception.Message
+                    }
+                } else {
+                    $script:Report.Security.WinRM.Status = 'ServiceNotRunning'
+                }
+            } else {
+                $script:Report.Security.WinRM.Status = 'NotAvailable'
+            }
+
+            # --- SMB signing / insecure guest access ---
+            if (Get-Command Get-SmbServerConfiguration -ErrorAction SilentlyContinue) {
+                try {
+                    $smbServerConfig = Get-SmbServerConfiguration -ErrorAction Stop
+                    $smbClientConfig = Get-SmbClientConfiguration -ErrorAction Stop
+
+                    $script:Report.Security.SMB.ServerSigningRequired = [bool]$smbServerConfig.RequireSecuritySignature
+                    $script:Report.Security.SMB.ServerSigningEnabled = [bool]$smbServerConfig.EnableSecuritySignature
+                    $script:Report.Security.SMB.ClientSigningRequired = [bool]$smbClientConfig.RequireSecuritySignature
+                    $script:Report.Security.SMB.InsecureGuestLogonsEnabled = [bool]$smbClientConfig.EnableInsecureGuestLogons
+                    $script:Report.Security.SMB.Status = 'Detected'
+
+                    if (-not $script:Report.Security.SMB.ServerSigningRequired) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.SMB' -Message 'SMB server signing не є обов''язковим (RequireSecuritySignature=False).' -Recommendation 'Увімкніть обов''язковий SMB signing на сервері — знижує ризик SMB relay-атак (напр. NTLM relay).'
+                    }
+
+                    if ($script:Report.Security.SMB.InsecureGuestLogonsEnabled) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.SMB' -Message 'SMB client дозволяє insecure guest logons.' -Recommendation 'Вимкніть EnableInsecureGuestLogons — небезпечний fallback на неавтентифікований guest-доступ до SMB-серверів.'
+                    }
+                } catch {
+                    Add-AuditError -Section 'Security.SMB' -Message $_.Exception.Message
+                }
+            } else {
+                $script:Report.Security.SMB.Status = 'NotAvailable'
+            }
+
+            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status), Defender: $($script:Report.Security.Defender.Status), WinRM: $($script:Report.Security.WinRM.Status)" -ForegroundColor Green
         }
 
         Write-Host "  $IconSecurity Безпека: RDP=$(if($script:Report.Security.RemoteAccess.RDPEnabled){'ON'}else{'OFF'}), UAC=$(if($script:Report.Security.UAC.Enabled){'ON'}else{'OFF'})" -ForegroundColor Green

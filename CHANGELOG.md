@@ -1,4 +1,18 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Defender details
+﻿## Unreleased — v0.5.0 Deep Inventory: RDP NLA/scope + WinRM + SMB signing
+
+Сьомий, восьмий і дев'ятий пункти v0.5.0 Deep Inventory (Security Baseline) — три remote-access security перевірки в одному PR.
+
+- **RDP details**: NLA, port, firewall scope, дозволені користувачі. Firewall-правило шукається за незалежним від локалізації ім'ям `RemoteDesktop-UserMode-In-TCP` (не за `DisplayGroup`/`DisplayName`, які на не-EN збірках Windows перекладені й ненадійні для програмного пошуку — перевірено вручну на UA-локалізованій машині, `Get-NetFirewallRule -DisplayGroup 'Remote Desktop'` не знаходить нічого). WARNING якщо NLA не вимагається; WARNING якщо `RemoteAddress=Any` у Public-профілі фаєрвола.
+- **WinRM**: listeners (`WSMan:\localhost\Listener`) і auth-методи (`WSMan:\localhost\Service\Auth`) — лише коли служба `WinRM` реально `Running` (інакше WSMan-провайдер недоступний). WARNING якщо Basic auth увімкнено; WARNING якщо CredSSP увімкнено.
+- **SMB signing / insecure guest access**: `Get-SmbServerConfiguration`/`Get-SmbClientConfiguration`. WARNING якщо server signing не обов'язковий (`RequireSecuritySignature=False`); WARNING якщо `EnableInsecureGuestLogons=True`.
+- Усі три — гейтовано `-Profile Full/Deep/Forensic`; RDP-блок додатково виконується лише коли `RDPEnabled=True` (немає сенсу перевіряти NLA/scope на вимкненому RDP).
+- **Sanitize**: нове поле `Security.RemoteAccess.AllowedUsers` (список імен облікових записів — та сама категорія чутливості, що й `Users.LocalAdmins`) тепер теж маскується (`src/45-Sanitize.ps1`, той самий `$maskAdmin`), і в Basic, і в Strict рівні. Новий тест-кейс у `tests/Sanitize.Tests.ps1`.
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Security.RemoteAccess.{NLAEnabled,Port,FirewallScope,FirewallProfiles,AllowedUsers}`, `Security.WinRM.{ServiceStatus,Listeners,Auth,Status,Error}`, `Security.SMB.{ServerSigningRequired,ServerSigningEnabled,ClientSigningRequired,InsecureGuestLogonsEnabled,Status,Error}`. `SchemaVersion` піднято `0.6.7` → `0.6.8`.
+- HTML: три нові картки — "RDP details", "WinRM", "SMB signing" на вкладці Security (`src/51-Export-Html.ps1`).
+- 3 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / RDP / WinRM / SMB signing'` (перейменовано), той самий `-Profile Deep` прогін.
+
+Усі 101 Pester-тест проходить (98 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
+## Unreleased — v0.5.0 Deep Inventory: Defender details
 
 Шостий пункт v0.5.0 Deep Inventory (Security Baseline) — деталі Windows Defender.
 

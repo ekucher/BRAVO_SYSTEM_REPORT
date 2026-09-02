@@ -132,6 +132,12 @@ function Invoke-BravoReportSanitization {
         $Report.Users.LocalAdmins = @($Report.Users.LocalAdmins | ForEach-Object { & $maskAdmin $_ })
     }
 
+    # --- Дозволені RDP-користувачі (та сама категорія імен облікових записів,
+    # що й LocalAdmins — той самий маскер, узгоджені токени в межах звіту) ---
+    if ($Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.AllowedUsers) {
+        $Report.Security.RemoteAccess.AllowedUsers = @($Report.Security.RemoteAccess.AllowedUsers | ForEach-Object { & $maskAdmin $_ })
+    }
+
     # --- Чутливі шляхи встановлення ПЗ ---
     if ($Report.Software -and $Report.Software.Installed) {
         foreach ($item in @($Report.Software.Installed)) {
