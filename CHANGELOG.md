@@ -1,4 +1,13 @@
-﻿## Unreleased — v0.7.0 CI: Forensic -JSONOnly smoke test + HTML/JSONOnly validation (закриває v0.7.0 CI/Quality Gates повністю)
+﻿## Unreleased — v0.6.1: Dark Mode
+
+- CSS-змінні для card/nav/table поверхонь HTML-звіту (`--panel`, `--nav-bg`, `--btn-bg`, `--tab-panel-bg`, `--metric-card-bg`, `--toolbar-bg`, `--search-bg`, `--table-scroll-bg`, `--th-bg`, `--storage-item-bg`, `--progress-track`, `--title-text`) — заміняють раніше hardcoded hex-кольори в `src/51-Export-Html.ps1`.
+- `@media (prefers-color-scheme: dark)` — дефолтна темна палітра без явного вибору користувача (system-рівень).
+- `:root[data-theme="dark"]`/`[data-theme="light"]` override — явний вибір користувача перемагає системний дефолт в обидва боки.
+- Кнопка `theme-toggle` в header (🌙/☀️), JS `toggleTheme()` перемикає атрибут `data-theme` на `<html>`.
+- Вибір теми зберігається через `localStorage`, обгорнуто в try/catch — на `file://` протоколі деякі браузери обмежують доступ (SecurityError), тоді тема перемикається лише в межах поточної сесії перегляду, без збереження між відкриттями файлу (не критично, звіт відкривається offline).
+- Print CSS (`@media print`) свідомо лишається завжди білим — для друку тема не має значення.
+
+## Unreleased — v0.7.0 CI: Forensic -JSONOnly smoke test + HTML/JSONOnly validation (закриває v0.7.0 CI/Quality Gates повністю)
 
 **v0.7.0 CI/Quality Gates тепер повністю закрито.**
 

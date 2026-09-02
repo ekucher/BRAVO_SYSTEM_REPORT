@@ -667,6 +667,26 @@ Describe 'v0.7.0 CI/Quality Gates — Forensic -JSONOnly smoke test / HTML-JSONO
     }
 }
 
+Describe 'v0.6.1 — Dark Mode markers присутні в HTML-виводі' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    BeforeAll {
+        $script:DarkModeDir = New-BravoTestReportsDir -Name 'darkmode-markers'
+        & $script:WrapperPath -Profile Quick -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $script:DarkModeDir 2>&1 | Out-Null
+        $htmlFile = Get-ChildItem -LiteralPath $script:DarkModeDir -Filter '*.html' -Recurse | Select-Object -First 1
+        $script:DarkModeHtml = Get-Content -LiteralPath $htmlFile.FullName -Raw
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:DarkModeDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'HTML містить theme-toggle кнопку, функцію toggleTheme та CSS-визначення :root[data-theme]' {
+        $script:DarkModeHtml | Should -Match 'id="theme-toggle"'
+        $script:DarkModeHtml | Should -Match 'toggleTheme'
+        $script:DarkModeHtml | Should -Match ':root\[data-theme="dark"\]'
+        $script:DarkModeHtml | Should -Match 'prefers-color-scheme:\s*dark'
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'
