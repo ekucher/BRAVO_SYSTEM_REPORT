@@ -1,4 +1,16 @@
-﻿## Unreleased — Security Baseline: Autoruns
+﻿## Unreleased — Security Baseline: Scheduled tasks (закриває секцію повністю)
+
+**Security Baseline секцію v0.5.0 Deep Inventory тепер повністю закрито.**
+
+- **Security.ScheduledTasks[]** через `Get-ScheduledTask` — Name/Path/State/Author/Execute/Arguments/IsMicrosoftDefault. Гейтовано Deep/Forensic (`src/34-Collectors-Security.ps1`).
+- Вбудовані задачі Windows (`TaskPath` під `\Microsoft\Windows\*`, типово 200-300+ на кожній машині) не приховуються з моделі — позначаються прапорцем `IsMicrosoftDefault=true`. HTML-таблиця за замовчуванням показує лише не-Microsoft задачі, з лічильником прихованих у заголовку — той самий принцип "дані видимі, findings обережні", що вже застосований для ARP/Storage ReservedVolumes.
+- Sanitize: `Author` (часто `DOMAIN\username`) — категорія ADMIN (та сама, що й `LocalAdmins`/`AllowedUsers`). `Execute`/`Arguments` — категорія PATH (як і `Autoruns[].Command`).
+- Модуль `Get-ScheduledTask` відсутній (деякі Server Core збірки) — штатний стан, порожній масив.
+- Поле існувало як завжди-порожня заглушка; тепер реально заповнюється — `SchemaVersion` піднято `0.6.18` → `0.6.19`.
+- HTML: нова таблиця 'Scheduled Tasks' на вкладці Security.
+- Тести: +1 Sanitize +1 E2E.
+
+## Unreleased — Security Baseline: Autoruns
 
 - **Security.Autoruns[]** — реєстрові ключі Run/RunOnce у HKLM/HKCU (+ Wow6432Node на 64-bit) та папки автозавантаження User/AllUsers Startup. Кожен запис: Name/Command/Source/Hive. Гейтовано окремо `-Profile Deep/Forensic` (не Full — суттєво більший обсяг даних, ніж решта Security-блоку).
 - Нова чиста функція `ConvertFrom-BravoRegistryKeyProperties` (`src/34-Collectors-Security.ps1`) витягує реальні Name/Value пари з `Get-ItemProperty`, відкидаючи службові `PS*`-метавластивості (`PSPath`/`PSParentPath`/`PSChildName`/`PSDrive`/`PSProvider`) — покрита 3 unit-тестами (`tests/RegistryKeyProperties.Tests.ps1`).

@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors / ConnectionsProcessName+SmbShares / UacFullPolicy / Autoruns' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors / ConnectionsProcessName+SmbShares / UacFullPolicy / Autoruns / ScheduledTasks' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -563,6 +563,24 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
             $entry.Source | Should -Not -BeNullOrEmpty
             $entry.Hive | Should -BeIn @('HKLM', 'HKCU')
         }
+    }
+
+    It 'Security.ScheduledTasks заповнений на реальній машині, кожен запис має Name/Path/IsMicrosoftDefault, і принаймні одна Microsoft-задача позначена прапорцем' {
+        if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Get-ScheduledTask недоступний на цій машині — нема що перевіряти'
+            return
+        }
+
+        $tasks = @($script:DeepSecurityReport.Security.ScheduledTasks)
+        $tasks.Count | Should -BeGreaterThan 0
+
+        foreach ($task in $tasks) {
+            $task.Name | Should -Not -BeNullOrEmpty
+            $task.Path | Should -Not -BeNullOrEmpty
+            $task.IsMicrosoftDefault | Should -BeIn @($true, $false)
+        }
+
+        ($tasks | Where-Object { $_.IsMicrosoftDefault }).Count | Should -BeGreaterThan 0
     }
 }
 

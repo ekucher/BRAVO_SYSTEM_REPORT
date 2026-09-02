@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.18'
+    SchemaVersion = '0.6.19'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -208,6 +208,7 @@ return [ordered]@{
             Error = ''
         }
         Autoruns = @()
+        ScheduledTasks = @()
     }
     Users = [ordered]@{ LocalAdmins=@() }
     Processes = [ordered]@{ Total=0; TopMemory=@() }
