@@ -242,11 +242,13 @@ function Get-BravoStorageRiskSummary {
         WarningVolumes             = @()
         SystemVolumeWarnings       = @()
         HealthyVolumes             = @()
+        ReservedVolumes            = @()
         Summary                    = [ordered]@{
             CriticalCount           = 0
             WarningCount            = 0
             SystemWarningCount      = 0
             HealthyCount            = 0
+            ReservedCount           = 0
         }
     }
 
@@ -303,6 +305,19 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
+        # Томи без літери диска (WinRE/EFI System Partition/MSR) — системно-
+        # зарезервовані розділи фіксованого розміру, недоступні користувачу
+        # через Провідник чи звичайне очищення файлів. WinRE Partition (типово
+        # ~0.5-1 GB) майже завжди заповнений на 90%+ образом відновлення — це
+        # штатний стан Windows, а не ризик, що потребує дій. Виводити їх у
+        # Critical/Warning findings і знижувати Health Score на КОЖНІЙ Windows-
+        # машині було б систематичним false positive. Дані про них лишаються
+        # видимими в таблиці Storage Deep (без Add-AuditFinding).
+        if (-not $driveLetter) {
+            $risk.ReservedVolumes += $volumeRisk
+            continue
+        }
+
         if ($freePercent -lt $criticalThreshold) {
             $risk.CriticalVolumes += $volumeRisk
 
@@ -346,6 +361,7 @@ function Get-BravoStorageRiskSummary {
     $risk.Summary.WarningCount = @($risk.WarningVolumes).Count
     $risk.Summary.SystemWarningCount = @($risk.SystemVolumeWarnings).Count
     $risk.Summary.HealthyCount = @($risk.HealthyVolumes).Count
+    $risk.Summary.ReservedCount = @($risk.ReservedVolumes).Count
 
     return [PSCustomObject]$risk
 }

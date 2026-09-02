@@ -1,4 +1,12 @@
-﻿## Unreleased — docs: закрито пункт "уніфікувати network schema" (ROADMAP v0.4.2)
+﻿## Unreleased — fix: false-positive WARNING на WinRE/EFI-розділах без літери диска
+
+- **Проблема**: Get-BravoStorageRiskSummary (src/32-Collectors-Storage.ps1) оцінював томи без літери диска (Windows Recovery Environment partition, EFI System Partition) тими самими порогами вільного місця (5%/10%), що й звичайні томи з даними. WinRE Partition — фіксованого розміру (типово ~0.5-1 GB) і майже завжди заповнений на 90%+ образом відновлення, недоступний користувачу через Провідник чи звичайне очищення файлів. Це породжувало WARNING finding (`Storage.FreeSpace`) практично на КОЖНІЙ Windows 10/11 машині — systematic false positive, що штучно знижував Health Score.
+- **Фікс**: томи без `DriveLetter` тепер виносяться в окремий бакет `ReservedVolumes` (`Summary.ReservedCount`) — не потрапляють у `CriticalVolumes`/`WarningVolumes`, не викликають `Add-AuditFinding`, не впливають на Health Score. Дані про них лишаються видимими в таблиці `Storage Deep` (HTML), і в Dashboard додано окрему плитку "System-reserved (без літери)" (`src/51-Export-Html.ps1`) — щоб не ховати інформацію мовчки, а явно показати, що ці томи свідомо виключені з ризик-оцінки.
+- Нові тести в `tests/StorageThresholds.Tests.ps1` (`Describe 'Get-BravoStorageRiskSummary'`, 3 тести): том без літери з 5.98% вільного НЕ породжує finding; той самий % З літерою диска — далі породжує Warning; том без літери з достатнім вільним місцем потрапляє у `ReservedVolumes`, а не `HealthyVolumes`.
+
+Усі 68 Pester-тестів проходять (65 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
+
+## Unreleased — docs: закрито пункт "уніфікувати network schema" (ROADMAP v0.4.2)
 
 Пункт ROADMAP "Уніфікувати network schema" перевірено і закрито без змін коду — станом на 2026-09-02 у кодовій базі й так немає top-level дублікатів `Network.IPv4`/`Network.PrimaryIPv4`/`Network.PublicIPv4`. Єдине джерело правди — вкладена структура `Network.IP.{IPv4, PrimaryIPv4, PrimaryInterface, PublicIPv4*}`, оголошена в `src/20-ReportModel.ps1` і послідовно використовувана в `src/33-Collectors-Network.ps1`, `src/45-Sanitize.ps1`, `src/51-Export-Html.ps1`, `src/52-Export-Csv.ps1`. Історичні баги з неправильним шляхом (`Network.PrimaryIPv4` замість `Network.IP.PrimaryIPv4`) вже виправлені в попередніх раундах (див. записи нижче про CI/HTML export).
 

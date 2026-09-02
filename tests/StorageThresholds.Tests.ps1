@@ -5,6 +5,24 @@
 
 BeforeAll {
     . (Join-Path $PSScriptRoot '..\src\32-Collectors-Storage.ps1')
+
+    # Get-BravoStorageRiskSummary викликає Add-AuditFinding (визначену в
+    # src/90-Main.ps1, який небезпечно dot-source'ити цілком — виконує
+    # elevation-логіку на top-level). Легкий локальний stub з тим самим
+    # сигнатурним контрактом, щоб перехоплювати виклики без побічних ефектів.
+    function Add-AuditFinding {
+        param(
+            [string]$Severity,
+            [string]$Category,
+            [string]$Message,
+            [string]$Recommendation = ''
+        )
+        $script:CapturedFindings += [PSCustomObject]@{
+            Severity = $Severity
+            Category = $Category
+            Message  = $Message
+        }
+    }
 }
 
 Describe 'Get-BravoStorageThresholds' {
@@ -42,5 +60,82 @@ Describe 'Get-BravoStorageFreeSpaceSeverity' {
 
     It 'повертає Unknown, якщо FreePercent відсутній' {
         Get-BravoStorageFreeSpaceSeverity -FreePercent $null | Should -Be 'Unknown'
+    }
+}
+
+Describe 'Get-BravoStorageRiskSummary' {
+    BeforeEach {
+        $script:CapturedFindings = @()
+    }
+
+    It 'том без літери диска (WinRE/EFI) НЕ породжує Critical/Warning finding, навіть при 5.98% вільного' {
+        $storageDeep = [PSCustomObject]@{
+            Volumes = @(
+                [PSCustomObject]@{
+                    DriveLetter = $null
+                    FileSystemLabel = ''
+                    FileSystem = 'NTFS'
+                    DriveType = 'Fixed'
+                    HealthStatus = 'Healthy'
+                    SizeGB = 0.88
+                    FreeGB = 0.05
+                    FreePercent = 5.98
+                }
+            )
+        }
+
+        $risk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+        $risk.Summary.CriticalCount | Should -Be 0
+        $risk.Summary.WarningCount | Should -Be 0
+        $risk.Summary.ReservedCount | Should -Be 1
+        @($risk.ReservedVolumes).Count | Should -Be 1
+        @($script:CapturedFindings).Count | Should -Be 0
+    }
+
+    It 'том З літерою диска і тим самим % вільного місця ДАЛІ породжує Warning finding' {
+        $storageDeep = [PSCustomObject]@{
+            Volumes = @(
+                [PSCustomObject]@{
+                    DriveLetter = 'D'
+                    FileSystemLabel = 'DATA'
+                    FileSystem = 'NTFS'
+                    DriveType = 'Fixed'
+                    HealthStatus = 'Healthy'
+                    SizeGB = 1863
+                    FreeGB = 84.21
+                    FreePercent = 5.98
+                }
+            )
+        }
+
+        $risk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+        $risk.Summary.WarningCount | Should -Be 1
+        $risk.Summary.ReservedCount | Should -Be 0
+        @($script:CapturedFindings).Count | Should -Be 1
+        $script:CapturedFindings[0].Category | Should -Be 'Storage.FreeSpace'
+    }
+
+    It 'том без літери диска ІЗ достатнім вільним місцем також потрапляє у ReservedVolumes, а не HealthyVolumes' {
+        $storageDeep = [PSCustomObject]@{
+            Volumes = @(
+                [PSCustomObject]@{
+                    DriveLetter = $null
+                    FileSystemLabel = ''
+                    FileSystem = 'FAT32'
+                    DriveType = 'Fixed'
+                    HealthStatus = 'Healthy'
+                    SizeGB = 0.09
+                    FreeGB = 0.06
+                    FreePercent = 63.93
+                }
+            )
+        }
+
+        $risk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+        $risk.Summary.ReservedCount | Should -Be 1
+        $risk.Summary.HealthyCount | Should -Be 0
     }
 }
