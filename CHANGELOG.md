@@ -3,7 +3,7 @@
 Перший пункт v0.5.0 Deep Inventory (Hardware Inventory) — Deep Security базові дані.
 
 - **Secure Boot** (`Confirm-SecureBootUEFI`) і **TPM** (`Win32_Tpm` CIM-клас у `root\cimv2\Security\MicrosoftTpm`) — новий блок у `src/34-Collectors-Security.ps1`, гейтовано `-Profile Full/Deep/Forensic` (не критично для найшвидшого Quick-профілю).
-- Нові поля моделі (`src/20-ReportModel.ps1`): `Security.SecureBoot.{Supported,Enabled,Status,Error}`, `Security.TPM.{Present,Ready,Enabled,Activated,ManufacturerId,ManufacturerVersion,SpecVersion,Status,Error}`.
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Security.SecureBoot.{Supported,Enabled,Status,Error}`, `Security.TPM.{Present,Ready,Enabled,Activated,ManufacturerId,ManufacturerVersion,SpecVersion,Status,Error}`. `SchemaVersion` піднято `0.6.1` → `0.6.2` (адитивна зміна контракту, п.6 `docs/AI_RULES.md`).
 - **Свідоме рішення**: Legacy BIOS (Secure Boot фізично неможливий) і відсутність TPM (VM без vTPM, старе обладнання) — штатні стани машини (`Status = 'NotSupported'`/`'NotPresent'`), НЕ `Add-AuditError` — інакше кожна VM чи Legacy BIOS машина отримувала б `CollectionErrors > 0` і, як наслідок, exit code 1 за замовчуванням (той самий принцип, що й для WinRE-розділів раніше в цій сесії).
 - Findings: WARNING, якщо Secure Boot підтримується, але вимкнено; WARNING, якщо TPM присутній, але не увімкнений/активований повністю (`Ready = Enabled -and Activated`).
 - HTML Dashboard: нова картка "Secure Boot / TPM" на вкладці Security (`src/51-Export-Html.ps1`). CSV: `SecureBoot_Status`/`TPM_Status` (`src/52-Export-Csv.ps1`).

@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-02 13:56:42
+    GeneratedAt: 2026-09-02 14:10:46
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -440,7 +440,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.1'
+    SchemaVersion = '0.6.2'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
