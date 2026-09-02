@@ -137,9 +137,9 @@
 - [x] Physical disks: basic model, serial, size, media type/status.
 - [x] Findings для низького вільного місця.
 - [x] BitLocker status (`Get-BitLockerVolume`, `src/32-Collectors-Storage.ps1`, гейтовано Deep/Forensic через `Get-BravoStorageDeepAudit`; `Hardware.Disks.Deep.BitLocker[]` — MountPoint/VolumeType/VolumeStatus/EncryptionPercentage/EncryptionMethod/ProtectionStatus/LockStatus/AutoUnlockEnabled; WARNING-finding лише для незахищеного системного тому, не для data-томів — той самий принцип, що й WinRE-фікс, аби уникнути WARNING на кожній звичайній робочій станції).
-- [ ] Pagefile.
-- [ ] Shadow Copies / VSS.
-- [ ] Storage Spaces.
+- [x] Pagefile (`Win32_PageFileUsage`, `src/32-Collectors-Storage.ps1`, вже було реалізовано в `Get-BravoStorageDeepAudit` — `Hardware.Disks.Deep.PageFiles[]`; помічено при перегляді ROADMAP і позначено заднім числом).
+- [x] Shadow Copies / VSS (`Win32_ShadowCopy`, `src/32-Collectors-Storage.ps1`, гейтовано Deep/Forensic через `Get-BravoStorageDeepAudit`; `Hardware.Disks.Deep.ShadowCopies[]` — ID/VolumeName/InstallDate/ClientAccessible/Persistent; відсутність точок відновлення — штатний стан, не помилка).
+- [x] Storage Spaces (`Get-StoragePool`, `src/32-Collectors-Storage.ps1`, гейтовано Deep/Forensic; `Hardware.Disks.Deep.StoragePools[]` — FriendlyName/HealthStatus/OperationalStatus/SizeGB/AllocatedGB/IsReadOnly; виключено `IsPrimordial` пул — прихований "сирий" пул фізичних дисків, не реальний Storage Spaces; WARNING якщо HealthStatus не Healthy; модуль Storage відсутній або Storage Spaces не використовується — штатний стан, порожній масив).
 - [ ] SMART/NVMe health, якщо доступно штатними засобами.
 
 ### Network Audit
