@@ -195,6 +195,42 @@ function Get-BravoStorageDeepAudit {
         }
     }
 
+    if (Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue) {
+        try {
+            $bitlockerVolumes = Get-BitLockerVolume -ErrorAction Stop
+            foreach ($volume in $bitlockerVolumes) {
+                $storage.BitLocker += [PSCustomObject]@{
+                    MountPoint           = $volume.MountPoint
+                    VolumeType           = [string]$volume.VolumeType
+                    CapacityGB           = if ($null -ne $volume.CapacityGB) { [Math]::Round($volume.CapacityGB, 2) } else { $null }
+                    VolumeStatus         = [string]$volume.VolumeStatus
+                    EncryptionPercentage = $volume.EncryptionPercentage
+                    EncryptionMethod     = [string]$volume.EncryptionMethod
+                    ProtectionStatus     = [string]$volume.ProtectionStatus
+                    LockStatus           = [string]$volume.LockStatus
+                    AutoUnlockEnabled    = $volume.AutoUnlockEnabled
+                }
+
+                # Незашифрований системний том — окрема, свідомо вужча знахідка:
+                # відсутність BitLocker на data-томах занадто поширена на
+                # звичайних робочих станціях, щоб бути WARNING на кожному
+                # прогоні (той самий принцип, що й з WinRE/EFI-розділами
+                # раніше в цій сесії); системний том — інша вага ризику.
+                if ($volume.VolumeType -eq 'OperatingSystem' -and [string]$volume.ProtectionStatus -eq 'Off') {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage.BitLocker' -Message "Системний том $($volume.MountPoint) не захищений BitLocker (ProtectionStatus=Off)." -Recommendation 'Розгляньте увімкнення BitLocker для системного тому, особливо на портативних пристроях.'
+                }
+            }
+        } catch {
+            # Get-BitLockerVolume вимагає прав адміністратора й може падати з
+            # access denied на непідвищеній сесії — не помилка збору per se,
+            # оскільки решта Deep Audit продовжує працювати; фіксуємо окремо.
+            Add-AuditError -Section 'StorageDeep.BitLocker' -Message $_.Exception.Message
+        }
+    }
+    # BitLocker-модуль не встановлено (напр. Windows Home edition, деякі
+    # Server Core збірки без feature BitLocker) — $storage.BitLocker
+    # лишається порожнім масивом, це штатний стан машини, не помилка.
+
     try {
         $pageFiles = Get-AuditObject -ClassName 'Win32_PageFileUsage'
         foreach ($pageFile in $pageFiles) {

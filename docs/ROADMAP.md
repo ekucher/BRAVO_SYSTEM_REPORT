@@ -136,7 +136,7 @@
 - [x] Volumes: health, operational status, size/free/risk.
 - [x] Physical disks: basic model, serial, size, media type/status.
 - [x] Findings для низького вільного місця.
-- [ ] BitLocker status.
+- [x] BitLocker status (`Get-BitLockerVolume`, `src/32-Collectors-Storage.ps1`, гейтовано Deep/Forensic через `Get-BravoStorageDeepAudit`; `Hardware.Disks.Deep.BitLocker[]` — MountPoint/VolumeType/VolumeStatus/EncryptionPercentage/EncryptionMethod/ProtectionStatus/LockStatus/AutoUnlockEnabled; WARNING-finding лише для незахищеного системного тому, не для data-томів — той самий принцип, що й WinRE-фікс, аби уникнути WARNING на кожній звичайній робочій станції).
 - [ ] Pagefile.
 - [ ] Shadow Copies / VSS.
 - [ ] Storage Spaces.
