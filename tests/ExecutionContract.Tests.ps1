@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -363,6 +363,18 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
                 $matchedEntry | Should -Not -BeNullOrEmpty
                 $matchedEntry.Status | Should -BeIn @('Enabled', 'Disabled', 'NotConfigured')
             }
+        }
+    }
+
+    It 'Security.Defender.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Deep-профілі' {
+        $script:DeepSecurityReport.Security.Defender.Status | Should -BeIn @('Detected', 'Unavailable', 'NotAvailable')
+    }
+
+    It 'якщо Defender.Status=Detected, то RealTimeProtectionEnabled — визначений bool (не null)' {
+        if ($script:DeepSecurityReport.Security.Defender.Status -eq 'Detected') {
+            $script:DeepSecurityReport.Security.Defender.RealTimeProtectionEnabled | Should -BeIn @($true, $false)
+        } else {
+            Set-ItResult -Skipped -Because 'Windows Defender недоступний на цій машині — нема що перевіряти'
         }
     }
 }
