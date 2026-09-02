@@ -181,9 +181,9 @@
 - [x] Installed hotfixes (`39-Collectors-Updates.ps1`, `WindowsUpdate.InstalledHotFixes`).
 - [x] Pending reboot detection (`WindowsUpdate.PendingRebootRequired`).
 - [x] Windows Update errors (`WindowsUpdate.SearchError`; pending updates з Catalog-посиланням у Deep/Forensic).
-- [ ] Event logs: System, Application, Setup, Security summary.
-- [ ] Provider summary.
-- [ ] Critical/Error/Warning grouping.
+- [x] Event logs: System, Application, Setup, Security summary (`ConvertTo-BravoEventLogSummary` + `Get-WinEvent -FilterHashtable`, `src/37-Collectors-Events.ps1`, гейтовано Full/Deep/Forensic; `EventLogs.LogSummaries[]` — LogName/Status/CriticalCount/ErrorCount/WarningCount/TopProviders; benign "немає записів" розпізнається за locale-незалежним `FullyQualifiedErrorId` (`NoMatchingEventsFound`), не за текстом повідомлення).
+- [x] Provider summary (топ-10 провайдерів на кожен журнал, `EventLogs.LogSummaries[].TopProviders`, той самий колектор).
+- [x] Critical/Error/Warning grouping (той самий колектор; CRITICAL-finding при Critical-подіях у будь-якому з 4 журналів).
 - [ ] Disk/Ntfs/storport/WHEA/Kernel-Power/BugCheck diagnostics.
 
 ## v0.6.0 Reports and UX
