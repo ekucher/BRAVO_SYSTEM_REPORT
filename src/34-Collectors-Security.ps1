@@ -1,7 +1,8 @@
 ﻿# MODULE: 34-Collectors-Security.ps1
 # Збір інформації про UAC, RDP (+NLA/port/firewall scope/allowed users),
 # антивірус, Windows Firewall, Secure Boot, TPM, SMBv1, TLS registry status,
-# деталі Windows Defender, WinRM (listeners/auth) та SMB signing.
+# деталі Windows Defender, WinRM (listeners/auth), SMB signing, password
+# policy (net accounts) та audit policy (auditpol).
 
 # Чиста функція: інтерпретує пару SCHANNEL registry DWORD (Enabled,
 # DisabledByDefault — HKLM:\...\SecurityProviders\SCHANNEL\Protocols\<protocol>\<Client|Server>)
@@ -25,6 +26,48 @@ function Get-BravoTlsProtocolStatus {
     if ($null -ne $Enabled -and $Enabled -eq 0) { return 'Disabled' }
     if ($null -ne $DisabledByDefault -and $DisabledByDefault -eq 1) { return 'Disabled' }
     return 'Enabled'
+}
+
+# Чиста функція: парсить вивід `net accounts` за ПОЗИЦІЄЮ рядка, а не за
+# текстом мітки. `net.exe` локалізує самі мітки (на не-EN збірках Windows),
+# але порядок рядків — фіксований у самому net.exe, не залежить від мовного
+# пакета (перевірено на UA-локалізованій машині: значення виводяться у тому
+# самому порядку, що документує Microsoft для будь-якої локалі). Той самий
+# принцип, що й для RemoteDesktop-UserMode-In-TCP (незалежне від локалізації
+# ім'я замість локалізованого DisplayGroup) раніше в цій сесії.
+function ConvertFrom-BravoNetAccountsOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [string[]]$Lines
+    )
+
+    $dataLines = @($Lines | Where-Object { $_ -match ':' })
+
+    function Get-BravoNetAccountsValueAt {
+        param([int]$Index)
+        if ($dataLines.Count -le $Index) { return $null }
+        $line = $dataLines[$Index]
+        $colonIndex = $line.LastIndexOf(':')
+        if ($colonIndex -lt 0) { return $null }
+        $value = $line.Substring($colonIndex + 1).Trim()
+        if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+        return $value
+    }
+
+    # Фіксований порядок рядків net accounts (індекс 0 — "Force user logoff...",
+    # навмисно не використовується цим колектором):
+    return [ordered]@{
+        MinPasswordAgeDays               = Get-BravoNetAccountsValueAt 1
+        MaxPasswordAgeDays               = Get-BravoNetAccountsValueAt 2
+        MinPasswordLength                = Get-BravoNetAccountsValueAt 3
+        PasswordHistoryLength            = Get-BravoNetAccountsValueAt 4
+        LockoutThreshold                 = Get-BravoNetAccountsValueAt 5
+        LockoutDurationMinutes           = Get-BravoNetAccountsValueAt 6
+        LockoutObservationWindowMinutes  = Get-BravoNetAccountsValueAt 7
+    }
 }
 
 function Get-BravoSecurityAudit {
@@ -362,7 +405,87 @@ function Get-BravoSecurityAudit {
                 $script:Report.Security.SMB.Status = 'NotAvailable'
             }
 
-            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status), Defender: $($script:Report.Security.Defender.Status), WinRM: $($script:Report.Security.WinRM.Status)" -ForegroundColor Green
+            # --- Password policy (net accounts) ---
+            try {
+                $netAccountsOutput = & net accounts 2>&1
+
+                if ($LASTEXITCODE -eq 0) {
+                    $parsedPolicy = ConvertFrom-BravoNetAccountsOutput -Lines $netAccountsOutput
+
+                    $script:Report.Security.PasswordPolicy.MinPasswordAgeDays = $parsedPolicy.MinPasswordAgeDays
+                    $script:Report.Security.PasswordPolicy.MaxPasswordAgeDays = $parsedPolicy.MaxPasswordAgeDays
+                    $script:Report.Security.PasswordPolicy.MinPasswordLength = $parsedPolicy.MinPasswordLength
+                    $script:Report.Security.PasswordPolicy.PasswordHistoryLength = $parsedPolicy.PasswordHistoryLength
+                    $script:Report.Security.PasswordPolicy.LockoutThreshold = $parsedPolicy.LockoutThreshold
+                    $script:Report.Security.PasswordPolicy.LockoutDurationMinutes = $parsedPolicy.LockoutDurationMinutes
+                    $script:Report.Security.PasswordPolicy.LockoutObservationWindowMinutes = $parsedPolicy.LockoutObservationWindowMinutes
+                    $script:Report.Security.PasswordPolicy.Status = 'Detected'
+
+                    # Findings рахуються лише з ЧИСЛОВИХ значень (locale-безпечно
+                    # — цифри не локалізуються так, як текстові мітки/значення
+                    # "Never"/"None"/"Unlimited"). Нечислове значення (не
+                    # вдалось [int]::TryParse) залишає поле "не оцінене" —
+                    # свідомо без спроби вгадати сенс локалізованого слова.
+                    $minLength = 0
+                    if ([int]::TryParse($script:Report.Security.PasswordPolicy.MinPasswordLength, [ref]$minLength) -and $minLength -lt 8) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.PasswordPolicy' -Message "Мінімальна довжина пароля замала: $minLength символів." -Recommendation 'Встановіть мінімальну довжину пароля не менше 8 символів (net accounts /minpwlen:8 або групова політика).'
+                    }
+
+                    $lockoutThreshold = 0
+                    if ([int]::TryParse($script:Report.Security.PasswordPolicy.LockoutThreshold, [ref]$lockoutThreshold) -and $lockoutThreshold -eq 0) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.PasswordPolicy' -Message 'Політика блокування облікового запису вимкнена (Lockout threshold=0) — необмежена кількість спроб входу.' -Recommendation 'Встановіть lockout threshold (напр. 5-10 невдалих спроб) для захисту від brute-force атак.'
+                    }
+
+                    $historyLength = 0
+                    if ([int]::TryParse($script:Report.Security.PasswordPolicy.PasswordHistoryLength, [ref]$historyLength) -and $historyLength -eq 0) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.PasswordPolicy' -Message 'Історія паролів вимкнена (0) — користувачі можуть одразу повторно використовувати старий пароль.' -Recommendation 'Встановіть довжину історії паролів (напр. 5-24) для заборони повторного використання.'
+                    }
+                } else {
+                    $script:Report.Security.PasswordPolicy.Status = 'Unavailable'
+                }
+            } catch {
+                # `net accounts` недоступний (напр. обмежене середовище без
+                # net.exe) — не типова ситуація на Windows, але не помилка
+                # інструмента, якщо трапиться.
+                $script:Report.Security.PasswordPolicy.Status = 'Unavailable'
+                $script:Report.Security.PasswordPolicy.Error = $_.Exception.Message
+            }
+
+            # --- Audit policy (auditpol) ---
+            # Свідомо БЕЗ findings на основі тексту "Inclusion Setting": ці
+            # значення (напр. "No Auditing"/"Success and Failure") — локалізовані
+            # рядки auditpol.exe, на відміну від числових полів password policy
+            # вище. Судити "недостатньо аудиту" за збігом англійського тексту
+            # було б ненадійно на не-EN системах — просто публікуємо сирі дані.
+            if (Get-Command auditpol -ErrorAction SilentlyContinue) {
+                try {
+                    $auditPolicyCsv = & auditpol /get /category:* /r 2>&1
+
+                    if ($LASTEXITCODE -eq 0) {
+                        $auditPolicyEntries = $auditPolicyCsv | ConvertFrom-Csv -ErrorAction Stop
+
+                        foreach ($entry in $auditPolicyEntries) {
+                            $script:Report.Security.AuditPolicy.Subcategories += [PSCustomObject]@{
+                                Category          = $entry.'Policy Target'
+                                Subcategory       = $entry.Subcategory
+                                SubcategoryGuid   = $entry.'Subcategory GUID'
+                                InclusionSetting  = $entry.'Inclusion Setting'
+                            }
+                        }
+
+                        $script:Report.Security.AuditPolicy.TotalCount = $script:Report.Security.AuditPolicy.Subcategories.Count
+                        $script:Report.Security.AuditPolicy.Status = 'Detected'
+                    } else {
+                        $script:Report.Security.AuditPolicy.Status = 'Unavailable'
+                    }
+                } catch {
+                    Add-AuditError -Section 'Security.AuditPolicy' -Message $_.Exception.Message
+                }
+            } else {
+                $script:Report.Security.AuditPolicy.Status = 'NotAvailable'
+            }
+
+            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status), SMBv1: $($script:Report.Security.SMBv1.Status), Defender: $($script:Report.Security.Defender.Status), WinRM: $($script:Report.Security.WinRM.Status), Password policy: $($script:Report.Security.PasswordPolicy.Status), Audit policy: $($script:Report.Security.AuditPolicy.Status) ($($script:Report.Security.AuditPolicy.TotalCount))" -ForegroundColor Green
         }
 
         Write-Host "  $IconSecurity Безпека: RDP=$(if($script:Report.Security.RemoteAccess.RDPEnabled){'ON'}else{'OFF'}), UAC=$(if($script:Report.Security.UAC.Enabled){'ON'}else{'OFF'})" -ForegroundColor Green

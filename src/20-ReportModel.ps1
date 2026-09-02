@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.8'
+    SchemaVersion = '0.6.9'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -175,6 +175,23 @@ return [ordered]@{
             ServerSigningEnabled = $null
             ClientSigningRequired = $null
             InsecureGuestLogonsEnabled = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        PasswordPolicy = [ordered]@{
+            MinPasswordLength = $null
+            MaxPasswordAgeDays = $null
+            MinPasswordAgeDays = $null
+            PasswordHistoryLength = $null
+            LockoutThreshold = $null
+            LockoutDurationMinutes = $null
+            LockoutObservationWindowMinutes = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        AuditPolicy = [ordered]@{
+            Subcategories = @()
+            TotalCount = 0
             Status = 'NotChecked'
             Error = ''
         }

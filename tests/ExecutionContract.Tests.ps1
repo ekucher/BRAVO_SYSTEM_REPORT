@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -397,6 +397,24 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
         if ($script:DeepSecurityReport.Security.SMB.Status -eq 'Detected') {
             $script:DeepSecurityReport.Security.SMB.ServerSigningRequired | Should -BeIn @($true, $false)
             $script:DeepSecurityReport.Security.SMB.InsecureGuestLogonsEnabled | Should -BeIn @($true, $false)
+        }
+    }
+
+    It 'Security.PasswordPolicy.Status — одне з очікуваних значень, і якщо Detected, MinPasswordLength — числовий рядок' {
+        $script:DeepSecurityReport.Security.PasswordPolicy.Status | Should -BeIn @('Detected', 'Unavailable')
+
+        if ($script:DeepSecurityReport.Security.PasswordPolicy.Status -eq 'Detected') {
+            $parsedLength = 0
+            [int]::TryParse($script:DeepSecurityReport.Security.PasswordPolicy.MinPasswordLength, [ref]$parsedLength) | Should -BeTrue
+        }
+    }
+
+    It 'Security.AuditPolicy.Status — одне з очікуваних значень, і якщо Detected, зібрано >0 subcategories' {
+        $script:DeepSecurityReport.Security.AuditPolicy.Status | Should -BeIn @('Detected', 'Unavailable', 'NotAvailable')
+
+        if ($script:DeepSecurityReport.Security.AuditPolicy.Status -eq 'Detected') {
+            $script:DeepSecurityReport.Security.AuditPolicy.TotalCount | Should -BeGreaterThan 0
+            @($script:DeepSecurityReport.Security.AuditPolicy.Subcategories).Count | Should -Be $script:DeepSecurityReport.Security.AuditPolicy.TotalCount
         }
     }
 }
