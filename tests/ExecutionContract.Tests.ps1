@@ -687,6 +687,39 @@ Describe 'v0.6.1 — Dark Mode markers присутні в HTML-виводі' -S
     }
 }
 
+Describe 'v0.6.1 — Edge CLI PDF (-ExportPdf)' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    It '-ExportPdf створює .pdf поряд з HTML, якщо Edge встановлено на цій машині; інакше не падає (graceful skip)' {
+        if (-not (Get-Command msedge.exe -ErrorAction SilentlyContinue) -and
+            -not (Test-Path 'C:\Program Files\Microsoft\Edge\Application\msedge.exe') -and
+            -not (Test-Path 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe')) {
+            Set-ItResult -Skipped -Because 'Microsoft Edge не встановлено на цій машині — нема що перевіряти'
+            return
+        }
+
+        $dir = New-BravoTestReportsDir -Name 'exportpdf'
+        & $script:WrapperPath -Profile Quick -ExportPdf -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+
+        $pdfFile = Get-ChildItem -LiteralPath $dir -Filter '*.pdf' -Recurse | Select-Object -First 1
+
+        $exitCode | Should -Be 0
+        $pdfFile | Should -Not -BeNullOrEmpty
+        $pdfFile.Length | Should -BeGreaterThan 0
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'без -ExportPdf .pdf НЕ створюється (фіча опційна, не дефолт)' {
+        $dir = New-BravoTestReportsDir -Name 'noexportpdf'
+        & $script:WrapperPath -Profile Quick -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+
+        $pdfFile = Get-ChildItem -LiteralPath $dir -Filter '*.pdf' -Recurse | Select-Object -First 1
+        $pdfFile | Should -BeNullOrEmpty
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'

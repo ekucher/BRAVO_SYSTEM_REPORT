@@ -1,4 +1,15 @@
-﻿## Unreleased — v0.6.1: Dark Mode
+﻿## Unreleased — v0.6.1: Edge CLI PDF (закриває v0.6.1 повністю)
+
+**v0.6.1 Interactive HTML Dashboard & Tabs секцію тепер повністю закрито.**
+
+- Новий опційний параметр `-ExportPdf` (`src/05-Params.ps1`), форвардиться транспарентно через root wrapper і elevation-relaunch у `src/90-Main.ps1` (той самий генеричний `$ForwardParameters`/`$arguments` механізм, що й решта параметрів).
+- `Get-BravoEdgeExecutablePath` (`src/51-Export-Html.ps1`) — шукає `msedge.exe` через PATH (`Get-Command`), потім два стандартних шляхи встановлення (`Program Files\Microsoft\Edge` і `Program Files (x86)\Microsoft\Edge` — Edge типово встановлюється як 32-bit застосунок навіть на 64-bit Windows).
+- `Export-BravoPdfReport` — викликає `msedge.exe --headless --disable-gpu --print-to-pdf="<path>" --print-to-pdf-no-header <file:// URI HTML>` одразу після генерації HTML, до ZIP-пакування (щоб PDF встиг потрапити в `GeneratedFiles`).
+- Відсутність Edge на машині — НЕ помилка збору/експорту (лише `[INFO]` у консоль), опційна фіча. Помилка самого виклику Edge (ненульовий exit code, PDF не з'явився) — `Add-ExportError 'Export.Pdf'`.
+- `-JSONOnly` вимикає й PDF (нема з чого конвертувати — HTML взагалі не генерується).
+- Тести: +1 unit (`Get-BravoEdgeExecutablePath`) +2 E2E (`-ExportPdf` створює `.pdf` якщо Edge присутній / без `-ExportPdf` `.pdf` не створюється).
+
+## Unreleased — v0.6.1: Dark Mode
 
 - CSS-змінні для card/nav/table поверхонь HTML-звіту (`--panel`, `--nav-bg`, `--btn-bg`, `--tab-panel-bg`, `--metric-card-bg`, `--toolbar-bg`, `--search-bg`, `--table-scroll-bg`, `--th-bg`, `--storage-item-bg`, `--progress-track`, `--title-text`) — заміняють раніше hardcoded hex-кольори в `src/51-Export-Html.ps1`.
 - `@media (prefers-color-scheme: dark)` — дефолтна темна палітра без явного вибору користувача (system-рівень).
