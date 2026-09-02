@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.14'
+    SchemaVersion = '0.6.15'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -85,6 +85,7 @@ return [ordered]@{
         Disks = [ordered]@{ FreePercent=0; TotalGB=0; FreeGB=0; Volumes=@(); PhysicalDisks=@() }
         Motherboard = [ordered]@{ Manufacturer=''; Product=''; SerialNumber=''; Version='' }
         GPU = @()
+        Monitors = @()
     }
     Network = [ordered]@{
         General = [ordered]@{ Hostname=''; Domain='' }

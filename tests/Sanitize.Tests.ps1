@@ -16,6 +16,7 @@ BeforeAll {
                     PhysicalDisks = @([PSCustomObject]@{ SerialNumber = 'SN-DISK-1' })
                     Deep = [PSCustomObject]@{ Disks = @([PSCustomObject]@{ SerialNumber = 'SN-DEEPDISK-1' }) }
                 }
+                Monitors = @([PSCustomObject]@{ SerialNumber = 'SN-MONITOR-1'; Model = 'XG27ACS' })
             }
             BIOS = [ordered]@{ SerialNumber = 'SN-BIOS-1' }
             Network = [ordered]@{
@@ -92,6 +93,11 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Hardware.RAM.Modules[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
         $script:report.Hardware.Disks.PhysicalDisks[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
         $script:report.Hardware.Disks.Deep.Disks[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
+    }
+
+    It 'маскує серійний номер монітора (v0.5.0-tail), Model лишається' {
+        $script:report.Hardware.Monitors[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
+        $script:report.Hardware.Monitors[0].Model | Should -Be 'XG27ACS'
     }
 
     It 'маскує MAC-адреси в ARP-кеші (v0.5.0) навіть у Basic, IP-адреса в ARP лишається' {
