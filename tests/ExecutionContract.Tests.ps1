@@ -250,10 +250,13 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
+    # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
+    # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
     BeforeAll {
         $script:DeepSecurityDir = New-BravoTestReportsDir -Name 'deep-security'
-        & $script:WrapperPath -Profile Full -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $script:DeepSecurityDir 2>&1 | Out-Null
+        & $script:WrapperPath -Profile Deep -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $script:DeepSecurityDir 2>&1 | Out-Null
         $script:DeepSecurityExitCode = $LASTEXITCODE
         $jsonFile = Get-ChildItem -LiteralPath $script:DeepSecurityDir -Filter '*.json' -Recurse | Select-Object -First 1
         $script:DeepSecurityReport = Get-Content -LiteralPath $jsonFile.FullName -Raw | ConvertFrom-Json
@@ -282,6 +285,22 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM' -Skip:(-not (Test-Path (J
             $script:DeepSecurityReport.Security.TPM.Ready | Should -BeIn @($true, $false)
         } else {
             Set-ItResult -Skipped -Because 'TPM не виявлено на цій машині (Status=NotPresent) — нема що перевіряти'
+        }
+    }
+
+    It 'Hardware.Disks.Deep.BitLocker заповнений (модуль BitLocker присутній на цій машині) з очікуваними полями на кожному томі' {
+        $bitlockerVolumes = @($script:DeepSecurityReport.Hardware.Disks.Deep.BitLocker)
+
+        if (-not (Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Модуль BitLocker недоступний на цій машині — нема що перевіряти'
+            return
+        }
+
+        $bitlockerVolumes.Count | Should -BeGreaterThan 0
+
+        foreach ($volume in $bitlockerVolumes) {
+            $volume.MountPoint | Should -Not -BeNullOrEmpty
+            $volume.ProtectionStatus | Should -BeIn @('On', 'Off', 'Unknown')
         }
     }
 }

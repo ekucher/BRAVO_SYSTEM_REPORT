@@ -1,4 +1,16 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Secure Boot + TPM
+﻿## Unreleased — v0.5.0 Deep Inventory: BitLocker status
+
+Другий пункт v0.5.0 Deep Inventory (Storage Audit) — статус шифрування томів.
+
+- **BitLocker** через `Get-BitLockerVolume` — новий блок у `Get-BravoStorageDeepAudit` (`src/32-Collectors-Storage.ps1`), заповнює раніше завжди порожнє поле `Hardware.Disks.Deep.BitLocker[]` (гейтовано `-Profile Deep/Forensic`, так само як решта Storage Deep Audit). Поля на кожному томі: `MountPoint`, `VolumeType`, `CapacityGB`, `VolumeStatus`, `EncryptionPercentage`, `EncryptionMethod`, `ProtectionStatus`, `LockStatus`, `AutoUnlockEnabled`.
+- `SchemaVersion` піднято `0.6.2` → `0.6.3` (адитивне збагачення контракту: поле існувало, тепер має визначену форму об'єктів замість завжди порожнього масиву).
+- Findings: WARNING лише для незахищеного (`ProtectionStatus=Off`) **системного** тому — свідомо НЕ для data-томів, інакше WARNING спрацьовував би на кожній звичайній робочій станції без керованого шифрування (той самий принцип, що й WinRE-фікс раніше в цій сесії).
+- Відсутність модуля BitLocker (Windows Home edition, деякі Server Core збірки) — штатний стан, `Hardware.Disks.Deep.BitLocker` лишається порожнім масивом, не `Add-AuditError`.
+- HTML Dashboard: нова таблиця "BitLocker" на вкладці Hardware, одразу після Storage Deep (`src/51-Export-Html.ps1`).
+- Тест-блок `Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker'` (`tests/ExecutionContract.Tests.ps1`) переведено з `-Profile Full` на `-Profile Deep` — той самий E2E-прогін тепер покриває й BitLocker (гейтовано лише Deep/Forensic), без другого окремого прогону; додано 1 новий тест.
+
+Усі 84 Pester-тести проходять (83 попередніх + 1 новий). `dist` перебудовано, sha512 звірено.
+## Unreleased — v0.5.0 Deep Inventory: Secure Boot + TPM
 
 Перший пункт v0.5.0 Deep Inventory (Hardware Inventory) — Deep Security базові дані.
 
