@@ -109,10 +109,10 @@
   - [ ] service account names — **не реалізовано**: колектор служб (`src/36-Collectors-ProcessesServices.ps1`) не збирає LogOnAs/StartName, маскувати нема чого; додати разом зі збором цих даних, якщо колись знадобиться;
   - [x] sensitive install paths (`Software.Installed[].InstallLocation`).
   - Відоме обмеження: ім'я файлу звіту (`BravoSystemReport_<COMPUTERNAME>_...`) і далі містить реальне ім'я машини — маскується лише вміст файлів, не назва; поза межами явного переліку цього пункту ТЗ.
-- [ ] Додати CI validation для sanitize:
-  - [ ] запуск `-Sanitize`;
-  - [ ] regex scan JSON/HTML на IP/MAC/serial/user/domain literals;
-  - [ ] перевірка, що структура звіту не ламається після маскування.
+- [x] Додати CI validation для sanitize (`tests/ExecutionContract.Tests.ps1`, `Describe 'P1 — CI validation для -SanitizeLevel Strict'`, наскрізний прогін через wrapper з `-Profile Full -Sanitize -SanitizeLevel Strict -Offline`):
+  - [x] запуск `-Sanitize`;
+  - [x] точкові перевірки полів JSON на маскування (ComputerName/UserName/UserDomainName/Hostname/Network.IP.\*/MAC/serial numbers) — **не** "сліпий" regex-скан усього тексту на IP/MAC-патерн: версії встановленого ПЗ (`Software.Installed[].Version`) масово збігаються з форматом IPv4 і дають сотні false positive; `OutputPath` (шлях збереження звіту під профілем Windows-користувача) легітимно й свідомо не маскується, тож full-text-скан на `$env:USERNAME` теж хибно спрацьовує — перевірено вручну обидва випадки перед фіналізацією тесту;
+  - [x] перевірка, що структура звіту не ламається після маскування (`ConvertFrom-Json` успішний, `CollectionErrors`/`ExportErrors` = 0, `exit code 0`).
 
 ## v0.5.0 Deep Inventory
 
