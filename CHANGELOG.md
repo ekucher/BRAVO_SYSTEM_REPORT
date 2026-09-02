@@ -1,4 +1,8 @@
-﻿## Unreleased — P1/v0.4.3: -Sanitize / -SanitizeLevel (маскування чутливих даних)
+﻿## Unreleased — docs: закрито пункт "уніфікувати network schema" (ROADMAP v0.4.2)
+
+Пункт ROADMAP "Уніфікувати network schema" перевірено і закрито без змін коду — станом на 2026-09-02 у кодовій базі й так немає top-level дублікатів `Network.IPv4`/`Network.PrimaryIPv4`/`Network.PublicIPv4`. Єдине джерело правди — вкладена структура `Network.IP.{IPv4, PrimaryIPv4, PrimaryInterface, PublicIPv4*}`, оголошена в `src/20-ReportModel.ps1` і послідовно використовувана в `src/33-Collectors-Network.ps1`, `src/45-Sanitize.ps1`, `src/51-Export-Html.ps1`, `src/52-Export-Csv.ps1`. Історичні баги з неправильним шляхом (`Network.PrimaryIPv4` замість `Network.IP.PrimaryIPv4`) вже виправлені в попередніх раундах (див. записи нижче про CI/HTML export).
+
+## Unreleased — P1/v0.4.3: -Sanitize / -SanitizeLevel (маскування чутливих даних)
 
 П'ятий пункт P1 / v0.4.3 Safe Sharing — маскування чутливих даних перед передачею звіту третім сторонам.
 

@@ -70,12 +70,12 @@
   - [x] `-Strict`;
   - [x] ненульовий exit code, коли Health.Status аудитованої машини = `CRITICAL` (окремий exit code `4`, лише в `-Strict` режимі — за замовчуванням Health.Status і далі НЕ впливає на exit code, це властивість машини, не збій інструмента).
   - [ ] `CollectionErrors`/`ExportErrors` і далі дають один exit code `1` незалежно від "критичності" — окремих кодів для parser/build/runtime/export failures немає (є лише 2=fatal trap, 3=JSON не згенеровано); розділення за типом failure — окрема майбутня задача, якщо знадобиться.
-- [ ] Уніфікувати network schema:
-  - [ ] `Network.IP.IPv4`;
-  - [ ] `Network.IP.PrimaryIPv4`;
-  - [ ] `Network.IP.PrimaryInterface`;
-  - [ ] `Network.IP.PublicIPv4`;
-  - [ ] прибрати дублювання top-level `Network.IPv4`, якщо воно не потрібне.
+- [x] Уніфікувати network schema (перевірено 2026-09-02: єдине джерело правди — вкладене `Network.IP.*`, top-level дублікатів немає):
+  - [x] `Network.IP.IPv4`;
+  - [x] `Network.IP.PrimaryIPv4`;
+  - [x] `Network.IP.PrimaryInterface`;
+  - [x] `Network.IP.PublicIPv4`;
+  - [x] top-level `Network.IPv4`/`Network.PrimaryIPv4`/`Network.PublicIPv4` в поточному коді відсутні (`src/20-ReportModel.ps1`, `src/33-Collectors-Network.ps1`, `src/51-Export-Html.ps1`, `src/52-Export-Csv.ps1`, `src/45-Sanitize.ps1` — усі звертаються лише через `Network.IP.*`); минулі баги з неправильним шляхом (`CHANGELOG.md`) вже виправлені раніше.
 - [x] Уніфікувати storage thresholds (P1, `src/32-Collectors-Storage.ps1`):
   - [x] один набір порогів для basic і deep storage audit (`Get-BravoStorageThresholds`: 5% critical / 10% warning / 15% системний);
   - [x] уникнути дублювання findings для одного й того самого тому (у Deep/Forensic профілях basic-прохід більше не емітить власні findings — рішення делегується `Get-BravoStorageRiskSummary`, який покриває ті самі томи глибше);
