@@ -43,7 +43,10 @@ BeforeAll {
                 SmbShares = @([PSCustomObject]@{ Name = 'Share1'; Path = 'C:\Users\jdoe\Share1' })
             }
             Users = [ordered]@{ LocalAdmins = @('jdoe', 'Administrator') }
-            Security = [ordered]@{ RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker') } }
+            Security = [ordered]@{
+                RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker') }
+                Autoruns = @([PSCustomObject]@{ Name = 'OneDrive'; Command = 'C:\Users\jdoe\AppData\Local\Microsoft\OneDrive\OneDrive.exe /background'; Source = 'Run'; Hive = 'HKCU' })
+            }
             Software = [ordered]@{ Installed = @([PSCustomObject]@{ InstallLocation = 'C:\Users\jdoe\AppData\Local\SomeApp' }) }
         }
     }
@@ -107,6 +110,11 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
     It 'маскує MAC-адреси в ARP-кеші (v0.5.0) навіть у Basic, IP-адреса в ARP лишається' {
         $script:report.Network.ARP[0].LinkLayerAddress | Should -Match '^REDACTED-MAC-'
         $script:report.Network.ARP[0].IPAddress | Should -Be '192.168.1.1'
+    }
+
+    It 'маскує Command в Autoruns (v0.5.0-tail) навіть у Basic, Name лишається' {
+        $script:report.Security.Autoruns[0].Command | Should -Match '^REDACTED-PATH-'
+        $script:report.Security.Autoruns[0].Name | Should -Be 'OneDrive'
     }
 
     It 'маскує шлях SMB share (v0.5.0-tail) навіть у Basic' {
