@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.1'
+    SchemaVersion = '0.6.2'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -110,7 +110,29 @@ return [ordered]@{
         Adapters = @()
         Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@() }
     }
-    Security = [ordered]@{ UAC=[ordered]@{Enabled=$false}; RemoteAccess=[ordered]@{RDPEnabled=$false}; Antivirus=[ordered]@{Product=''}; Firewall=[ordered]@{} }
+    Security = [ordered]@{
+        UAC=[ordered]@{Enabled=$false}
+        RemoteAccess=[ordered]@{RDPEnabled=$false}
+        Antivirus=[ordered]@{Product=''}
+        Firewall=[ordered]@{}
+        SecureBoot = [ordered]@{
+            Supported = $null
+            Enabled = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        TPM = [ordered]@{
+            Present = $null
+            Ready = $null
+            Enabled = $null
+            Activated = $null
+            ManufacturerId = ''
+            ManufacturerVersion = ''
+            SpecVersion = ''
+            Status = 'NotChecked'
+            Error = ''
+        }
+    }
     Users = [ordered]@{ LocalAdmins=@() }
     Processes = [ordered]@{ Total=0; TopMemory=@() }
     Services = [ordered]@{ Total=0; Running=0; AutomaticStopped=@() }

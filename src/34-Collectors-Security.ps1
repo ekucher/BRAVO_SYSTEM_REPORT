@@ -1,5 +1,5 @@
 ﻿# MODULE: 34-Collectors-Security.ps1
-# Збір інформації про UAC, RDP, антивірус та Windows Firewall.
+# Збір інформації про UAC, RDP, антивірус, Windows Firewall, Secure Boot та TPM.
 
 function Get-BravoSecurityAudit {
     [CmdletBinding()]
@@ -57,6 +57,64 @@ function Get-BravoSecurityAudit {
             } catch {
                 Add-AuditError -Section 'Security.Firewall' -Message $_.Exception.Message
             }
+        }
+
+        # --- Secure Boot / TPM (Deep Security, v0.5.0) ---
+        # Гейтовано Full/Deep/Forensic: не критично для Quick-профілю, і на
+        # частині машин (VM без vTPM, Legacy BIOS) обидва запити стабільно
+        # "не підтримується" — щоб не подовжувати найшвидший профіль зайвими
+        # WMI/cmdlet-викликами без цінності.
+        if ($Profile -in @('Full','Deep','Forensic')) {
+            try {
+                $secureBootEnabled = Confirm-SecureBootUEFI -ErrorAction Stop
+                $script:Report.Security.SecureBoot.Supported = $true
+                $script:Report.Security.SecureBoot.Enabled = [bool]$secureBootEnabled
+                $script:Report.Security.SecureBoot.Status = if ($secureBootEnabled) { 'Enabled' } else { 'Disabled' }
+
+                if (-not $secureBootEnabled) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
+                }
+            } catch {
+                # Confirm-SecureBootUEFI кидає виняток і на Legacy BIOS (немає
+                # UEFI — Secure Boot фізично неможливий), і на частині VM —
+                # це штатний стан машини, не помилка збору (Add-AuditError
+                # НЕ викликається, щоб не давати хибний exit code 1 на кожній
+                # Legacy BIOS/VM-машині).
+                $script:Report.Security.SecureBoot.Supported = $false
+                $script:Report.Security.SecureBoot.Status = 'NotSupported'
+                $script:Report.Security.SecureBoot.Error = $_.Exception.Message
+            }
+
+            try {
+                $tpmInfo = Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftTpm' -ClassName 'Win32_Tpm' -ErrorAction Stop | Select-Object -First 1
+
+                if ($tpmInfo) {
+                    $script:Report.Security.TPM.Present = $true
+                    $script:Report.Security.TPM.Enabled = [bool]$tpmInfo.IsEnabled_InitialValue
+                    $script:Report.Security.TPM.Activated = [bool]$tpmInfo.IsActivated_InitialValue
+                    $script:Report.Security.TPM.Ready = $script:Report.Security.TPM.Enabled -and $script:Report.Security.TPM.Activated
+                    $script:Report.Security.TPM.ManufacturerId = [string]$tpmInfo.ManufacturerId
+                    $script:Report.Security.TPM.ManufacturerVersion = [string]$tpmInfo.ManufacturerVersion
+                    $script:Report.Security.TPM.SpecVersion = [string]$tpmInfo.SpecVersion
+                    $script:Report.Security.TPM.Status = 'Detected'
+
+                    if (-not $script:Report.Security.TPM.Ready) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Security.TPM' -Message 'TPM присутній, але не увімкнений/не активований повністю.' -Recommendation 'Увімкніть і активуйте TPM у UEFI/BIOS — потрібен для BitLocker, Windows Hello, Credential Guard.'
+                    }
+                } else {
+                    $script:Report.Security.TPM.Present = $false
+                    $script:Report.Security.TPM.Status = 'NotPresent'
+                }
+            } catch {
+                # Клас Win32_Tpm/namespace відсутній — типово означає відсутність
+                # фізичного/firmware TPM (старе обладнання, VM без vTPM), не
+                # помилка збору (та сама логіка, що й для Secure Boot вище).
+                $script:Report.Security.TPM.Present = $false
+                $script:Report.Security.TPM.Status = 'NotPresent'
+                $script:Report.Security.TPM.Error = $_.Exception.Message
+            }
+
+            Write-Host "  $IconSecurity Secure Boot: $($script:Report.Security.SecureBoot.Status), TPM: $($script:Report.Security.TPM.Status)" -ForegroundColor Green
         }
 
         Write-Host "  $IconSecurity Безпека: RDP=$(if($script:Report.Security.RemoteAccess.RDPEnabled){'ON'}else{'OFF'}), UAC=$(if($script:Report.Security.UAC.Enabled){'ON'}else{'OFF'})" -ForegroundColor Green

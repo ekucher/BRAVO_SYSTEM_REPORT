@@ -250,6 +250,42 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    BeforeAll {
+        $script:DeepSecurityDir = New-BravoTestReportsDir -Name 'deep-security'
+        & $script:WrapperPath -Profile Full -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $script:DeepSecurityDir 2>&1 | Out-Null
+        $script:DeepSecurityExitCode = $LASTEXITCODE
+        $jsonFile = Get-ChildItem -LiteralPath $script:DeepSecurityDir -Filter '*.json' -Recurse | Select-Object -First 1
+        $script:DeepSecurityReport = Get-Content -LiteralPath $jsonFile.FullName -Raw | ConvertFrom-Json
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:DeepSecurityDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'завершується exit code 0, CollectionErrors=0 (відсутність Secure Boot/TPM на машині — не помилка збору)' {
+        $script:DeepSecurityExitCode | Should -Be 0
+        @($script:DeepSecurityReport.CollectionErrors).Count | Should -Be 0
+    }
+
+    It 'Security.SecureBoot.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Full-профілі' {
+        $script:DeepSecurityReport.Security.SecureBoot.Status | Should -BeIn @('Enabled', 'Disabled', 'NotSupported', 'Unknown')
+    }
+
+    It 'Security.TPM.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Full-профілі' {
+        $script:DeepSecurityReport.Security.TPM.Status | Should -BeIn @('Detected', 'NotPresent')
+    }
+
+    It 'якщо TPM.Status=Detected, то Present=true і Ready — визначений bool (не null)' {
+        if ($script:DeepSecurityReport.Security.TPM.Status -eq 'Detected') {
+            $script:DeepSecurityReport.Security.TPM.Present | Should -Be $true
+            $script:DeepSecurityReport.Security.TPM.Ready | Should -BeIn @($true, $false)
+        } else {
+            Set-ItResult -Skipped -Because 'TPM не виявлено на цій машині (Status=NotPresent) — нема що перевіряти'
+        }
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'

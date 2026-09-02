@@ -1,4 +1,25 @@
-﻿## Unreleased — P1/v0.4.3: CI validation для -Sanitize (закриває останній пункт v0.4.3)
+﻿## Unreleased — v0.5.0 Deep Inventory: Secure Boot + TPM
+
+Перший пункт v0.5.0 Deep Inventory (Hardware Inventory) — Deep Security базові дані.
+
+- **Secure Boot** (`Confirm-SecureBootUEFI`) і **TPM** (`Win32_Tpm` CIM-клас у `root\cimv2\Security\MicrosoftTpm`) — новий блок у `src/34-Collectors-Security.ps1`, гейтовано `-Profile Full/Deep/Forensic` (не критично для найшвидшого Quick-профілю).
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Security.SecureBoot.{Supported,Enabled,Status,Error}`, `Security.TPM.{Present,Ready,Enabled,Activated,ManufacturerId,ManufacturerVersion,SpecVersion,Status,Error}`. `SchemaVersion` піднято `0.6.1` → `0.6.2` (адитивна зміна контракту, п.6 `docs/AI_RULES.md`).
+- **Свідоме рішення**: Legacy BIOS (Secure Boot фізично неможливий) і відсутність TPM (VM без vTPM, старе обладнання) — штатні стани машини (`Status = 'NotSupported'`/`'NotPresent'`), НЕ `Add-AuditError` — інакше кожна VM чи Legacy BIOS машина отримувала б `CollectionErrors > 0` і, як наслідок, exit code 1 за замовчуванням (той самий принцип, що й для WinRE-розділів раніше в цій сесії).
+- Findings: WARNING, якщо Secure Boot підтримується, але вимкнено; WARNING, якщо TPM присутній, але не увімкнений/активований повністю (`Ready = Enabled -and Activated`).
+- HTML Dashboard: нова картка "Secure Boot / TPM" на вкладці Security (`src/51-Export-Html.ps1`). CSV: `SecureBoot_Status`/`TPM_Status` (`src/52-Export-Csv.ps1`).
+- 4 нових Pester-тести (`tests/ExecutionContract.Tests.ps1`, `Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM'`): наскрізний `-Profile Full -Offline` прогін, `CollectionErrors=0`, `Status` завжди в очікуваному переліку значень (ніколи не лишається `NotChecked`), узгодженість `TPM.Present`/`Ready` при `Status=Detected`.
+
+Усі 83 Pester-тести проходять (79 попередніх + 4 нових). `dist` перебудовано, sha512 звірено.
+
+## Unreleased — v0.4.1 Release Stabilization: перевірка release package + docs/RELEASE.md
+
+- Новий `tests/ReleasePackage.Tests.ps1` (5 тестів): `tools/New-ReleasePackage.ps1` створює ZIP -> розпаковується у temporary directory -> запускається `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого пакета -> перевіряється створення валідного JSON/HTML, sha512 runtime всередині пакета, sha256 самого ZIP, наявність усіх `.bat`-лаунчерів і `MANIFEST.txt`.
+- **Побічно спіймано й виправлено реальний баг** у `tools/New-ReleasePackage.ps1`, який до цього ніколи не запускався в CI: на self-hosted раннері з коротким 8.3-ім'ям облікового запису (`BRAVOR~1`) ручна арифметика `.Substring($StagingRoot.Length)` при формуванні імен файлів у ZIP з'їжджала - файли пакувались з "хвостом" шляху (напр. `5.1/BRAVO-SystemReport-Quick.bat` замість `BRAVO-SystemReport-Quick.bat`). Відтворено локально (штучний 8.3-каталог), виправлено на `Push-Location` + `Resolve-Path -Relative` (робастно незалежно від форми проміжних сегментів шляху).
+- Новий `docs/RELEASE.md`: локальний release-флоу + опис фактичної роботи `.github/workflows/release.yml`, таблиця типових причин падіння.
+- Побічно: `docs/SECURITY.md` більше не називає `-Sanitize` "майбутнім" параметром.
+
+Усі 79 Pester-тестів проходять (74 попередніх + 5 нових). `dist` перебудовано, sha512 звірено. Закриває решту ROADMAP v0.4.1 Release Stabilization.
+## Unreleased — P1/v0.4.3: CI validation для -Sanitize (закриває останній пункт v0.4.3)
 
 - Новий блок `Describe 'P1 — CI validation для -SanitizeLevel Strict'` у `tests/ExecutionContract.Tests.ps1` (6 тестів): наскрізний прогін через wrapper з `-Profile Full -Sanitize -SanitizeLevel Strict -Offline`, перевіряє exit code 0, валідність структури JSON після маскування (`CollectionErrors`/`ExportErrors` = 0), і точково — що `ComputerName`/`Meta.UserName`/`Meta.UserDomainName`/`Network.General.Hostname`/`Dashboard.Header.ComputerName` замасковані у відповідний `REDACTED-*` формат, `Network.IP.IPv4`/`PrimaryIPv4`/adapters IPv4 замасковані, MAC-адреси замасковані (плюс regex-перевірка відсутності будь-якого literal MAC-патерну в сирому JSON), серійні номери BIOS/PhysicalDisks замасковані, і що HTML-експорт теж містить `REDACTED-*` токени (маскування дійшло до export-етапу, не лише до JSON).
 - **Свідомо відхилено** підхід "сліпий regex-скан усього JSON/HTML на IPv4-патерн", запропонований у ROADMAP: перевірено вручну на реальному звіті (`-Profile Full`) — версії встановленого ПЗ (`Software.Installed[].Version`, напр. `10.0.11.50`) масово збігаються з форматом IPv4 (кожен октет ≤255) і дають десятки false positive. Замінено на точкові перевірки конкретних полів схеми, які реально маскує `Invoke-BravoReportSanitization`.
