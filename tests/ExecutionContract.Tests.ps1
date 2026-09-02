@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -375,6 +375,28 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
             $script:DeepSecurityReport.Security.Defender.RealTimeProtectionEnabled | Should -BeIn @($true, $false)
         } else {
             Set-ItResult -Skipped -Because 'Windows Defender недоступний на цій машині — нема що перевіряти'
+        }
+    }
+
+    It 'якщо RDP увімкнено, NLAEnabled — визначений bool, а не null' {
+        if (-not $script:DeepSecurityReport.Security.RemoteAccess.RDPEnabled) {
+            Set-ItResult -Skipped -Because 'RDP вимкнено на цій машині — нема що перевіряти'
+            return
+        }
+
+        $script:DeepSecurityReport.Security.RemoteAccess.NLAEnabled | Should -BeIn @($true, $false)
+    }
+
+    It 'Security.WinRM.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Deep-профілі' {
+        $script:DeepSecurityReport.Security.WinRM.Status | Should -BeIn @('Detected', 'ServiceNotRunning', 'NotAvailable')
+    }
+
+    It 'Security.SMB.Status — одне з очікуваних значень, і якщо Detected, поля signing визначені' {
+        $script:DeepSecurityReport.Security.SMB.Status | Should -BeIn @('Detected', 'NotAvailable')
+
+        if ($script:DeepSecurityReport.Security.SMB.Status -eq 'Detected') {
+            $script:DeepSecurityReport.Security.SMB.ServerSigningRequired | Should -BeIn @($true, $false)
+            $script:DeepSecurityReport.Security.SMB.InsecureGuestLogonsEnabled | Should -BeIn @($true, $false)
         }
     }
 }

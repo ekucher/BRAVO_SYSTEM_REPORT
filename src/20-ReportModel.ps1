@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.7'
+    SchemaVersion = '0.6.8'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -114,7 +114,14 @@ return [ordered]@{
     }
     Security = [ordered]@{
         UAC=[ordered]@{Enabled=$false}
-        RemoteAccess=[ordered]@{RDPEnabled=$false}
+        RemoteAccess=[ordered]@{
+            RDPEnabled=$false
+            NLAEnabled=$null
+            Port=$null
+            FirewallScope=''
+            FirewallProfiles=''
+            AllowedUsers=@()
+        }
         Antivirus=[ordered]@{Product=''}
         Firewall=[ordered]@{}
         SecureBoot = [ordered]@{
@@ -153,6 +160,21 @@ return [ordered]@{
             AntivirusSignatureAgeDays = $null
             AMEngineVersion = ''
             AMProductVersion = ''
+            Status = 'NotChecked'
+            Error = ''
+        }
+        WinRM = [ordered]@{
+            ServiceStatus = ''
+            Listeners = @()
+            Auth = [ordered]@{ Basic = $null; Kerberos = $null; Negotiate = $null; Certificate = $null; CredSSP = $null }
+            Status = 'NotChecked'
+            Error = ''
+        }
+        SMB = [ordered]@{
+            ServerSigningRequired = $null
+            ServerSigningEnabled = $null
+            ClientSigningRequired = $null
+            InsecureGuestLogonsEnabled = $null
             Status = 'NotChecked'
             Error = ''
         }
