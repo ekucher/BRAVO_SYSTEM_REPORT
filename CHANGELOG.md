@@ -1,4 +1,18 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: Routing table + ARP + WinHTTP proxy
+﻿## Unreleased — v0.5.0 Deep Inventory: Shadow Copies (VSS) + Storage Spaces
+
+Два пункти v0.5.0 Deep Inventory / Storage Audit в одному PR: Shadow Copies/VSS, Storage Spaces. Заразом виявлено й позначено заднім числом уже реалізований раніше пункт "Pagefile" (`Win32_PageFileUsage`, був у коді, але не позначений у ROADMAP).
+
+- **Shadow Copies / VSS** через `Win32_ShadowCopy` — `Hardware.Disks.Deep.ShadowCopies[]` (ID/VolumeName/InstallDate/ClientAccessible/Persistent). Відсутність точок відновлення — штатний стан, не помилка збору.
+- **Storage Spaces** через `Get-StoragePool` — `Hardware.Disks.Deep.StoragePools[]` (FriendlyName/HealthStatus/OperationalStatus/SizeGB/AllocatedGB/IsReadOnly). Виключено прихований `IsPrimordial`-пул (представляє "сирі" фізичні диски системи, не реальний Storage Spaces пул — той самий принцип фільтрації шуму, що й Unreachable/Incomplete у ARP-кеші попереднього PR). WARNING якщо `HealthStatus` не `Healthy`. Модуль Storage відсутній (напр. деякі Server Core збірки) — штатний стан, порожній масив.
+
+Обидва — новий блок у `src/32-Collectors-Storage.ps1` (`Get-BravoStorageDeepAudit`), гейтовано `-Profile Deep/Forensic`.
+
+- Поля вже існували як завжди-порожні заглушки в моделі даних (`ShadowCopies`/`StoragePools` у `$storage`-об'єкті); тепер реально заповнюються — `SchemaVersion` піднято `0.6.10` → `0.6.11` за встановленим правилом (заповнення раніше завжди-порожнього поля вважається контрактною зміною).
+- HTML: нові таблиці "Shadow Copies (VSS)" і "Storage Spaces" на вкладці Hardware/Storage (`src/51-Export-Html.ps1`).
+- Sanitize: не потрібен — жодне з нових полів не містить MAC/IP/username (VolumeName — це шлях `\\?\Volume{guid}\`, FriendlyName — довільна назва пулу, не PII).
+- 3 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / ShadowCopies+StoragePools'` (перейменовано), той самий `-Profile Deep` прогін.
+
+## Unreleased — v0.5.0 Deep Inventory: Routing table + ARP + WinHTTP proxy
 
 Три пункти v0.5.0 Deep Inventory / Network Audit в одному PR: Routing table, ARP/Neighbor table, WinHTTP proxy.
 

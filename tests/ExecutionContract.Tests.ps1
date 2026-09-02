@@ -250,7 +250,7 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
-Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
     # Secure Boot/TPM (гейтовані Full/Deep/Forensic), без другого окремого E2E-прогону.
@@ -431,6 +431,30 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
 
     It 'Network.WinHttpProxy.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Deep-профілі' {
         $script:DeepSecurityReport.Network.WinHttpProxy.Status | Should -BeIn @('Detected', 'Unavailable', 'NotAvailable')
+    }
+
+    It 'Hardware.Disks.Deep.PageFiles заповнений на реальній машині (щонайменше один pagefile)' {
+        @($script:DeepSecurityReport.Hardware.Disks.Deep.PageFiles).Count | Should -BeGreaterThan 0
+    }
+
+    It 'Hardware.Disks.Deep.ShadowCopies — масив (може бути порожній, якщо VSS не має точок відновлення), кожен запис має VolumeName' {
+        $shadowCopies = @($script:DeepSecurityReport.Hardware.Disks.Deep.ShadowCopies)
+        foreach ($entry in $shadowCopies) {
+            $entry.VolumeName | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'Hardware.Disks.Deep.StoragePools — масив (порожній, якщо Storage Spaces не використовується), кожен непорожній запис має FriendlyName і HealthStatus' {
+        if (-not (Get-Command Get-StoragePool -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Модуль Storage (Get-StoragePool) недоступний на цій машині — нема що перевіряти'
+            return
+        }
+
+        $pools = @($script:DeepSecurityReport.Hardware.Disks.Deep.StoragePools)
+        foreach ($pool in $pools) {
+            $pool.FriendlyName | Should -Not -BeNullOrEmpty
+            $pool.HealthStatus | Should -Not -BeNullOrEmpty
+        }
     }
 }
 

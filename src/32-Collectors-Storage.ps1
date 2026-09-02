@@ -57,15 +57,14 @@ function Convert-BravoBytesToGB {
 
 function Get-BravoStorageDeepAudit {
     # Заповнюються нижче в цій функції: CollectedAt, LogicalDisks, Volumes,
-    # Disks, Partitions, PageFiles.
+    # Disks, Partitions, PageFiles, BitLocker, ShadowCopies, StoragePools.
     #
     # НЕ реалізовано (завжди порожній масив @() — заплановані, ще не написані
-    # колектори; див. docs/ROADMAP.md "Storage Audit" для BitLocker/Storage
-    # Spaces/Shadow Copies/SMART): PhysicalDisks (не плутати з окремим,
-    # реально заповненим $script:Report.Hardware.Disks.PhysicalDisks —
-    # це різні поля з однаковою назвою в різних секціях моделі),
-    # ReliabilityCounters, BitLocker, ShadowCopies, StoragePools,
-    # StorageSubsystems, SmartPredictFailures.
+    # колектори; див. docs/ROADMAP.md "Storage Audit" для SMART): PhysicalDisks
+    # (не плутати з окремим, реально заповненим
+    # $script:Report.Hardware.Disks.PhysicalDisks — це різні поля з однаковою
+    # назвою в різних секціях моделі), ReliabilityCounters, StorageSubsystems,
+    # SmartPredictFailures.
     $storage = [ordered]@{
         CollectedAt  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         LogicalDisks = @()
@@ -251,6 +250,61 @@ function Get-BravoStorageDeepAudit {
     } catch {
         Add-AuditError -Section 'StorageDeep.PageFiles' -Message $_.Exception.Message
     }
+
+    try {
+        # Win32_ShadowCopy — точки відновлення VSS (System Restore/File
+        # History/backup-софт їх створюють). Порожній масив — штатний стан
+        # (VSS вимкнено, немає точок відновлення), не помилка збору.
+        $shadowCopies = Get-AuditObject -ClassName 'Win32_ShadowCopy'
+        foreach ($shadowCopy in $shadowCopies) {
+            $storage.ShadowCopies += [PSCustomObject]@{
+                ID                = $shadowCopy.ID
+                VolumeName        = $shadowCopy.VolumeName
+                InstallDate       = if ($shadowCopy.InstallDate) {
+                    $shadowCopyDate = Convert-AuditDateTime -Value $shadowCopy.InstallDate -UseCim:$script:UseCim
+                    if ($shadowCopyDate) { $shadowCopyDate.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+                } else {
+                    ''
+                }
+                ClientAccessible = $shadowCopy.ClientAccessible
+                Persistent       = $shadowCopy.Persistent
+            }
+        }
+    } catch {
+        # Win32_ShadowCopy-провайдер може бути недоступний (служба VSS
+        # вимкнена/недоступна) — фіксуємо як помилку збору, оскільки клас
+        # штатно присутній на всіх підтримуваних Windows.
+        Add-AuditError -Section 'StorageDeep.ShadowCopies' -Message $_.Exception.Message
+    }
+
+    if (Get-Command Get-StoragePool -ErrorAction SilentlyContinue) {
+        try {
+            # IsPrimordial=$true — це прихований "сирий" пул, що представляє
+            # фізичні диски системи саму по собі, не реальний Storage Spaces
+            # пул, створений користувачем; виключаємо як шум без цінності
+            # (той самий принцип, що й Unreachable/Incomplete у ARP-кеші).
+            $storagePools = Get-StoragePool -ErrorAction Stop | Where-Object { -not $_.IsPrimordial }
+            foreach ($pool in $storagePools) {
+                $storage.StoragePools += [PSCustomObject]@{
+                    FriendlyName      = $pool.FriendlyName
+                    HealthStatus      = [string]$pool.HealthStatus
+                    OperationalStatus = [string]$pool.OperationalStatus
+                    SizeGB            = Convert-BravoBytesToGB $pool.Size
+                    AllocatedGB       = Convert-BravoBytesToGB $pool.AllocatedSize
+                    IsReadOnly        = $pool.IsReadOnly
+                }
+
+                if ([string]$pool.HealthStatus -notin @('Healthy', '')) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage.StoragePools' -Message "Storage Pool '$($pool.FriendlyName)' має статус HealthStatus=$($pool.HealthStatus)." -Recommendation 'Перевірте стан пулу та фізичних дисків, що входять до нього (Get-PhysicalDisk).'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.StoragePools' -Message $_.Exception.Message
+        }
+    }
+    # Get-StoragePool відсутній (модуль Storage не встановлено, напр. деякі
+    # Server Core/старіші Windows) або Storage Spaces не використовується —
+    # $storage.StoragePools лишається порожнім масивом, штатний стан.
 
     return [PSCustomObject]$storage
 }
