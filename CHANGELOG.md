@@ -1,4 +1,16 @@
-﻿## Unreleased — v0.5.0 Deep Inventory: RDP NLA/scope + WinRM + SMB signing
+﻿## Unreleased — v0.5.0 Deep Inventory: Password policy + Audit policy
+
+Десятий і одинадцятий пункти v0.5.0 Deep Inventory (Security Baseline) — останні два класичні compliance-показники цього розділу.
+
+- **Password policy** через `net accounts`. Нова чиста функція `ConvertFrom-BravoNetAccountsOutput` парсить вивід за ФІКСОВАНОЮ ПОЗИЦІЄЮ рядка, а не за текстом мітки — `net.exe` локалізує самі мітки на не-EN збірках Windows, але порядок рядків фіксований у самому net.exe незалежно від мовного пакета. Покрито `tests/NetAccountsParsing.Tests.ps1` (3 тести, включно з симуляцією "локалізованого" виводу — інші мітки, той самий порядок рядків, той самий результат парсингу). Findings рахуються лише з числових значень (`[int]::TryParse`) — locale-безпечно, на відміну від текстових значень типу "Never"/"None"/"Unlimited".
+- **Audit policy** через `auditpol /get /category:* /r`. Свідомо БЕЗ findings на основі тексту `Inclusion Setting` (напр. "No Auditing"/"Success and Failure") — ці значення локалізовані рядки `auditpol.exe`, на відміну від числових полів password policy; судити "недостатньо аудиту" за англійським текстом було б ненадійно на не-EN системах (той самий принцип, що вже застосовувався для RDP firewall-правил і `net accounts` у цій сесії) — просто публікуємо сирі дані.
+- Findings: WARNING якщо мінімальна довжина пароля < 8; WARNING якщо lockout threshold = 0 (немає захисту від brute-force); WARNING якщо password history = 0 (дозволено миттєве повторне використання пароля).
+- Нові поля моделі (`src/20-ReportModel.ps1`): `Security.PasswordPolicy.{MinPasswordLength,MaxPasswordAgeDays,MinPasswordAgeDays,PasswordHistoryLength,LockoutThreshold,LockoutDurationMinutes,LockoutObservationWindowMinutes,Status,Error}`, `Security.AuditPolicy.{Subcategories,TotalCount,Status,Error}`. `SchemaVersion` піднято `0.6.8` → `0.6.9`.
+- HTML: нова картка "Password Policy" і нова таблиця "Audit Policy" на вкладці Security (`src/51-Export-Html.ps1`).
+- 2 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Password+Audit policy'` (перейменовано), той самий `-Profile Deep` прогін; + 3 unit-тести для `ConvertFrom-BravoNetAccountsOutput`.
+
+Усі 106 Pester-тестів проходять (101 попередніх + 2 E2E + 3 unit). `dist` перебудовано, sha512 звірено. **Security Baseline у v0.5.0 Deep Inventory тепер повністю закрито** (крім свідомо відкладених Autoruns/Scheduled tasks — більший обсяг даних).
+## Unreleased — v0.5.0 Deep Inventory: RDP NLA/scope + WinRM + SMB signing
 
 Сьомий, восьмий і дев'ятий пункти v0.5.0 Deep Inventory (Security Baseline) — три remote-access security перевірки в одному PR.
 
