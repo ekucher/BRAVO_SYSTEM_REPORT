@@ -95,6 +95,25 @@ jobs:
 
           Write-Host "[OK] SHA512 matches"
 
+      - name: Verify committed dist matches fresh build (reproducibility)
+        run: |
+          Write-Host "=== DIST REPRODUCIBILITY CHECK ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          # "Build modular monolith" step above just rebuilt dist/ IN-PLACE
+          # (same path as the committed files) - so git diff here compares
+          # the fresh build directly against committed HEAD. A difference
+          # means dist/ was committed manually without a matching src/
+          # change, or dist/ was not rebuilt after a src/ change.
+          git diff --exit-code -- dist/
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Generated dist artifacts differ from committed files. Run Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512 and commit both dist/Get-BravoSystemReport.ps1 and dist/Get-BravoSystemReport.ps1.sha512."
+          }
+
+          Write-Host "[OK] Committed dist/ matches fresh build"
+
       - name: Contract change guard (SchemaVersion + CHANGELOG)
         if: github.event_name == 'pull_request'
         run: |
@@ -176,6 +195,16 @@ jobs:
           }
 
           Import-Module Pester -MinimumVersion 5.0.0 -Force
+
+          # tests/WorkflowEncoding.Tests.ps1 parses .github/workflows/*.yml via
+          # powershell-yaml and -Skip's itself if the module is unavailable -
+          # without this bootstrap those tests would silently be skipped on
+          # every CI run (Release Blocker Fixes v0.6.1). Same NuGet/TLS
+          # provider bootstrap as for Pester above already ran in this step.
+          if (-not (Get-Module -ListAvailable -Name powershell-yaml)) {
+            Write-Host "[INFO] powershell-yaml not found, installing locally for CurrentUser..."
+            Install-Module -Name powershell-yaml -Force -SkipPublisherCheck -Scope CurrentUser
+          }
 
           $result = Invoke-Pester -Path ".\tests" -PassThru
 

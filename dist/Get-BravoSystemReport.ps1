@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-03 14:56:18
+    GeneratedAt: 2026-09-03 16:57:48
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -444,7 +444,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.19'
+    SchemaVersion = '0.6.20'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -610,6 +610,7 @@ return [ordered]@{
             AntivirusSignatureAgeDays = $null
             AMEngineVersion = ''
             AMProductVersion = ''
+            AMRunningMode = ''
             Status = 'NotChecked'
             Error = ''
         }
@@ -895,9 +896,9 @@ function Get-BravoHardwareAudit {
         # це не помилка), тож findings пишемо лише коли значення реально відоме.
         if ($null -ne $script:Report.Hardware.CPU.LoadPercent) {
             if ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuCriticalPercent) {
-                Add-AuditFinding -Severity 'CRITICAL' -Category 'Hardware.CPU' -Message "Завантаження CPU критично високе: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Перевірте процеси з найбільшим споживанням CPU (Processes.TopCPU) — можливий runaway-процес або недостатня продуктивність для навантаження.'
+                Add-AuditFinding -Severity 'CRITICAL' -Category 'Hardware.CPU' -Message "Завантаження CPU критично високе: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Перевірте процеси з найбільшим споживанням памʼяті (Processes.TopMemory) — можливий runaway-процес або недостатня продуктивність для навантаження.'
             } elseif ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuWarningPercent) {
-                Add-AuditFinding -Severity 'WARNING' -Category 'Hardware.CPU' -Message "Завантаження CPU підвищене: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Спостерігайте за динамікою навантаження CPU, за потреби перевірте Processes.TopCPU.'
+                Add-AuditFinding -Severity 'WARNING' -Category 'Hardware.CPU' -Message "Завантаження CPU підвищене: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Спостерігайте за динамікою навантаження CPU, за потреби перевірте Processes.TopMemory.'
             }
         }
 
@@ -1131,11 +1132,33 @@ function Get-BravoStorageDeepAudit {
     if (Get-Command Get-Volume -ErrorAction SilentlyContinue) {
         try {
             $volumes = Get-Volume -ErrorAction Stop
+            $getPartitionAvailable = [bool](Get-Command Get-Partition -ErrorAction SilentlyContinue)
             foreach ($volume in $volumes) {
                 $freePercent = if ($volume.Size -gt 0) {
                     [Math]::Round(($volume.SizeRemaining / $volume.Size) * 100, 2)
                 } else {
                     $null
+                }
+
+                # Кореляція з партицією (Release Blocker Fixes v0.6.1) —
+                # best-effort: том без літери диска НЕ завжди справжній
+                # зарезервований розділ (EFI/MSR/WinRE) — це може бути й
+                # звичайний NTFS/ReFS том, змонтований у порожню папку
+                # (folder-mounted volume, напр. C:\Data\PostgreSQL). Без
+                # цієї кореляції такі томи раніше помилково потрапляли до
+                # ReservedVolumes у Get-BravoStorageRiskSummary й випадали
+                # з аналізу вільного місця. Порожній рядок (кореляція не
+                # вдалась/недоступна) — свідомо НЕ трактується як Reserved.
+                $partitionType = ''
+                if ($getPartitionAvailable) {
+                    try {
+                        $correlatedPartition = Get-Partition -Volume $volume -ErrorAction Stop | Select-Object -First 1
+                        if ($correlatedPartition) { $partitionType = [string]$correlatedPartition.Type }
+                    } catch {
+                        # Кореляція може штатно не спрацювати (напр. том без
+                        # видимої партиції в поточному контексті) — не помилка
+                        # збору, $partitionType лишається '' (не Reserved).
+                    }
                 }
 
                 $storage.Volumes += [PSCustomObject]@{
@@ -1148,6 +1171,7 @@ function Get-BravoStorageDeepAudit {
                     SizeGB            = Convert-BravoBytesToGB $volume.Size
                     FreeGB            = Convert-BravoBytesToGB $volume.SizeRemaining
                     FreePercent       = $freePercent
+                    PartitionType     = $partitionType
                 }
 
                 if ($volume.HealthStatus -and [string]$volume.HealthStatus -notin @('Healthy','Unknown')) {
@@ -1374,10 +1398,18 @@ function Get-BravoStorageDeepAudit {
                         Add-AuditFinding -Severity 'WARNING' -Category 'Storage.Reliability' -Message "Диск '$($physicalDisk.FriendlyName)' має Wear=$($counter.Wear)% — близько до кінця ресурсу SSD/NVMe." -Recommendation 'Заплануйте заміну диска та перевірте резервні копії.'
                     }
                 } catch {
-                    Add-AuditError -Section 'StorageDeep.ReliabilityCounters' -Message $_.Exception.Message
+                    # Відсутність reliability counters для ОКРЕМОГО диска —
+                    # штатний стан (USB/віртуальний/деякі RAID-контрольовані
+                    # диски без SMART-passthrough), не помилка збору: інші
+                    # диски в цьому ж циклі продовжують оброблятись незалежно
+                    # (Release Blocker Fixes v0.6.1 — раніше суперечило
+                    # власному коментарю вище, який уже описував це як
+                    # benign, але код все одно викликав Add-AuditError).
                 }
             }
         } catch {
+            # Get-PhysicalDisk сам по собі впав — це вже помилка збору
+            # (не per-disk сценарій), на відміну від catch вище.
             Add-AuditError -Section 'StorageDeep.ReliabilityCounters' -Message $_.Exception.Message
         }
     }
@@ -1484,15 +1516,18 @@ function Get-BravoStorageRiskSummary {
         $freeGB = $volume.FreeGB
         $sizeGB = $volume.SizeGB
 
+        $partitionType = [string]$volume.PartitionType
+
         $volumeRisk = [PSCustomObject]@{
-            DriveLetter  = $driveLetter
-            Name         = $displayName
-            Label        = $label
-            FileSystem   = $volume.FileSystem
-            HealthStatus = $volume.HealthStatus
-            SizeGB       = $sizeGB
-            FreeGB       = $freeGB
-            FreePercent  = $freePercent
+            DriveLetter   = $driveLetter
+            Name          = $displayName
+            Label         = $label
+            FileSystem    = $volume.FileSystem
+            HealthStatus  = $volume.HealthStatus
+            SizeGB        = $sizeGB
+            FreeGB        = $freeGB
+            FreePercent   = $freePercent
+            PartitionType = $partitionType
         }
 
         if ($null -eq $freePercent) {
@@ -1514,7 +1549,17 @@ function Get-BravoStorageRiskSummary {
         # Critical/Warning findings і знижувати Health Score на КОЖНІЙ Windows-
         # машині було б систематичним false positive. Дані про них лишаються
         # видимими в таблиці Storage Deep (без Add-AuditFinding).
-        if (-not $driveLetter) {
+        #
+        # Відсутність літери диска сама по собі НЕ є доказом, що том —
+        # системно-зарезервований розділ (Release Blocker Fixes v0.6.1):
+        # звичайний NTFS/ReFS том, змонтований у порожню папку
+        # (folder-mounted volume, напр. C:\Data\PostgreSQL), теж не має
+        # літери диска, але це реальні дані, для яких аналіз вільного місця
+        # так само важливий, як і для звичайних томів. Тому Reserved
+        # визначається за фактичним типом партиції (PartitionType,
+        # кореляція через Get-Partition вище в Get-BravoStorageDeepAudit),
+        # а не лише за відсутністю DriveLetter.
+        if ((-not $driveLetter) -and ($partitionType -in @('System', 'Reserved', 'Recovery'))) {
             $risk.ReservedVolumes += $volumeRisk
             continue
         }
@@ -2130,6 +2175,64 @@ function ConvertFrom-BravoNetAccountsOutput {
     }
 }
 
+# Чиста функція (Release Blocker Fixes v0.6.1): чи потрібен WARNING на
+# вимкнений Real-Time Protection. Passive/SxS Passive — свідомий, штатний
+# стан Defender, коли активний сторонній антивірус, не сигнал проблеми.
+# Винесено окремо для Pester-покриття без запуску Get-BravoSecurityAudit.
+function Test-BravoDefenderRealTimeProtectionWarning {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [Nullable[bool]]$RealTimeProtectionEnabled,
+
+        [AllowNull()]
+        [string]$AMRunningMode
+    )
+
+    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive'))
+}
+
+# Чиста-за-даними обгортка над Confirm-SecureBootUEFI (Release Blocker
+# Fixes v0.6.1) — винесена окремо, щоб розрізняти access-denied (сесія без
+# elevation — не доказ апаратної відсутності Secure Boot) від справжнього
+# NotSupported (Legacy BIOS/VM без UEFI), і щоб цю логіку можна було
+# перевірити Pester Mock без запуску всього Get-BravoSecurityAudit.
+function Get-BravoSecureBootStatus {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $secureBootEnabled = Confirm-SecureBootUEFI -ErrorAction Stop
+        return [PSCustomObject]@{
+            Supported = $true
+            Enabled   = [bool]$secureBootEnabled
+            Status    = if ($secureBootEnabled) { 'Enabled' } else { 'Disabled' }
+            Error     = ''
+        }
+    } catch [System.UnauthorizedAccessException] {
+        # Access denied — Confirm-SecureBootUEFI вимагає підвищеної
+        # (elevated) сесії; це НЕ доказ апаратної відсутності Secure Boot,
+        # а лише брак прав у поточному контексті виконання (раніше
+        # змішувалось з реальним "NotSupported" — Legacy BIOS/VM).
+        return [PSCustomObject]@{
+            Supported = $null
+            Enabled   = $null
+            Status    = 'Unavailable'
+            Error     = $_.Exception.Message
+        }
+    } catch {
+        # Будь-який інший виняток (типово System.PlatformNotSupportedException
+        # на Legacy BIOS — немає UEFI, Secure Boot фізично неможливий, або
+        # аналогічний стан на частині VM) — штатний стан машини.
+        return [PSCustomObject]@{
+            Supported = $false
+            Enabled   = $null
+            Status    = 'NotSupported'
+            Error     = $_.Exception.Message
+        }
+    }
+}
+
 function Get-BravoSecurityAudit {
     [CmdletBinding()]
     param()
@@ -2216,28 +2319,18 @@ function Get-BravoSecurityAudit {
         # "не підтримується" — щоб не подовжувати найшвидший профіль зайвими
         # WMI/cmdlet-викликами без цінності.
         if ($Profile -in @('Full','Deep','Forensic')) {
-            try {
-                $secureBootEnabled = Confirm-SecureBootUEFI -ErrorAction Stop
-                $script:Report.Security.SecureBoot.Supported = $true
-                $script:Report.Security.SecureBoot.Enabled = [bool]$secureBootEnabled
-                $script:Report.Security.SecureBoot.Status = if ($secureBootEnabled) { 'Enabled' } else { 'Disabled' }
+            $secureBootResult = Get-BravoSecureBootStatus
+            $script:Report.Security.SecureBoot.Supported = $secureBootResult.Supported
+            $script:Report.Security.SecureBoot.Enabled = $secureBootResult.Enabled
+            $script:Report.Security.SecureBoot.Status = $secureBootResult.Status
+            $script:Report.Security.SecureBoot.Error = $secureBootResult.Error
 
-                if (-not $secureBootEnabled) {
-                    # INFO, не WARNING: Secure Boot вимкнений — поширений
-                    # свідомий вибір (dual-boot, старіше/специфічне обладнання,
-                    # dev-машини) — не впливає на Health Score/Status, лише
-                    # фіксується в звіті як факт стану.
-                    Add-AuditFinding -Severity 'INFO' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
-                }
-            } catch {
-                # Confirm-SecureBootUEFI кидає виняток і на Legacy BIOS (немає
-                # UEFI — Secure Boot фізично неможливий), і на частині VM —
-                # це штатний стан машини, не помилка збору (Add-AuditError
-                # НЕ викликається, щоб не давати хибний exit code 1 на кожній
-                # Legacy BIOS/VM-машині).
-                $script:Report.Security.SecureBoot.Supported = $false
-                $script:Report.Security.SecureBoot.Status = 'NotSupported'
-                $script:Report.Security.SecureBoot.Error = $_.Exception.Message
+            if ($secureBootResult.Status -eq 'Disabled') {
+                # INFO, не WARNING: Secure Boot вимкнений — поширений
+                # свідомий вибір (dual-boot, старіше/специфічне обладнання,
+                # dev-машини) — не впливає на Health Score/Status, лише
+                # фіксується в звіті як факт стану.
+                Add-AuditFinding -Severity 'INFO' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
             }
 
             try {
@@ -2335,6 +2428,12 @@ function Get-BravoSecurityAudit {
                     $script:Report.Security.Defender.AntivirusSignatureVersion = [string]$defenderStatus.AntivirusSignatureVersion
                     $script:Report.Security.Defender.AMEngineVersion = [string]$defenderStatus.AMEngineVersion
                     $script:Report.Security.Defender.AMProductVersion = [string]$defenderStatus.AMProductVersion
+                    # AMRunningMode (Release Blocker Fixes v0.6.1) — 'Normal',
+                    # 'Passive' або 'SxS Passive', коли сторонній антивірус
+                    # присутній і Defender свідомо працює у пасивному режимі
+                    # (RealTimeProtectionEnabled=$false у цьому режимі —
+                    # штатний стан, не сигнал проблеми, див. WARNING нижче).
+                    $script:Report.Security.Defender.AMRunningMode = [string]$defenderStatus.AMRunningMode
                     $script:Report.Security.Defender.Status = 'Detected'
 
                     if ($defenderStatus.AntivirusSignatureLastUpdated) {
@@ -2345,12 +2444,14 @@ function Get-BravoSecurityAudit {
                     # RealTimeProtectionEnabled=$false на машині зі стороннім
                     # антивірусом (напр. цей же script:Report.Security.Antivirus.Product
                     # показує інший продукт) — очікуваний, не тривожний стан:
-                    # Defender свідомо переходить у passive mode. Тут навмисно
-                    # НЕ звіряємо з Antivirus.Product (окрема, вже зібрана
-                    # SecurityCenter2-знахідка) — просто повідомляємо факт, без
-                    # спроби вгадати "чи це нормально", щоб не плодити хибних
-                    # WARNING/не-WARNING рішень на основі непрямих ознак.
-                    if (-not $script:Report.Security.Defender.RealTimeProtectionEnabled) {
+                    # Defender свідомо переходить у passive mode. AMRunningMode
+                    # ('Passive'/'SxS Passive') — прямий, авторитетний сигнал
+                    # саме цього стану від самого Defender (Release Blocker
+                    # Fixes v0.6.1: раніше WARNING спрацьовував безумовно,
+                    # даючи хибну тривогу на кожній машині зі стороннім AV).
+                    # Не звіряємо з Antivirus.Product (окрема SecurityCenter2-
+                    # знахідка) — AMRunningMode надійніший прямий індикатор.
+                    if (Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $script:Report.Security.Defender.RealTimeProtectionEnabled -AMRunningMode $script:Report.Security.Defender.AMRunningMode) {
                         Add-AuditFinding -Severity 'WARNING' -Category 'Security.Defender' -Message 'Windows Defender Real-Time Protection вимкнено.' -Recommendation 'Перевірте, чи це свідоме рішення (напр. активний сторонній антивірус) — якщо ні, увімкніть Real-Time Protection.'
                     }
 
@@ -2411,12 +2512,21 @@ function Get-BravoSecurityAudit {
 
                 if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
                     try {
-                        $rdpGroupMembers = Get-LocalGroupMember -Group 'Remote Desktop Users' -ErrorAction Stop
+                        # SID S-1-5-32-555 (well-known, locale-independent) —
+                        # той самий канонічний резолвер, що й для Administrators
+                        # (Resolve-BravoWellKnownGroupName, src/35-Collectors-Users.ps1).
+                        # Група "Remote Desktop Users" локалізується разом з MUI
+                        # (напр. "Пользователи удалённого рабочего стола" на
+                        # ru-RU) — жорсткий англ. літерал раніше повністю не
+                        # знаходив групу на не-EN збірках Windows, тож
+                        # AllowedUsers завжди лишався порожнім (Release Blocker
+                        # Fixes v0.6.1).
+                        $rdpGroupName = Resolve-BravoWellKnownGroupName -Sid 'S-1-5-32-555' -FallbackName 'Remote Desktop Users'
+                        $rdpGroupMembers = Get-LocalGroupMember -Group $rdpGroupName -ErrorAction Stop
                         $script:Report.Security.RemoteAccess.AllowedUsers = @($rdpGroupMembers | ForEach-Object { $_.Name })
                     } catch {
-                        # Група "Remote Desktop Users" може не існувати
-                        # (локалізована назва на не-EN збірках, або взагалі
-                        # відсутня) — не помилка збору.
+                        # Група "Remote Desktop Users" може справді не існувати
+                        # на цій машині — не помилка збору.
                     }
                 }
             }
@@ -2688,15 +2798,35 @@ function Get-BravoSecurityAudit {
 # MODULE: 35-Collectors-Users.ps1
 # Збір інформації про локальних користувачів та адміністраторів.
 
+# Резолвить well-known SID вбудованої локальної групи (S-1-5-32-*) у
+# ЛОКАЛІЗОВАНУ назву групи для цієї машини — locale-independent, на відміну
+# від жорсткого англ. літералу (Get-LocalGroupMember -Group з англ. назвою
+# на не-EN збірці Windows нічого не знаходить). Канонічна реалізація цього
+# патерну (Release Blocker Fixes v0.6.1) — раніше дублювалась лише для
+# Administrators тут; тепер також використовується для Remote Desktop Users
+# (src/34-Collectors-Security.ps1).
+function Resolve-BravoWellKnownGroupName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Sid,
+
+        [Parameter(Mandatory = $true)]
+        [string]$FallbackName
+    )
+
+    try {
+        $sidObject = New-Object Security.Principal.SecurityIdentifier($Sid)
+        return $sidObject.Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
+    } catch {
+        return $FallbackName
+    }
+}
+
 function Get-LocalAdministratorsSafe {
     $members = @()
 
-    try {
-        $adminGroupSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
-        $adminGroupName = $adminGroupSid.Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
-    } catch {
-        $adminGroupName = 'Administrators'
-    }
+    $adminGroupName = Resolve-BravoWellKnownGroupName -Sid 'S-1-5-32-544' -FallbackName 'Administrators'
 
     if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
         try {
@@ -2864,9 +2994,15 @@ function ConvertTo-BravoEventLogSummary {
 
     $events = @($Events)
 
-    $criticalCount = @($events | Where-Object { $_.LevelDisplayName -eq 'Critical' }).Count
-    $errorCount    = @($events | Where-Object { $_.LevelDisplayName -eq 'Error' }).Count
-    $warningCount  = @($events | Where-Object { $_.LevelDisplayName -eq 'Warning' }).Count
+    # Числовий .Level (стандартний Windows Event Log level: 1=Critical,
+    # 2=Error, 3=Warning) — locale-independent. .LevelDisplayName — це MUI
+    # рядок, локалізований на мову ОС аудитованої машини ("Помилка" на
+    # укр., "Erreur" на фр. тощо), тому порівняння з англійськими літералами
+    # раніше давало нульові лічильники на не-англомовних системах (Release
+    # Blocker Fixes v0.6.1).
+    $criticalCount = @($events | Where-Object { $_.Level -eq 1 }).Count
+    $errorCount    = @($events | Where-Object { $_.Level -eq 2 }).Count
+    $warningCount  = @($events | Where-Object { $_.Level -eq 3 }).Count
 
     $topProviders = @(
         $events |
@@ -3908,14 +4044,21 @@ function Get-BravoRuntimeAudit {
 
     # --- .NET Framework 4.x ---
     try {
-        # .NET Framework 4.8.1 підтримується лише на Windows 11 22H2+ (build 22621+)
-        # та Windows Server 2022 23H2/Annual Channel+ (build 25398+, теж >= 22621).
-        # На старіших ОС (Windows 7 SP1–10, Server 2012–2022 LTSC) 4.8.1 не існує
-        # як окремий пакет — інсталятор там блокується "не підтримується цією ОС",
+        # .NET Framework 4.8.1 підтримується на Windows 11 22H2+ (build 22621+),
+        # Windows Server 2022 23H2/Annual Channel+ (build 25398+, теж >= 22621),
+        # а також офіційно бекпортований (KB5029250 і новіші кумулятивні
+        # оновлення) на Windows 10 22H2 (build 19045) і базовий Windows
+        # Server 2022 RTM (build 20348) — обидва НЕ покриваються єдиним
+        # порогом "-ge 22621" (Release Blocker Fixes v0.6.1: раніше такі
+        # машини помилково отримували рекомендацію "максимум 4.8", хоча
+        # 4.8.1 для них реально доступний). На старіших ОС (Windows 7
+        # SP1–10 до 22H2, Server 2012–2019) 4.8.1 не існує як окремий
+        # пакет — інсталятор там блокується "не підтримується цією ОС",
         # тож максимум, який можна рекомендувати, — 4.8.
+        $dotNet481SupportedBuilds = @(19045, 20348) # Win10 22H2, Server 2022 RTM
         $osBuildNumber = 0
         $osBuildParsed = [int]::TryParse([string]$script:Report.OS.Build, [ref]$osBuildNumber)
-        $supports481 = $osBuildParsed -and ($osBuildNumber -ge 22621)
+        $supports481 = $osBuildParsed -and (($osBuildNumber -ge 22621) -or ($osBuildNumber -in $dotNet481SupportedBuilds))
 
         if ($supports481) {
             $maxCompatibleVersion = '4.8.1'
@@ -3968,7 +4111,13 @@ function Get-BravoRuntimeAudit {
 
     # --- PowerShell 7 (Core), встановлений поруч ---
     try {
-        $latestKnownCore7 = '7.6' # оновлено 2026-08, звірити при наступному ревю
+        # Явний patch-компонент (не лише Major.Minor) — Release Blocker Fixes
+        # v0.6.1: без нього нижче порівняння як повний [version] (замість
+        # лише Major/Minor) не мало б сенсу. Точна поточна patch-версія PS7
+        # не перевірена наживо (немає інтернет-доступу в цьому середовищі
+        # на момент фіксу) — '.0' консервативне припущення, звірити при
+        # наступному ревю, як і раніше.
+        $latestKnownCore7 = '7.6.0' # оновлено 2026-08, звірити при наступному ревю
         $script:Report.PowerShell.Core7LatestKnown = $latestKnownCore7
 
         $core7InstallsPath = 'HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions'
@@ -3986,8 +4135,14 @@ function Get-BravoRuntimeAudit {
                 $core7VersionParsed = [version]($core7Install.SemanticVersion -replace '-.*$','')
                 $latestKnownParsed = [version]$latestKnownCore7
 
-                if (($core7VersionParsed.Major -lt $latestKnownParsed.Major) -or
-                    ($core7VersionParsed.Major -eq $latestKnownParsed.Major -and $core7VersionParsed.Minor -lt $latestKnownParsed.Minor)) {
+                # Повне порівняння [version] (Major.Minor.Build), не лише
+                # Major/Minor (Release Blocker Fixes v0.6.1) — попередня
+                # логіка ігнорувала patch-версію: 7.4.5 проти "найновішої
+                # відомої" 7.4.0 не позначався б як застарілий, а 7.6.5
+                # (новіший за задекларовану "найновішу відому" 7.6.0)
+                # хибно позначався б як застарілий через порівняння лише
+                # Major/Minor, що завжди рівні.
+                if ($core7VersionParsed -lt $latestKnownParsed) {
                     $script:Report.PowerShell.Core7UpdateAvailable = $true
                     Add-AuditFinding -Severity 'WARNING' -Category 'PowerShell' -Message "PowerShell 7 застарів: $($script:Report.PowerShell.Core7Version) (найновіша відома версія: $latestKnownCore7)" -Recommendation 'Оновіть PowerShell 7 через winget (winget upgrade Microsoft.PowerShell) або MSI з github.com/PowerShell/PowerShell.'
                 }
@@ -4107,9 +4262,11 @@ function Update-BravoHealthScore {
 #   MAC-адреси, серійні номери, локальних адміністраторів, install path ПЗ.
 # -SanitizeLevel Strict: усе з Basic + приватні IPv4/gateway/DNS-сервери.
 #
-# Свідомо НЕ реалізовано (немає відповідних полів моделі, які можна було б
-# замаскувати): service account names — колектори служб не збирають LogOnAs;
-# якщо колись з'явиться, сюди додається окрема категорія.
+# Fail-closed (v0.6.1): маскування виконується через
+# Invoke-BravoReportSanitizationGated — якщо воно впаде посередині проходу
+# (частина полів замаскована, частина ні), виклик у src/90-Main.ps1
+# перериває ВЕСЬ export-пайплайн (жоден звіт не пишеться на диск), а не
+# лише реєструє ExportError і продовжує з частково замаскованими даними.
 
 # Створює маскер-функцію для однієї категорії значень: однакове вхідне
 # значення завжди повертає той самий токен (консистентність у межах одного
@@ -4257,6 +4414,13 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # Материнська плата (Hardware.Motherboard.SerialNumber, Release Blocker
+    # Fixes v0.6.1) — та сама категорія SERIAL, раніше пропущена поряд з
+    # BIOS/RAM/Disks/Monitors, хоча поле збирається тим самим колектором.
+    if ($Report.Hardware -and $Report.Hardware.Motherboard -and $Report.Hardware.Motherboard.SerialNumber) {
+        $Report.Hardware.Motherboard.SerialNumber = & $maskSerial $Report.Hardware.Motherboard.SerialNumber
+    }
+
     # --- Локальні адміністратори ---
     if ($Report.Users -and $Report.Users.LocalAdmins) {
         $Report.Users.LocalAdmins = @($Report.Users.LocalAdmins | ForEach-Object { & $maskAdmin $_ })
@@ -4266,6 +4430,20 @@ function Invoke-BravoReportSanitization {
     # що й LocalAdmins — той самий маскер, узгоджені токени в межах звіту) ---
     if ($Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.AllowedUsers) {
         $Report.Security.RemoteAccess.AllowedUsers = @($Report.Security.RemoteAccess.AllowedUsers | ForEach-Object { & $maskAdmin $_ })
+    }
+
+    # --- Облікові записи автоматичних служб (Services.AutomaticStopped[].StartName,
+    # Release Blocker Fixes v0.6.1) — та сама категорія ADMIN, що й
+    # LocalAdmins/AllowedUsers/ScheduledTasks.Author вище. Вбудовані системні
+    # ідентичності (LocalSystem, NT AUTHORITY\*) НЕ є персональними обліковими
+    # записами — маскувати їх лише додало б шуму без користі для privacy.
+    if ($Report.Services -and $Report.Services.AutomaticStopped) {
+        $builtInServiceIdentities = @('LocalSystem', 'NT AUTHORITY\SYSTEM', 'NT AUTHORITY\LOCAL SERVICE', 'NT AUTHORITY\NETWORK SERVICE')
+        foreach ($service in @($Report.Services.AutomaticStopped)) {
+            if ($service.StartName -and $service.StartName -notin $builtInServiceIdentities) {
+                $service.StartName = & $maskAdmin $service.StartName
+            }
+        }
     }
 
     # --- Чутливі шляхи встановлення ПЗ ---
@@ -4366,7 +4544,42 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # --- Report.OutputPath (Release Blocker Fixes v0.6.1) — реальний
+    # локальний шлях, куди збережено звіти (напр. C:\Users\jdoe\Reports) —
+    # та сама категорія PATH, що й InstallLocation/Autoruns/SmbShares. Це
+    # поле встановлюється в src/90-Main.ps1 ДО виклику санітизації (щоб
+    # маскування встигло його покрити), тому на момент цього виклику вже
+    # заповнене.
+    if ($Report.OutputPath) { $Report.OutputPath = & $maskPath $Report.OutputPath }
+
     return $Report
+}
+
+# Fail-closed gate (v0.6.1) навколо Invoke-BravoReportSanitization: сама
+# функція вище мутує $Report по посиланню (властивість вкладених
+# PSCustomObject/hashtable — не value type), тому виняток, кинутий
+# ПОСЕРЕДИНІ проходу, залишає $Report у частково замаскованому стані.
+# Ця обгортка не намагається відкотити часткові зміни (немає дешевого
+# способу без deep-clone усього звіту заздалегідь) — натомість повертає
+# Success=$false, і виклик у src/90-Main.ps1 на підставі цього прапорця
+# свідомо не пише ЖОДЕН файл на диск, замість ризикувати випадковим
+# витоком через недомаскований звіт.
+function Invoke-BravoReportSanitizationGated {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $Report,
+
+        [ValidateSet('Basic', 'Strict')]
+        [string]$Level = 'Basic'
+    )
+
+    try {
+        Invoke-BravoReportSanitization -Report $Report -Level $Level | Out-Null
+        return [PSCustomObject]@{ Success = $true; ErrorMessage = '' }
+    } catch {
+        return [PSCustomObject]@{ Success = $false; ErrorMessage = $_.Exception.Message }
+    }
 }
 
 
@@ -4990,28 +5203,6 @@ function Export-BravoHtmlReport {
             }
             $scheduledTaskMicrosoftCount = @($script:Report.Security.ScheduledTasks | Where-Object { $_.IsMicrosoftDefault }).Count
 
-            $updatesPending = @($script:Report.WindowsUpdate.PendingUpdates)
-            $updatesPendingRows = if ($updatesPending.Count -gt 0) {
-                ($updatesPending | ForEach-Object {
-                    $pendingUpdate = $_
-                    $severityText = if ([string]::IsNullOrWhiteSpace([string]$pendingUpdate.Severity)) { 'Unspecified' } else { [string]$pendingUpdate.Severity }
-                    $severityClass = switch ($severityText) {
-                        'Critical'  { 'risk-critical' }
-                        'Important' { 'risk-warning' }
-                        'Moderate'  { 'risk-warning' }
-                        'Low'       { 'risk-ok' }
-                        default     { 'risk-unknown' }
-                    }
-                    # Allow-list схеми перед вставкою в href: HTML-encode сам собою
-                    # не блокує javascript:/data:-URI, лише екранує спецсимволи.
-                    $catalogUrlValue = [string]$pendingUpdate.CatalogUrl
-                    $catalogLinkHtml = if ([string]::IsNullOrWhiteSpace($catalogUrlValue) -or $catalogUrlValue -notmatch '^https://') { '' } else { "<a href=`"$(ConvertTo-BravoHtmlText $catalogUrlValue)`" target=`"_blank`" rel=`"noopener noreferrer`">Catalog ↗</a>" }
-                    "<tr><td>$(ConvertTo-BravoHtmlText $pendingUpdate.KB)</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Title)</td><td><span class=`"risk $severityClass`">$(ConvertTo-BravoHtmlText $severityText)</span></td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.Categories)</td><td>$(if($pendingUpdate.IsDownloaded){'Так'}else{'Ні'})</td><td>$(ConvertTo-BravoHtmlText $pendingUpdate.SizeMB)</td><td>$catalogLinkHtml</td></tr>"
-                }) -join "`n"
-            } else {
-                '<tr><td colspan="7" class="muted">Відсутні оновлення не виявлені, пошук пропущено або завершився з помилкою (див. Search status).</td></tr>'
-            }
-
             $computerNameHtml = ConvertTo-BravoHtmlText $script:Report.ComputerName
             $timestampHtml = ConvertTo-BravoHtmlText $script:Report.Timestamp
             $profileHtml = ConvertTo-BravoHtmlText $Profile
@@ -5089,7 +5280,7 @@ function Export-BravoHtmlReport {
   </nav>
   <main class="content">
     <section id="tab-general" class="tab-panel active"><h2 class="tab-panel-title"><span class="section-icon">📌</span>General Dashboard</h2><div class="metrics-grid">$metricCardsHtml</div><div class="grid"><div class="card"><h3>Підсумок</h3>$(New-BravoInfoRowHtml 'Health Score' "$($script:Report.Health.Score)/100")$(New-BravoInfoRowHtml 'Status' $script:Report.Status)$(New-BravoInfoRowHtml 'Status reason' $script:Report.StatusReason)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)$(New-BravoInfoRowHtml 'Collection errors' $script:Report.CollectionErrors.Count)</div><div class="card"><h3>Ключова мережа</h3>$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div></div></section>
-    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml '.NET оновлення' $(if($script:Report.DotNet.UpdateAvailable){"Доступне (найновіша: $($script:Report.DotNet.LatestKnownVersion))"}else{'Немає'}))$(New-BravoInfoRowHtml 'PowerShell 7 (Core)' $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'Не встановлено'}))$(New-BravoInfoRowHtml 'PowerShell 7 оновлення' $(if($script:Report.PowerShell.Core7UpdateAvailable){"Доступне (найновіша: $($script:Report.PowerShell.Core7LatestKnown))"}else{'Немає'}))$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Service' $script:Report.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Installed hotfixes' $script:Report.WindowsUpdate.InstalledHotFixCount)$(New-BravoInfoRowHtml 'Last hotfix' "$($script:Report.WindowsUpdate.LastInstalledHotFix) ($($script:Report.WindowsUpdate.LastInstallDate))")$(New-BravoInfoRowHtml 'Pending reboot' $(if($script:Report.WindowsUpdate.PendingRebootRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Pending updates' $script:Report.WindowsUpdate.PendingCount)$(New-BravoInfoRowHtml 'Pending critical / security' "$($script:Report.WindowsUpdate.PendingCritical) / $($script:Report.WindowsUpdate.PendingSecurity)")$(New-BravoInfoRowHtml 'Search status' $script:Report.WindowsUpdate.SearchStatus)</div></div><h3>Pending Windows Updates</h3>$(New-BravoTableToolbarHtml -TableId 'table-pending-updates' -Placeholder 'Пошук по KB, назві, severity...')<div class="table-scroll"><table id="table-pending-updates" class="data-table"><thead><tr><th>KB</th><th>Назва</th><th>Severity</th><th>Категорії</th><th>Завантажено</th><th>Size MB</th><th>Посилання</th></tr></thead><tbody>$updatesPendingRows</tbody></table></div></section>
+    <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml '.NET оновлення' $(if($script:Report.DotNet.UpdateAvailable){"Доступне (найновіша: $($script:Report.DotNet.LatestKnownVersion))"}else{'Немає'}))$(New-BravoInfoRowHtml 'PowerShell 7 (Core)' $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'Не встановлено'}))$(New-BravoInfoRowHtml 'PowerShell 7 оновлення' $(if($script:Report.PowerShell.Core7UpdateAvailable){"Доступне (найновіша: $($script:Report.PowerShell.Core7LatestKnown))"}else{'Немає'}))$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div></div></section>
     <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div><div class="card"><h3>System / Motherboard</h3>$(New-BravoInfoRowHtml 'Manufacturer' $script:Report.Hardware.ComputerSystem.Manufacturer)$(New-BravoInfoRowHtml 'Model' $script:Report.Hardware.ComputerSystem.Model)$(New-BravoInfoRowHtml 'Chassis type' $script:Report.Hardware.ComputerSystem.ChassisType)$(New-BravoInfoRowHtml 'Motherboard' "$($script:Report.Hardware.Motherboard.Manufacturer) $($script:Report.Hardware.Motherboard.Product)")$(New-BravoInfoRowHtml 'Motherboard version' $script:Report.Hardware.Motherboard.Version)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System-reserved (без літери)</div><div class="storage-summary-value"><span class="risk risk-unknown">$reservedCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div><h3>BitLocker</h3>$(New-BravoTableToolbarHtml -TableId 'table-bitlocker' -Placeholder 'Пошук по томах, статусу захисту...')<div class="table-scroll"><table id="table-bitlocker" class="data-table"><thead><tr><th>Том</th><th>Тип</th><th>Volume Status</th><th>Protection</th><th>Encryption %</th><th>Method</th><th>Lock Status</th></tr></thead><tbody>$bitlockerRows</tbody></table></div><h3>Shadow Copies (VSS)</h3>$(New-BravoTableToolbarHtml -TableId 'table-shadowcopies' -Placeholder 'Пошук по точках відновлення...')<div class="table-scroll"><table id="table-shadowcopies" class="data-table"><thead><tr><th>Volume</th><th>Install Date</th><th>Client Accessible</th><th>Persistent</th></tr></thead><tbody>$shadowCopyRows</tbody></table></div><h3>Storage Spaces</h3>$(New-BravoTableToolbarHtml -TableId 'table-storagepools' -Placeholder 'Пошук по пулах...')<div class="table-scroll"><table id="table-storagepools" class="data-table"><thead><tr><th>Name</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Allocated GB</th></tr></thead><tbody>$storagePoolRows</tbody></table></div><h3>SMART / Reliability Counters</h3>$(New-BravoTableToolbarHtml -TableId 'table-reliability' -Placeholder 'Пошук по дисках...')<div class="table-scroll"><table id="table-reliability" class="data-table"><thead><tr><th>Disk</th><th>Media</th><th>Temp °C</th><th>Wear</th><th>Uncorrected errors</th><th>Power-on hours</th></tr></thead><tbody>$reliabilityRows</tbody></table></div><h3>SMART Predictive Failure</h3>$(New-BravoTableToolbarHtml -TableId 'table-smartpredict' -Placeholder 'Пошук по дисках...')<div class="table-scroll"><table id="table-smartpredict" class="data-table"><thead><tr><th>Instance</th><th>Predict Failure</th><th>Reason</th></tr></thead><tbody>$smartPredictRows</tbody></table></div><h3>GPU</h3>$(New-BravoTableToolbarHtml -TableId 'table-gpu' -Placeholder 'Пошук по відеокартах...')<div class="table-scroll"><table id="table-gpu" class="data-table"><thead><tr><th>Name</th><th>VRAM</th><th>Driver</th><th>Resolution</th><th>Status</th></tr></thead><tbody>$gpuRows</tbody></table></div><h3>Monitors</h3>$(New-BravoTableToolbarHtml -TableId 'table-monitors' -Placeholder 'Пошук по моніторах...')<div class="table-scroll"><table id="table-monitors" class="data-table"><thead><tr><th>Manufacturer</th><th>Model</th><th>Active</th><th>Size</th><th>Year</th></tr></thead><tbody>$monitorRows</tbody></table></div></section>
     <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS, driver...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th><th>Link Speed</th><th>Status</th><th>Driver</th></tr></thead><tbody>$adapterRows</tbody></table></div><div class="grid"><div class="card"><h3>WinHTTP Proxy</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Network.WinHttpProxy.Status)$(New-BravoInfoRowHtml 'Details' $winHttpProxyText)</div></div><h3>Routing Table</h3>$(New-BravoTableToolbarHtml -TableId 'table-routing' -Placeholder 'Пошук по маршрутах...')<div class="table-scroll"><table id="table-routing" class="data-table"><thead><tr><th>Destination</th><th>Next Hop</th><th>Metric</th><th>Interface</th></tr></thead><tbody>$routingTableRows</tbody></table></div><h3>ARP Cache</h3>$(New-BravoTableToolbarHtml -TableId 'table-arp' -Placeholder 'Пошук по ARP-кешу...')<div class="table-scroll"><table id="table-arp" class="data-table"><thead><tr><th>IP Address</th><th>MAC Address</th><th>State</th><th>Interface</th></tr></thead><tbody>$arpRows</tbody></table></div><h3>Listening Ports</h3>$(New-BravoTableToolbarHtml -TableId 'table-listening' -Placeholder 'Пошук по портах...')<div class="table-scroll"><table id="table-listening" class="data-table"><thead><tr><th>Local Address</th><th>Port</th><th>PID</th><th>Process</th></tr></thead><tbody>$listeningPortRows</tbody></table></div><h3>Established Connections</h3>$(New-BravoTableToolbarHtml -TableId 'table-established' -Placeholder 'Пошук по з''єднаннях...')<div class="table-scroll"><table id="table-established" class="data-table"><thead><tr><th>Local Address</th><th>Local Port</th><th>Remote Address</th><th>Remote Port</th><th>PID</th><th>Process</th></tr></thead><tbody>$establishedConnectionRows</tbody></table></div><h3>SMB Shares</h3>$(New-BravoTableToolbarHtml -TableId 'table-smbshares' -Placeholder 'Пошук по shares...')<div class="table-scroll"><table id="table-smbshares" class="data-table"><thead><tr><th>Name</th><th>Path</th><th>Type</th><th>Administrative</th></tr></thead><tbody>$smbShareRows</tbody></table></div></section>
     <section id="tab-security" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔒</span>Security</h2><div class="grid"><div class="card"><h3>Security baseline</h3>$(New-BravoInfoRowHtml 'UAC' $(if($script:Report.Security.UAC.Enabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'RDP' $(if($script:Report.Security.RemoteAccess.RDPEnabled){'Ввімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Antivirus' $script:Report.Security.Antivirus.Product)$(New-BravoInfoRowHtml 'Local admins' $script:Report.Users.LocalAdmins.Count)</div><div class="card"><h3>UAC full policy</h3>$(New-BravoInfoRowHtml 'Admin prompt behavior' $script:Report.Security.UAC.ConsentPromptBehaviorAdminText)$(New-BravoInfoRowHtml 'User prompt behavior' $script:Report.Security.UAC.ConsentPromptBehaviorUserText)$(New-BravoInfoRowHtml 'Secure desktop prompt' $(if($null -eq $script:Report.Security.UAC.PromptOnSecureDesktop){'N/A'}elseif($script:Report.Security.UAC.PromptOnSecureDesktop){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Filter admin token' $(if($null -eq $script:Report.Security.UAC.FilterAdministratorToken){'N/A'}elseif($script:Report.Security.UAC.FilterAdministratorToken){'Так'}else{'Ні'}))</div><div class="card"><h3>Firewall</h3>$(New-BravoInfoRowHtml 'Profiles collected' $script:Report.Security.Firewall.Count)$(New-BravoInfoRowHtml 'Health status' $script:Report.Health.Status)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)</div><div class="card"><h3>Secure Boot / TPM / SMBv1</h3>$(New-BravoInfoRowHtml 'Secure Boot' $script:Report.Security.SecureBoot.Status)$(New-BravoInfoRowHtml 'TPM' $script:Report.Security.TPM.Status)$(New-BravoInfoRowHtml 'TPM Ready' $(if($null -eq $script:Report.Security.TPM.Ready){'N/A'}elseif($script:Report.Security.TPM.Ready){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'TPM Manufacturer' $script:Report.Security.TPM.ManufacturerId)$(New-BravoInfoRowHtml 'TPM Spec Version' $script:Report.Security.TPM.SpecVersion)$(New-BravoInfoRowHtml 'SMBv1' $script:Report.Security.SMBv1.Status)</div><div class="card"><h3>Windows Defender</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Security.Defender.Status)$(New-BravoInfoRowHtml 'Real-Time Protection' $(if($null -eq $script:Report.Security.Defender.RealTimeProtectionEnabled){'N/A'}elseif($script:Report.Security.Defender.RealTimeProtectionEnabled){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Behavior Monitor' $(if($null -eq $script:Report.Security.Defender.BehaviorMonitorEnabled){'N/A'}elseif($script:Report.Security.Defender.BehaviorMonitorEnabled){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Signature version' $script:Report.Security.Defender.AntivirusSignatureVersion)$(New-BravoInfoRowHtml 'Signature age, днів' $script:Report.Security.Defender.AntivirusSignatureAgeDays)$(New-BravoInfoRowHtml 'Engine version' $script:Report.Security.Defender.AMEngineVersion)</div><div class="card"><h3>RDP details</h3>$(New-BravoInfoRowHtml 'NLA required' $(if($null -eq $script:Report.Security.RemoteAccess.NLAEnabled){'N/A'}elseif($script:Report.Security.RemoteAccess.NLAEnabled){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Port' $script:Report.Security.RemoteAccess.Port)$(New-BravoInfoRowHtml 'Firewall scope' $script:Report.Security.RemoteAccess.FirewallScope)$(New-BravoInfoRowHtml 'Firewall profiles' $script:Report.Security.RemoteAccess.FirewallProfiles)$(New-BravoInfoRowHtml 'Allowed users' ((@($script:Report.Security.RemoteAccess.AllowedUsers) | Where-Object { $_ }) -join ', '))</div><div class="card"><h3>WinRM</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Security.WinRM.Status)$(New-BravoInfoRowHtml 'Service' $script:Report.Security.WinRM.ServiceStatus)$(New-BravoInfoRowHtml 'Basic auth' $(if($null -eq $script:Report.Security.WinRM.Auth.Basic){'N/A'}elseif($script:Report.Security.WinRM.Auth.Basic){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'CredSSP' $(if($null -eq $script:Report.Security.WinRM.Auth.CredSSP){'N/A'}elseif($script:Report.Security.WinRM.Auth.CredSSP){'Увімкнено'}else{'Вимкнено'}))$(New-BravoInfoRowHtml 'Listeners' $script:Report.Security.WinRM.Listeners.Count)</div><div class="card"><h3>SMB signing</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Security.SMB.Status)$(New-BravoInfoRowHtml 'Server signing required' $(if($null -eq $script:Report.Security.SMB.ServerSigningRequired){'N/A'}elseif($script:Report.Security.SMB.ServerSigningRequired){'Так'}else{'Ні'}))$(New-BravoInfoRowHtml 'Insecure guest logons' $(if($null -eq $script:Report.Security.SMB.InsecureGuestLogonsEnabled){'N/A'}elseif($script:Report.Security.SMB.InsecureGuestLogonsEnabled){'Увімкнено'}else{'Вимкнено'}))</div><div class="card"><h3>Password Policy</h3>$(New-BravoInfoRowHtml 'Min password length' $script:Report.Security.PasswordPolicy.MinPasswordLength)$(New-BravoInfoRowHtml 'Max password age, днів' $script:Report.Security.PasswordPolicy.MaxPasswordAgeDays)$(New-BravoInfoRowHtml 'Password history length' $script:Report.Security.PasswordPolicy.PasswordHistoryLength)$(New-BravoInfoRowHtml 'Lockout threshold' $script:Report.Security.PasswordPolicy.LockoutThreshold)$(New-BravoInfoRowHtml 'Lockout duration, хв' $script:Report.Security.PasswordPolicy.LockoutDurationMinutes)</div></div><h3>TLS registry status</h3>$(New-BravoTableToolbarHtml -TableId 'table-tls' -Placeholder 'Пошук по протоколах TLS...')<div class="table-scroll"><table id="table-tls" class="data-table"><thead><tr><th>Protocol</th><th>Side</th><th>Status</th></tr></thead><tbody>$tlsRows</tbody></table></div><h3>Audit Policy</h3>$(New-BravoTableToolbarHtml -TableId 'table-audit-policy' -Placeholder 'Пошук по категоріях audit policy...')<div class="table-scroll"><table id="table-audit-policy" class="data-table"><thead><tr><th>Category</th><th>Subcategory</th><th>Inclusion Setting</th></tr></thead><tbody>$auditPolicyRows</tbody></table></div><h3>Autoruns</h3>$(New-BravoTableToolbarHtml -TableId 'table-autoruns' -Placeholder 'Пошук по autorun-записах...')<div class="table-scroll"><table id="table-autoruns" class="data-table"><thead><tr><th>Name</th><th>Command</th><th>Source</th><th>Hive</th></tr></thead><tbody>$autorunRows</tbody></table></div><h3>Scheduled Tasks (не-Microsoft, $scheduledTaskMicrosoftCount вбудованих Microsoft-задач приховано)</h3>$(New-BravoTableToolbarHtml -TableId 'table-scheduledtasks' -Placeholder 'Пошук по задачах...')<div class="table-scroll"><table id="table-scheduledtasks" class="data-table"><thead><tr><th>Name</th><th>Path</th><th>State</th><th>Author</th><th>Execute</th></tr></thead><tbody>$scheduledTaskRows</tbody></table></div></section>
@@ -6028,19 +6219,6 @@ Get-BravoUpdatesAudit
 # попередніх версій) став непотрібним.
 Update-BravoHealthScore
 
-# --- Sanitize (P1/v0.4.3) ---
-# Виконується ПІСЛЯ Health Score (маскування не впливає на Score/Status —
-# рахунок уже фінальний) і ДО будь-якого export'а, щоб JSON/HTML/CSV/ZIP
-# усі отримали вже замасковані дані з одного проходу.
-if ($Sanitize) {
-    try {
-        Invoke-BravoReportSanitization -Report $script:Report -Level $SanitizeLevel | Out-Null
-        Write-Host "$IconOk Sanitize: дані замасковано (рівень $SanitizeLevel)" -ForegroundColor Yellow
-    } catch {
-        Add-ExportError -Section 'Sanitize' -Message $_.Exception.Message
-    }
-}
-
 # ============================================================
 # ЗБЕРЕЖЕННЯ ЗВІТІВ
 # ============================================================
@@ -6055,67 +6233,111 @@ try {
 }
 
 $script:Report.OutputPath = $outputDir
-$baseFileName = "BravoSystemReport_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+$reportTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+
+# --- Sanitize (P1/v0.4.3, fail-closed з v0.6.1) ---
+# Виконується ПІСЛЯ Health Score (маскування не впливає на Score/Status —
+# рахунок уже фінальний), ПІСЛЯ Report.OutputPath (щоб саме поле теж
+# потрапило під маскування), і ДО будь-якого export'а, щоб JSON/HTML/CSV/ZIP
+# усі отримали вже замасковані дані з одного проходу. Fail-closed: якщо
+# маскування впало посередині (частина полів замаскована, частина — ні),
+# жоден звіт НЕ пишеться на диск (exit code 5) — часткове маскування
+# небезпечніше за відсутність звіту.
+$script:SanitizeFailed = $false
+if ($Sanitize) {
+    $sanitizeResult = Invoke-BravoReportSanitizationGated -Report $script:Report -Level $SanitizeLevel
+    if ($sanitizeResult.Success) {
+        Write-Host "$IconOk Sanitize: дані замасковано (рівень $SanitizeLevel)" -ForegroundColor Yellow
+    } else {
+        $script:SanitizeFailed = $true
+        Write-Host "[ERROR] Sanitize перервано помилкою — жоден звіт НЕ згенеровано (fail-closed): $($sanitizeResult.ErrorMessage)" -ForegroundColor Red
+    }
+}
+
+# Ім'я файлу теж має бути безпечним при -Sanitize: реальний $env:COMPUTERNAME
+# використовується лише коли sanitize вимкнено або провалився (у разі
+# провалу звіти взагалі не пишуться нижче, тому ім'я тут не потрапляє на
+# диск, але лишається консистентним з рештою пайплайна).
+$baseFileNameComputer = if ($Sanitize -and -not $script:SanitizeFailed) { $script:Report.ComputerName } else { $env:COMPUTERNAME }
+$baseFileName = "BravoSystemReport_${baseFileNameComputer}_$reportTimestamp"
 
 Write-Host ''
 Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
 Write-Host ''
-Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
+if ($script:SanitizeFailed) {
+    Write-Host "[ERROR] Sanitize fail-closed: жоден звіт НЕ записано в $outputDir" -ForegroundColor Red
+} else {
+    Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
-# JSON — Health Score вже фінальний (рахувався до початку export-етапів),
-# тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
-# Пишеться ПЕРШИМ (не останнім), щоб потрапити до ZIP нижче — але через це
-# ExportErrors від наступних export-етапів (HTML/CSV/ZIP/Email) у ньому ще
-# не відомі на момент цього запису. Тому наприкінці пайплайну JSON
-# перезаписується ще раз, якщо ExportErrors змінились — це ЄДИНИЙ можливий
-# повторний запис (не Health Score, не HTML, без re-zip), набагато простіше
-# й безпечніше за попередній "гейт" повторного перерахунку.
-$exportErrorCountBeforeExport = @($script:Report.ExportErrors).Count
-Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    # Локальний helper — синхронізує JSON на диску з поточним станом
+    # ExportErrors, якщо він змінився з моменту попереднього запису. JSON
+    # пишеться ПЕРШИМ (щоб потрапити до ZIP), але наступні export-етапи
+    # (HTML/PDF/TXT/MD/CSV/ZIP/Email) можуть додати власні ExportErrors —
+    # тому виклик повторюється в кількох контрольних точках нижче (після
+    # CSV/до ZIP, після ZIP/до Email, після Email), а не лише один раз
+    # наприкінці — щоб і ZIP-вкладення, і Email-вкладення відображали
+    # актуальний на момент пакування/відправки стан ExportErrors.
+    function Sync-BravoJsonIfExportErrorsChanged {
+        param([int]$PriorCount)
+        if (@($script:Report.ExportErrors).Count -gt $PriorCount) {
+            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+            $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+        }
+        return @($script:Report.ExportErrors).Count
+    }
 
-# HTML
-Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
-
-# PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
-# виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
-# встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
-# взагалі, тож PDF теж пропускається (нема з чого конвертувати).
-if ($ExportPdf -and -not $JSONOnly) {
-    Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
-}
-
-# TXT (plain-text summary — v0.6.0 Reports and UX, той самий формат
-# слугує й copy-friendly support summary) — не залежить від HTML/PDF,
-# генерується прямо з $script:Report, тож не гейтується -JSONOnly.
-Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
-
-# MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
-# самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
-# $script:Report, тож не гейтується -JSONOnly.
-Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
-
-# CSV
-Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
-
-$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
-
-# ZIP
-Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
-$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
-
-# Email — останній export-етап. Тіло листа й вкладення відображають стан на
-# момент відправки (Health Score вже фінальний; JSON-вкладення може не
-# містити ExportErrors від самого Email — лист не може повідомити про власну
-# невдалу відправку заднім числом, це очікуване обмеження).
-Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
-
-# Якщо HTML/CSV/ZIP/Email додали нові ExportErrors після першого запису JSON —
-# перезаписуємо JSON ще раз, щоб файл на диску (не копія в ZIP) був
-# авторитетним щодо ExportErrors. Health Score тут не перераховується (не
-# залежить від ExportErrors), тож це просто один додатковий запис файлу.
-if (@($script:Report.ExportErrors).Count -gt $exportErrorCountBeforeExport) {
+    # JSON — Health Score вже фінальний (рахувався до початку export-етапів),
+    # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
+    $exportErrorCount = @($script:Report.ExportErrors).Count
     Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+
+    # HTML
+    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+
+    # PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
+    # виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
+    # встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
+    # взагалі, тож PDF теж пропускається (нема з чого конвертувати).
+    if ($ExportPdf -and -not $JSONOnly) {
+        Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
+    }
+
+    # TXT (plain-text summary — v0.6.0 Reports and UX, той самий формат
+    # слугує й copy-friendly support summary) — не залежить від HTML/PDF,
+    # генерується прямо з $script:Report, тож не гейтується -JSONOnly.
+    Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
+
+    # MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
+    # самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
+    # $script:Report, тож не гейтується -JSONOnly.
+    Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
+
+    # CSV
+    Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
+
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+
+    # JSON у ZIP має відображати ExportErrors від HTML/PDF/TXT/MD/CSV, а не
+    # лише від початкового запису — синхронізуємо перед пакуванням.
+    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+
+    # ZIP
+    Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+
+    # Якщо сам ZIP додав ExportError — JSON на диску (не копія всередині вже
+    # запакованого ZIP) все одно має бути авторитетним перед відправкою Email.
+    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+
+    # Email — останній export-етап. Тіло листа й вкладення відображають стан на
+    # момент відправки (Health Score вже фінальний; JSON-вкладення може не
+    # містити ExportErrors від самого Email — лист не може повідомити про власну
+    # невдалу відправку заднім числом, це очікуване обмеження).
+    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+
+    # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
+    # (не вкладення вже відправленого листа) відображає це.
+    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
 }
 
 # Фінал
@@ -6130,7 +6352,11 @@ $zipPath = Join-Path $outputDir "$baseFileName.zip"
 Write-Host ''
 Write-Host '=== АУДИТ МАШИНИ ЗАВЕРШЕНО ===' -ForegroundColor Green
 Write-Host ''
-Write-Host "$IconFolder Звіти збережено: $outputDir" -ForegroundColor Cyan
+if ($script:SanitizeFailed) {
+    Write-Host "$IconError Звіти НЕ згенеровано (Sanitize fail-closed): $outputDir" -ForegroundColor Red
+} else {
+    Write-Host "$IconFolder Звіти збережено: $outputDir" -ForegroundColor Cyan
+}
 if (Test-Path -LiteralPath $jsonPath) { Write-Host "$IconJson JSON: $baseFileName.json" -ForegroundColor White }
 if ((-not $JSONOnly) -and (Test-Path -LiteralPath $htmlPath)) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
 if ($CSV -and (Test-Path -LiteralPath $csvPath)) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
@@ -6146,7 +6372,7 @@ Write-Host "Знахідки: $($script:Report.Health.Findings.Count); поми�
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
 Write-Host ''
 
-# --- Exit code contract (P0.5, розширено -Strict у P1) ---
+# --- Exit code contract (P0.5, розширено -Strict у P1, code 5 у v0.6.1) ---
 # 0 = аудит успішно завершено, без помилок збору/експорту (і, у -Strict
 #     режимі, без CRITICAL Health.Status);
 # 1 = аудит завершено, але були CollectionErrors і/або ExportErrors;
@@ -6154,6 +6380,10 @@ Write-Host ''
 # 3 = обов'язковий вихідний файл (JSON) не згенеровано;
 # 4 = лише у -Strict режимі: аудит завершено без CollectionErrors/ExportErrors,
 #     але Health.Status аудитованої машини = CRITICAL.
+# 5 = -Sanitize провалився посередині маскування (fail-closed) — жоден звіт
+#     не записано на диск, щоб частково замаскований звіт ніколи не потрапив
+#     користувачу. Перевіряється ПЕРШИМ у ланцюжку — причина відсутності
+#     JSON тут інша (свідома відмова писати), ніж у коді 3 (export-баг).
 #
 # За замовчуванням (без -Strict) Health Status (WARNING/CRITICAL) НЕ впливає
 # на exit code — це властивість аудитованої машини (наскільки вона здорова),
@@ -6161,7 +6391,9 @@ Write-Host ''
 # для CI-гейтів, яким потрібен ненульовий exit code саме на "машина в
 # критичному стані", а не лише на "інструмент не зміг щось зібрати/записати".
 $script:ExitCode = 0
-if (-not (Test-Path -LiteralPath $jsonPath)) {
+if ($script:SanitizeFailed) {
+    $script:ExitCode = 5
+} elseif (-not (Test-Path -LiteralPath $jsonPath)) {
     $script:ExitCode = 3
 } elseif ((@($script:Report.CollectionErrors).Count -gt 0) -or (@($script:Report.ExportErrors).Count -gt 0)) {
     $script:ExitCode = 1
@@ -6175,7 +6407,9 @@ if (-not (Test-Path -LiteralPath $jsonPath)) {
 # запису звіту, самі звіти вже записані) — лише консольне попередження,
 # щоб не спотворювати ExportErrors/Health невидимим для користувача чином
 # (JSON на цей момент уже записаний, повторний запис не відбувається).
-if (-not $NoOpenFolder) {
+# При $script:SanitizeFailed директорія свідомо не відкривається — там
+# немає звітів, які варто показувати оператору.
+if (-not $NoOpenFolder -and -not $script:SanitizeFailed) {
     try { Start-Process explorer.exe -ArgumentList "`"$outputDir`"" -ErrorAction SilentlyContinue } catch {
         Write-Host "[WARNING] Не вдалося відкрити директорію звітів: $($_.Exception.Message)" -ForegroundColor Yellow
     }

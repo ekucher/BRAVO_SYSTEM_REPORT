@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.19'
+    SchemaVersion = '0.6.20'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -172,6 +172,7 @@ return [ordered]@{
             AntivirusSignatureAgeDays = $null
             AMEngineVersion = ''
             AMProductVersion = ''
+            AMRunningMode = ''
             Status = 'NotChecked'
             Error = ''
         }

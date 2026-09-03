@@ -3,7 +3,7 @@
 ## Поточний статус
 
 - **Current stable (`main`)**: ScriptVersion 0.5.0 (SchemaVersion 0.5.0) — усе, що змерджено в `developer` після цього, ще не promoted у `main`.
-- **Release candidate**: ScriptVersion 0.6.1 (SchemaVersion 0.6.19), гілка `release/v0.6.1-stable` → PR у `main` (не змержений, чекає окремого рішення власника).
+- **Release candidate**: ScriptVersion 0.6.1 (SchemaVersion 0.6.20), гілка `release/v0.6.1-stable` → PR у `main` (не змержений, чекає окремого рішення власника).
 - **Completed** (у `developer`, включено в release candidate вище): Stabilization P0 (execution contract, exit codes, CollectionErrors/ExportErrors), v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs, PR #57-#69), v0.6.x Reports and UX (Findings grouped, JSON schema docs, TXT/Markdown summary), v0.6.1 (Dark Mode, Edge CLI PDF), v0.7.0 CI/Quality Gates.
 - **Next** (у `developer`, після promotion `main`): HTML filters/collapsible sections (останній пункт v0.6.0 Reports and UX) — див. відповідний розділ нижче.
 

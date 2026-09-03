@@ -17,9 +17,15 @@ function ConvertTo-BravoEventLogSummary {
 
     $events = @($Events)
 
-    $criticalCount = @($events | Where-Object { $_.LevelDisplayName -eq 'Critical' }).Count
-    $errorCount    = @($events | Where-Object { $_.LevelDisplayName -eq 'Error' }).Count
-    $warningCount  = @($events | Where-Object { $_.LevelDisplayName -eq 'Warning' }).Count
+    # Числовий .Level (стандартний Windows Event Log level: 1=Critical,
+    # 2=Error, 3=Warning) — locale-independent. .LevelDisplayName — це MUI
+    # рядок, локалізований на мову ОС аудитованої машини ("Помилка" на
+    # укр., "Erreur" на фр. тощо), тому порівняння з англійськими літералами
+    # раніше давало нульові лічильники на не-англомовних системах (Release
+    # Blocker Fixes v0.6.1).
+    $criticalCount = @($events | Where-Object { $_.Level -eq 1 }).Count
+    $errorCount    = @($events | Where-Object { $_.Level -eq 2 }).Count
+    $warningCount  = @($events | Where-Object { $_.Level -eq 3 }).Count
 
     $topProviders = @(
         $events |
