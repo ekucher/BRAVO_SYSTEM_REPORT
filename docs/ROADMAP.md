@@ -2,7 +2,10 @@
 
 ## Поточний статус
 
-Поточна стабільна версія: **ScriptVersion 0.6.1** (SchemaVersion 0.6.19). v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs) повністю закрито 2026-09-02 (PR #57-#69). v0.6.x Reports and UX (Findings grouped, JSON schema docs, TXT summary) та v0.6.1 (Dark Mode, Edge CLI PDF) та v0.7.0 CI/Quality Gates — повністю закрито 2026-09-03.
+- **Current stable (`main`)**: ScriptVersion 0.5.0 (SchemaVersion 0.5.0) — усе, що змерджено в `developer` після цього, ще не promoted у `main`.
+- **Release candidate**: ScriptVersion 0.6.1 (SchemaVersion 0.6.19), гілка `release/v0.6.1-stable` → PR у `main` (не змержений, чекає окремого рішення власника).
+- **Completed** (у `developer`, включено в release candidate вище): Stabilization P0 (execution contract, exit codes, CollectionErrors/ExportErrors), v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs, PR #57-#69), v0.6.x Reports and UX (Findings grouped, JSON schema docs, TXT/Markdown summary), v0.6.1 (Dark Mode, Edge CLI PDF), v0.7.0 CI/Quality Gates.
+- **Next** (у `developer`, після promotion `main`): HTML filters/collapsible sections (останній пункт v0.6.0 Reports and UX) — див. відповідний розділ нижче.
 
 ## Stabilization milestone (зовнішнє ТЗ P0-P3)
 
@@ -44,7 +47,7 @@
 - export-и винесені у `src/50-*` ... `src/54-*`;
 - монолітний runtime збирається у `dist/Get-BravoSystemReport.ps1` через `Build-BRAVO-SystemReport.ps1`.
 
-## Найближчий milestone: v0.4.1 Release Stabilization
+## v0.4.1 Release Stabilization (завершено)
 
 Ціль: зробити релізний пакет і документацію узгодженими з фактичною модульною архітектурою.
 

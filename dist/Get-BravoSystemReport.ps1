@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-03 10:45:31
+    GeneratedAt: 2026-09-03 14:56:18
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -33,6 +33,7 @@ param(
     [switch]$JSONOnly,
     [switch]$CSV,
     [switch]$TXT,
+    [switch]$MD,
     [switch]$Zip = $true,
     [switch]$NoZip,
     [switch]$NoEmoji,
@@ -4188,6 +4189,19 @@ function Invoke-BravoReportSanitization {
     # --- Public IPv4 (і geo/ISP-дані, що з нею пов'язані) ---
     if ($Report.Network -and $Report.Network.IP) {
         if ($Report.Network.IP.PublicIPv4) { $Report.Network.IP.PublicIPv4 = & $maskPublicIP $Report.Network.IP.PublicIPv4 }
+
+        # GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) —
+        # похідні від PublicIPv4 (ipapi.co lookup, src/33-Collectors-Network.ps1),
+        # самі по собі ідентифікують локацію/провайдера машини навіть якщо
+        # сама IP-адреса замаскована вище. Лише Strict (Basic-поведінку
+        # свідомо не чіпаємо — див. header-коментар цього файлу): не
+        # повторюваний ідентифікатор на кшталт MAC/serial (один профіль на
+        # звіт), тому фіксований токен без per-value унікальності.
+        if ($Level -eq 'Strict') {
+            foreach ($geoField in @('PublicIPv4ISP', 'PublicIPv4Organization', 'PublicIPv4ASN', 'PublicIPv4Country', 'PublicIPv4Region', 'PublicIPv4City', 'PublicIPv4Timezone')) {
+                if ($Report.Network.IP.$geoField) { $Report.Network.IP.$geoField = 'REDACTED-GEOIP' }
+            }
+        }
     }
 
     # --- MAC-адреси ---
@@ -5567,6 +5581,103 @@ function Export-BravoTxtReport {
 
 
 # ============================================================
+# MODULE: src/56-Export-Md.ps1
+# ============================================================
+
+# MODULE: 56-Export-Md.ps1
+# Експорт BRAVO SYSTEM REPORT у Markdown summary (v0.6.0 Reports and UX —
+# Markdown summary для Redmine/GitHub). Той самий набір даних, що й TXT
+# summary (src/55-Export-Txt.ps1), але з Markdown-розміткою: заголовки,
+# таблиця ключових метрик, таблиця findings — щоб можна було вставити прямо
+# в опис issue/тікета й отримати відформатований вивід.
+
+function Export-BravoMdReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$OutputDir,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$BaseFileName,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$MD
+    )
+
+    if (-not $MD) { return }
+
+    try {
+        $mdPath = Join-Path $OutputDir "$BaseFileName.md"
+        $lines = [System.Collections.Generic.List[string]]::new()
+
+        $lines.Add('# BRAVO SYSTEM REPORT — Summary')
+        $lines.Add('')
+        $lines.Add("**Computer:** $($script:Report.ComputerName)  ")
+        $lines.Add("**Profile:** $($script:Report.Profile)  ")
+        $lines.Add("**Timestamp:** $($script:Report.Timestamp)  ")
+        $lines.Add("**Health Score:** $($script:Report.Health.Score)/100  ")
+        $lines.Add("**Status:** $($script:Report.Status)  ")
+        $lines.Add("**Status reason:** $($script:Report.StatusReason)")
+        $lines.Add('')
+
+        $lines.Add('## Key metrics')
+        $lines.Add('')
+        $lines.Add('| Metric | Value |')
+        $lines.Add('|---|---|')
+        $lines.Add("| OS | $($script:Report.OS.Caption) ($($script:Report.OS.Version), build $($script:Report.OS.Build)) |")
+        $lines.Add("| Uptime | $($script:Report.OS.UptimeDays)d $($script:Report.OS.UptimeHours)h |")
+        $lines.Add("| CPU | $($script:Report.Hardware.CPU.Name) — load $($script:Report.Hardware.CPU.LoadPercent)% |")
+        $lines.Add("| RAM | $($script:Report.Hardware.RAM.UsedGB) GB used / $($script:Report.Hardware.RAM.TotalGB) GB total ($($script:Report.Hardware.RAM.UsedPercent)%) |")
+        $lines.Add("| Disk | $($script:Report.Hardware.Disks.FreeGB) GB free / $($script:Report.Hardware.Disks.TotalGB) GB total ($($script:Report.Hardware.Disks.FreePercent)% free) |")
+        $lines.Add('')
+
+        # Findings через ту саму чисту функцію групування, що й TXT/HTML-звіт
+        # (src/40-Health.ps1, PR #82) — єдина точка сортування/лічильників
+        # для всіх форматів звіту.
+        $findingsGrouped = Get-BravoFindingsGrouped -Findings $script:Report.Health.Findings
+        $lines.Add("## Findings (Critical: $($findingsGrouped.CriticalCount), Warning: $($findingsGrouped.WarningCount), Info: $($findingsGrouped.InfoCount))")
+        $lines.Add('')
+
+        if (@($findingsGrouped.Sorted).Count -gt 0) {
+            $lines.Add('| Severity | Category | Message |')
+            $lines.Add('|---|---|---|')
+            foreach ($finding in @($findingsGrouped.Sorted)) {
+                $escapedMessage = $finding.Message -replace '\|', '\|'
+                $lines.Add("| $($finding.Severity) | $($finding.Category) | $escapedMessage |")
+            }
+        } else {
+            $lines.Add('Критичних зауважень не знайдено.')
+        }
+        $lines.Add('')
+
+        $collectionErrorCount = @($script:Report.CollectionErrors).Count
+        if ($collectionErrorCount -gt 0) {
+            $lines.Add("## Collection errors ($collectionErrorCount)")
+            $lines.Add('')
+            $lines.Add('| Section | Message |')
+            $lines.Add('|---|---|')
+            foreach ($collectionError in @($script:Report.CollectionErrors)) {
+                $escapedMessage = $collectionError.Message -replace '\|', '\|'
+                $lines.Add("| $($collectionError.Section) | $escapedMessage |")
+            }
+            $lines.Add('')
+        }
+
+        $lines.Add("*Generated by BRAVO SYSTEM REPORT v$($script:Report.ScriptVersion) (SchemaVersion $($script:Report.SchemaVersion))*")
+
+        Set-Content -LiteralPath $mdPath -Value $lines -Encoding utf8
+        $script:Report.GeneratedFiles += $mdPath
+        Write-Host "  $IconCsv MD: $BaseFileName.md" -ForegroundColor Green
+    } catch {
+        Add-ExportError -Section 'Export.Md' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка MD: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+
+# ============================================================
 # MODULE: src/90-Main.ps1
 # ============================================================
 
@@ -5791,6 +5902,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
         if ($TXT) { $arguments += '-TXT' }
+        if ($MD) { $arguments += '-MD' }
         # $Zip не форвардиться напряму: powershell.exe -File не підтримує
         # синтаксис -Zip:$false для switch-параметрів з рядка команди (це
         # PowerShell-мовна конструкція, а не CLI-конвенція — перевірено
@@ -5977,6 +6089,11 @@ if ($ExportPdf -and -not $JSONOnly) {
 # генерується прямо з $script:Report, тож не гейтується -JSONOnly.
 Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
 
+# MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
+# самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
+# $script:Report, тож не гейтується -JSONOnly.
+Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
+
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
@@ -6007,6 +6124,7 @@ $jsonPath = Join-Path $outputDir "$baseFileName.json"
 $htmlPath = Join-Path $outputDir "$baseFileName.html"
 $csvPath = Join-Path $outputDir "$baseFileName.csv"
 $txtPath = Join-Path $outputDir "$baseFileName.txt"
+$mdPath = Join-Path $outputDir "$baseFileName.md"
 $zipPath = Join-Path $outputDir "$baseFileName.zip"
 
 Write-Host ''
@@ -6017,6 +6135,7 @@ if (Test-Path -LiteralPath $jsonPath) { Write-Host "$IconJson JSON: $baseFileNam
 if ((-not $JSONOnly) -and (Test-Path -LiteralPath $htmlPath)) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
 if ($CSV -and (Test-Path -LiteralPath $csvPath)) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
 if ($TXT -and (Test-Path -LiteralPath $txtPath)) { Write-Host "$IconCsv TXT: $baseFileName.txt" -ForegroundColor White }
+if ($MD -and (Test-Path -LiteralPath $mdPath)) { Write-Host "$IconCsv MD: $baseFileName.md" -ForegroundColor White }
 if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
     Write-Host "$IconZip ZIP: $baseFileName.zip" -ForegroundColor White
 } elseif ($Zip) {
@@ -6050,9 +6169,15 @@ if (-not (Test-Path -LiteralPath $jsonPath)) {
     $script:ExitCode = 4
 }
 
+# Відкриття директорії звітів — UX-зручність, не частина export-контракту:
+# $script:ExitCode вже зафіксований вище і не залежить від успіху цього
+# кроку. Невдача тут НЕ реєструється через Add-ExportError (не помилка
+# запису звіту, самі звіти вже записані) — лише консольне попередження,
+# щоб не спотворювати ExportErrors/Health невидимим для користувача чином
+# (JSON на цей момент уже записаний, повторний запис не відбувається).
 if (-not $NoOpenFolder) {
     try { Start-Process explorer.exe -ArgumentList "`"$outputDir`"" -ErrorAction SilentlyContinue } catch {
-        Add-ExportError -Section 'OpenFolder' -Message $_.Exception.Message
+        Write-Host "[WARNING] Не вдалося відкрити директорію звітів: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 

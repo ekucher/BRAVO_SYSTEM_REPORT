@@ -296,13 +296,20 @@ BRAVO-SYSTEM-REPORT-WIN
 - перевірка `CollectionErrors=0`;
 - перевірка, що у tracked files немає випадково закомічених публічних IPv4 literals.
 
-Окремо є ручний workflow:
+Окремо є hosted workflow (`ubuntu-latest`, без залежності від self-hosted Windows-раннера):
 
 ```text
 .github/workflows/powershell-static-check.yml
 ```
 
-Він виконує базову перевірку структури репозиторію.
+Запускається на PR у `main`/`developer`, push у `developer` і вручну
+(`workflow_dispatch`). Виконує лише Windows-незалежні перевірки: структура
+репозиторію, PowerShell parser check (`src/*.ps1` + `dist` + root wrapper),
+version consistency (`ScriptVersion`/`SchemaVersion` vs README/ROADMAP),
+parameter-surface guard (`tests/ParameterSurface.Tests.ps1`). Усе, що
+потребує реальної Windows-машини (WMI/CIM/Get-WinEvent/Get-NetAdapter/
+Get-SmbShare/Edge/реєстр тощо) — і далі виключно `local-windows-validation.yml`
+на self-hosted раннері.
 
 ## Реліз
 

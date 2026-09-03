@@ -814,3 +814,26 @@ Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit c
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+Describe 'Release Sync & Governance Fixes — OpenFolder не породжує ExportError' {
+    # Живий Start-Process explorer.exe недетермінований у CI (self-hosted
+    # раннер може не мати інтерактивного desktop; сам виклик майже ніколи
+    # не кидає термінуючий exception) — тому регресія перевіряється
+    # статичним скануванням джерела (той самий підхід, що й
+    # tests/WorkflowEncoding.Tests.ps1), а не live-запуском. Відкриття
+    # папки — UX-зручність, не export-контракт: $script:ExitCode вже
+    # зафіксований до цього блоку і не повинен залежати від нього, а
+    # невдача не повинна мовчки псувати ExportErrors (звіти вже записані,
+    # повторного запису JSON не буде — Add-ExportError тут був би
+    # невидимим для користувача).
+    It 'src/90-Main.ps1: catch-блок навколо Start-Process explorer.exe не викликає Add-ExportError' {
+        $mainPath = Join-Path $PSScriptRoot '..\src\90-Main.ps1'
+        Test-Path -LiteralPath $mainPath | Should -BeTrue
+
+        $content = Get-Content -LiteralPath $mainPath -Raw
+        $openFolderMatch = [regex]::Match($content, 'if \(-not \$NoOpenFolder\) \{.*?\n\}', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+
+        $openFolderMatch.Success | Should -BeTrue -Because 'блок OpenFolder має існувати в src/90-Main.ps1'
+        $openFolderMatch.Value | Should -Not -Match 'Add-ExportError' -Because 'невдача відкриття папки — UX, не export-помилка; ExitCode вже зафіксований раніше й не повинен розходитись із мовчки зміненим ExportErrors'
+    }
+}

@@ -1,5 +1,16 @@
 ﻿## v0.6.1 — 2026-09-03
 
+### Release Sync & Governance Fixes
+
+- Синхронізація `release/v0.6.1-stable` з `developer` (merge, без force-push) після того, як PR #86 (Markdown summary) змержено в `developer` вже після відкриття `release/v0.6.1-stable`.
+- **Parameter surface regression test** (`tests/ParameterSurface.Tests.ps1`): звіряє AST-парсингом множини імен параметрів root wrapper `Get-BravoSystemReport.ps1` і canonical `src/05-Params.ps1` — превентивний захист від класу багу з PR #86 (новий параметр забутий у wrapper).
+- **OpenFolder/exit-code**: `src/90-Main.ps1` — невдача `Start-Process explorer.exe` більше не реєструється через `Add-ExportError` (семантично невірно категоризувала UX-зручність як export-помилку; `$script:ExitCode` уже зафіксований до цього блоку, тож сама помилка ніде не була видима). Тепер лише консольне `[WARNING]`. Regression: статичний скан `src/90-Main.ps1` (`tests/ExecutionContract.Tests.ps1`).
+- **Sanitize Strict: GeoIP redaction**: `src/45-Sanitize.ps1` — `Network.IP.PublicIPv4ISP/Organization/ASN/Country/Region/City/Timezone` (похідні від `PublicIPv4`, `src/33-Collectors-Network.ps1`) тепер редагуються (`REDACTED-GEOIP`) у `-SanitizeLevel Strict`; Basic-поведінку не змінено. +2 Pester (`tests/Sanitize.Tests.ps1`).
+- **Hosted CI розширено**: `.github/workflows/powershell-static-check.yml` — з ручного `workflow_dispatch` до PR-тригера (`main`/`developer`) + push у `developer`. Нові Windows-незалежні кроки: PowerShell parser check (`src/*.ps1` + `dist` + root wrapper), version consistency (`ScriptVersion`/`SchemaVersion` vs README/ROADMAP), `tests/SourceParserCheck.Tests.ps1` + `tests/ParameterSurface.Tests.ps1` через Pester. Свідомо не запускає решту Pester-набору (WMI/CIM/Get-WinEvent/Get-NetAdapter/Get-SmbShare/Edge залежності) — це лишається виключно на self-hosted `local-windows-validation.yml`.
+- **Branch protection**: задокументовано рекомендований contract у `docs/PROJECT_RULES.md` (обидва branch protection наразі не налаштовані на GitHub) — рекомендація для власника, repository settings не змінювались.
+- **ROADMAP**: "Поточний статус" переписано за структурою Current stable / Release candidate / Completed / Next; перейменовано застарілий заголовок "Найближчий milestone: v0.4.1 Release Stabilization" → "v0.4.1 Release Stabilization (завершено)".
+- 180/180 Pester passed.
+
 ### v0.6.0: Markdown summary
 
 - Новий опційний параметр `-MD` (`src/05-Params.ps1`), форвардиться через wrapper і elevation-relaunch тим самим генеричним механізмом, що й `-TXT`.

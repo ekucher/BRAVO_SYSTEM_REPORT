@@ -486,9 +486,15 @@ if (-not (Test-Path -LiteralPath $jsonPath)) {
     $script:ExitCode = 4
 }
 
+# Відкриття директорії звітів — UX-зручність, не частина export-контракту:
+# $script:ExitCode вже зафіксований вище і не залежить від успіху цього
+# кроку. Невдача тут НЕ реєструється через Add-ExportError (не помилка
+# запису звіту, самі звіти вже записані) — лише консольне попередження,
+# щоб не спотворювати ExportErrors/Health невидимим для користувача чином
+# (JSON на цей момент уже записаний, повторний запис не відбувається).
 if (-not $NoOpenFolder) {
     try { Start-Process explorer.exe -ArgumentList "`"$outputDir`"" -ErrorAction SilentlyContinue } catch {
-        Add-ExportError -Section 'OpenFolder' -Message $_.Exception.Message
+        Write-Host "[WARNING] Не вдалося відкрити директорію звітів: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 

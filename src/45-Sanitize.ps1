@@ -91,6 +91,19 @@ function Invoke-BravoReportSanitization {
     # --- Public IPv4 (і geo/ISP-дані, що з нею пов'язані) ---
     if ($Report.Network -and $Report.Network.IP) {
         if ($Report.Network.IP.PublicIPv4) { $Report.Network.IP.PublicIPv4 = & $maskPublicIP $Report.Network.IP.PublicIPv4 }
+
+        # GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) —
+        # похідні від PublicIPv4 (ipapi.co lookup, src/33-Collectors-Network.ps1),
+        # самі по собі ідентифікують локацію/провайдера машини навіть якщо
+        # сама IP-адреса замаскована вище. Лише Strict (Basic-поведінку
+        # свідомо не чіпаємо — див. header-коментар цього файлу): не
+        # повторюваний ідентифікатор на кшталт MAC/serial (один профіль на
+        # звіт), тому фіксований токен без per-value унікальності.
+        if ($Level -eq 'Strict') {
+            foreach ($geoField in @('PublicIPv4ISP', 'PublicIPv4Organization', 'PublicIPv4ASN', 'PublicIPv4Country', 'PublicIPv4Region', 'PublicIPv4City', 'PublicIPv4Timezone')) {
+                if ($Report.Network.IP.$geoField) { $Report.Network.IP.$geoField = 'REDACTED-GEOIP' }
+            }
+        }
     }
 
     # --- MAC-адреси ---

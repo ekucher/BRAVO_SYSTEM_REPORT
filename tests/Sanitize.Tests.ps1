@@ -26,6 +26,13 @@ BeforeAll {
                     PrimaryIPv4 = '192.168.1.10'
                     PrimaryInterface = [PSCustomObject]@{ IPv4 = '192.168.1.10'; Gateway = '192.168.1.1' }
                     PublicIPv4 = '203.0.113.5'
+                    PublicIPv4ISP = 'Example ISP LLC'
+                    PublicIPv4Organization = 'Example Org'
+                    PublicIPv4ASN = 'AS64500'
+                    PublicIPv4Country = 'Ukraine'
+                    PublicIPv4Region = 'Kyiv Oblast'
+                    PublicIPv4City = 'Kyiv'
+                    PublicIPv4Timezone = 'Europe/Kyiv'
                 }
                 Routing = [ordered]@{
                     DefaultGateway = '192.168.1.1'
@@ -139,6 +146,16 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Network.IP.PrimaryIPv4 | Should -Be '192.168.1.10'
         $script:report.Network.Routing.DefaultGateway | Should -Be '192.168.1.1'
     }
+
+    It 'НЕ маскує GeoIP/ISP-метадані у Basic-режимі (задокументована поведінка — лише Strict)' {
+        $script:report.Network.IP.PublicIPv4ISP | Should -Be 'Example ISP LLC'
+        $script:report.Network.IP.PublicIPv4Organization | Should -Be 'Example Org'
+        $script:report.Network.IP.PublicIPv4ASN | Should -Be 'AS64500'
+        $script:report.Network.IP.PublicIPv4Country | Should -Be 'Ukraine'
+        $script:report.Network.IP.PublicIPv4Region | Should -Be 'Kyiv Oblast'
+        $script:report.Network.IP.PublicIPv4City | Should -Be 'Kyiv'
+        $script:report.Network.IP.PublicIPv4Timezone | Should -Be 'Europe/Kyiv'
+    }
 }
 
 Describe 'Invoke-BravoReportSanitization -Level Strict' {
@@ -177,5 +194,15 @@ Describe 'Invoke-BravoReportSanitization -Level Strict' {
     It 'все з Basic лишається замаскованим і в Strict' {
         $script:report.ComputerName | Should -Match '^REDACTED-COMPUTERNAME-'
         $script:report.Network.IP.PublicIPv4 | Should -Match '^REDACTED-PUBLIC-IP-'
+    }
+
+    It 'редагує GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) — лише в Strict' {
+        $script:report.Network.IP.PublicIPv4ISP | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Organization | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4ASN | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Country | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Region | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4City | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Timezone | Should -Be 'REDACTED-GEOIP'
     }
 }
