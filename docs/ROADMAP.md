@@ -195,7 +195,7 @@
 - [x] CSV — коротка інвентаризація.
 - [x] ZIP — пакет звітів.
 - [x] TXT summary (`-TXT` параметр, `src/55-Export-Txt.ps1`, `Export-BravoTxtReport`; заголовок + ключові метрики + findings через `Get-BravoFindingsGrouped` (PR #82) + collection errors; той самий файл покриває "Copy-friendly support summary" нижче).
-- [ ] Markdown summary для Redmine/GitHub.
+- [x] Markdown summary для Redmine/GitHub (`-MD` параметр, `src/56-Export-Md.ps1`, `Export-BravoMdReport`; заголовок + таблиця ключових метрик + таблиця findings через `Get-BravoFindingsGrouped` (PR #82) + таблиця collection errors — той самий принцип, що й TXT summary, але з Markdown-таблицями).
 - [ ] HTML filters/collapsible sections.
 - [x] Findings grouped by severity/category (`Get-BravoFindingsGrouped`, `src/40-Health.ps1` — чиста функція, сортує CRITICAL→WARNING→INFO, потім за Category; вкладка Findings у HTML-звіті тепер сортована за цим порядком + плитки-лічильники Critical/Warning/Info зверху таблиці; та сама функція буде перевикористана для TXT/Markdown summary).
 - [x] Copy-friendly support summary (той самий пункт, що й "TXT summary" вище — plain text без розмітки, легко копіювати в тікет).

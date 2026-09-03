@@ -755,6 +755,36 @@ Describe 'v0.6.0 — TXT summary (-TXT)' -Skip:(-not (Test-Path (Join-Path $PSSc
     }
 }
 
+Describe 'v0.6.0 — Markdown summary (-MD)' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    It '-MD створює .md з очікуваними маркерами (заголовок, Health Score, таблиця Findings)' {
+        $dir = New-BravoTestReportsDir -Name 'exportmd'
+        & $script:WrapperPath -Profile Quick -MD -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+
+        $mdFile = Get-ChildItem -LiteralPath $dir -Filter '*.md' -Recurse | Select-Object -First 1
+        $exitCode | Should -Be 0
+        $mdFile | Should -Not -BeNullOrEmpty
+
+        $mdContent = Get-Content -LiteralPath $mdFile.FullName -Raw
+        $mdContent | Should -Match '# BRAVO SYSTEM REPORT'
+        $mdContent | Should -Match '\*\*Health Score:\*\*'
+        $mdContent | Should -Match '## Findings \('
+        $mdContent | Should -Match 'SchemaVersion'
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'без -MD .md НЕ створюється (фіча опційна, не дефолт)' {
+        $dir = New-BravoTestReportsDir -Name 'nomd'
+        & $script:WrapperPath -Profile Quick -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $dir 2>&1 | Out-Null
+
+        $mdFile = Get-ChildItem -LiteralPath $dir -Filter '*.md' -Recurse | Select-Object -First 1
+        $mdFile | Should -BeNullOrEmpty
+
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'P0.4/P0.5 — CollectionErrors/ExportErrors розділені, exit code відповідає стану' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     It 'успішний Quick-прогін -> exit code 0, CollectionErrors=0, ExportErrors=0' {
         $dir = New-BravoTestReportsDir -Name 'exit0'

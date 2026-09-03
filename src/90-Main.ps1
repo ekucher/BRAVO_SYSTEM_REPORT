@@ -219,6 +219,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
         if ($TXT) { $arguments += '-TXT' }
+        if ($MD) { $arguments += '-MD' }
         # $Zip не форвардиться напряму: powershell.exe -File не підтримує
         # синтаксис -Zip:$false для switch-параметрів з рядка команди (це
         # PowerShell-мовна конструкція, а не CLI-конвенція — перевірено
@@ -405,6 +406,11 @@ if ($ExportPdf -and -not $JSONOnly) {
 # генерується прямо з $script:Report, тож не гейтується -JSONOnly.
 Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
 
+# MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
+# самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
+# $script:Report, тож не гейтується -JSONOnly.
+Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
+
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
@@ -435,6 +441,7 @@ $jsonPath = Join-Path $outputDir "$baseFileName.json"
 $htmlPath = Join-Path $outputDir "$baseFileName.html"
 $csvPath = Join-Path $outputDir "$baseFileName.csv"
 $txtPath = Join-Path $outputDir "$baseFileName.txt"
+$mdPath = Join-Path $outputDir "$baseFileName.md"
 $zipPath = Join-Path $outputDir "$baseFileName.zip"
 
 Write-Host ''
@@ -445,6 +452,7 @@ if (Test-Path -LiteralPath $jsonPath) { Write-Host "$IconJson JSON: $baseFileNam
 if ((-not $JSONOnly) -and (Test-Path -LiteralPath $htmlPath)) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
 if ($CSV -and (Test-Path -LiteralPath $csvPath)) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
 if ($TXT -and (Test-Path -LiteralPath $txtPath)) { Write-Host "$IconCsv TXT: $baseFileName.txt" -ForegroundColor White }
+if ($MD -and (Test-Path -LiteralPath $mdPath)) { Write-Host "$IconCsv MD: $baseFileName.md" -ForegroundColor White }
 if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
     Write-Host "$IconZip ZIP: $baseFileName.zip" -ForegroundColor White
 } elseif ($Zip) {
