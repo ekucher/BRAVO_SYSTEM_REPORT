@@ -6,6 +6,7 @@ on:
       - main
       - developer
       - bravo/integration/modular-build
+      - 'release/**'
   workflow_dispatch:
 
 jobs:
