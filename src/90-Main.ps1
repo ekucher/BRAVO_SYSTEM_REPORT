@@ -218,6 +218,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         if ($OutputPath) { $arguments += "-OutputPath `"$OutputPath`"" }
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
+        if ($TXT) { $arguments += '-TXT' }
         # $Zip не форвардиться напряму: powershell.exe -File не підтримує
         # синтаксис -Zip:$false для switch-параметрів з рядка команди (це
         # PowerShell-мовна конструкція, а не CLI-конвенція — перевірено
@@ -399,6 +400,11 @@ if ($ExportPdf -and -not $JSONOnly) {
     Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
 }
 
+# TXT (plain-text summary — v0.6.0 Reports and UX, той самий формат
+# слугує й copy-friendly support summary) — не залежить від HTML/PDF,
+# генерується прямо з $script:Report, тож не гейтується -JSONOnly.
+Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
+
 # CSV
 Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
@@ -428,6 +434,7 @@ $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)
 $jsonPath = Join-Path $outputDir "$baseFileName.json"
 $htmlPath = Join-Path $outputDir "$baseFileName.html"
 $csvPath = Join-Path $outputDir "$baseFileName.csv"
+$txtPath = Join-Path $outputDir "$baseFileName.txt"
 $zipPath = Join-Path $outputDir "$baseFileName.zip"
 
 Write-Host ''
@@ -437,6 +444,7 @@ Write-Host "$IconFolder Звіти збережено: $outputDir" -ForegroundCo
 if (Test-Path -LiteralPath $jsonPath) { Write-Host "$IconJson JSON: $baseFileName.json" -ForegroundColor White }
 if ((-not $JSONOnly) -and (Test-Path -LiteralPath $htmlPath)) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
 if ($CSV -and (Test-Path -LiteralPath $csvPath)) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
+if ($TXT -and (Test-Path -LiteralPath $txtPath)) { Write-Host "$IconCsv TXT: $baseFileName.txt" -ForegroundColor White }
 if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
     Write-Host "$IconZip ZIP: $baseFileName.zip" -ForegroundColor White
 } elseif ($Zip) {

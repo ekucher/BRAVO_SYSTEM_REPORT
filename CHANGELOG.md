@@ -1,4 +1,12 @@
-﻿## Unreleased — v0.6.0: JSON schema documentation
+﻿## Unreleased — v0.6.0: TXT summary (закриває заодно Copy-friendly support summary)
+
+- Новий опційний параметр `-TXT` (`src/05-Params.ps1`), форвардиться через wrapper і elevation-relaunch тим самим генеричним механізмом, що й решта параметрів.
+- `Export-BravoTxtReport` (`src/55-Export-Txt.ps1`) генерує `$BaseFileName.txt` — plain-text summary: заголовок (ComputerName/Profile/Timestamp/Health Score/Status/StatusReason), ключові метрики (OS/Uptime/CPU/RAM/Disk коротко), findings через `Get-BravoFindingsGrouped` (PR #82, той самий формат сортування, що й HTML), collection errors якщо є.
+- Закриває одразу два пункти ROADMAP: "TXT summary" і "Copy-friendly support summary" — той самий простий, легко-копійований у тікет підтримки файл.
+- `.txt` додається в `GeneratedFiles`, тож потрапляє в ZIP-пакування, якщо `-Zip` активний. Не гейтується `-JSONOnly` (генерується прямо з моделі, не залежить від HTML).
+- Тести: +2 E2E (`-TXT` створює `.txt` з очікуваними маркерами / без `-TXT` файл не створюється).
+
+## Unreleased — v0.6.0: JSON schema documentation
 
 - Новий `docs/SCHEMA.md` — навігаційна документація структури `$script:Report`: кожен верхньорівневий розділ моделі (`Meta`, `Dashboard`, `Health`, `OS`, `Hardware`, `Network`, `Security`, `EventLogs`, `Software`, `Updates` тощо) з коротким описом призначення, ключовими полями та посиланням на відповідний `src/3X-Collectors-*.ps1`. Не документує кожне поле дослівно — фокус на навігації для розробника, що вперше бачить схему.
 - Розділ про `SchemaVersion` (поточне значення, семантика PATCH-інкременту) і явно сформульоване правило "нова/змінена форма моделі → бампнути SchemaVersion в тому самому коміті" — те саме правило, яке вже застосовувалось у кожному PR цієї сесії, тепер задокументоване в одному місці.
