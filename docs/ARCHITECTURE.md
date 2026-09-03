@@ -36,7 +36,11 @@ Export-BravoHtmlReport / Export-BravoCsvReport / Export-BravoZipReport /
 Export-BravoJsonReport (повторний запис, лише якщо ExportErrors змінились —
     щоб файл на диску відображав фінальний стан)
     ↓
-Підсумок у консоль, детермінований exit code (0/1/2/3)
+Підсумок у консоль, детермінований exit code (0/1/2/3/4/5):
+    0 — успіх; 1 — Collection/ExportErrors; 2 — фатальна неопрацьована
+    помилка (top-level trap); 3 — обов'язковий JSON не згенеровано;
+    4 — лише -Strict: Health.Status = CRITICAL; 5 — Sanitize fail-closed
+    (жоден звіт не записано)
 ```
 
 ## Конвенція collector-а

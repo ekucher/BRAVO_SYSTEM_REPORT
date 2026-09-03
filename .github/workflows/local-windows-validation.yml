@@ -54,6 +54,34 @@ jobs:
 
           Write-Host "[OK] Git diff check passed"
 
+      - name: Verify committed dist SHA512
+        run: |
+          Write-Host "=== COMMITTED DIST SHA512 VERIFICATION ==="
+
+          Set-Location $env:GITHUB_WORKSPACE
+
+          # Must run BEFORE the build step below: the build regenerates BOTH
+          # dist/Get-BravoSystemReport.ps1 and its .sha512 in-place, so the
+          # later "Verify SHA512 matches dist" step only proves fresh-build
+          # self-consistency. This step hashes the checked-out (committed)
+          # working-tree artifact before anything touches it - proving the
+          # COMMITTED .sha512, the value end users verify a downloaded dist
+          # against, matches the COMMITTED dist content (v0.6.1
+          # acceptance-review finding).
+          $scriptPath = ".\dist\Get-BravoSystemReport.ps1"
+          $shaPath = ".\dist\Get-BravoSystemReport.ps1.sha512"
+
+          $actualHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA512).Hash.Trim()
+          $recordedHash = (Get-Content -LiteralPath $shaPath -Raw).Trim()
+
+          if ($actualHash -ne $recordedHash) {
+            Write-Host "[ERROR] SHA512 of committed dist: $actualHash"
+            Write-Host "[ERROR] Committed .sha512:        $recordedHash"
+            throw "Committed dist/Get-BravoSystemReport.ps1.sha512 does not match the committed dist runtime. Rebuild with 'Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512' and commit both files together."
+          }
+
+          Write-Host "[OK] Committed .sha512 matches committed dist runtime"
+
       - name: Build modular monolith
         run: |
           Write-Host "=== BUILD MODULAR MONOLITH ==="
@@ -117,6 +145,12 @@ jobs:
           # script plus the timestamp and is therefore never reproducible
           # across separate builds - it is already validated for internal
           # self-consistency by "Verify SHA512 matches dist" above.
+          # git show output is decoded through the console output encoding;
+          # the dist contains Cyrillic UTF-8, so an OEM codepage console
+          # (437/866/1251) would turn the committed side into mojibake and
+          # false-fail the comparison. Pin UTF-8 before any native capture.
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
           $normalizePattern = '(?m)^\s*GeneratedAt:.*$'
 
           # git show (captured by PowerShell as a line array, which drops the
@@ -133,9 +167,7 @@ jobs:
             throw "Generated dist/Get-BravoSystemReport.ps1 differs from committed HEAD (ignoring the GeneratedAt timestamp line). Run Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512 and commit both dist/Get-BravoSystemReport.ps1 and dist/Get-BravoSystemReport.ps1.sha512."
           }
 
-          Write-Host "[OK] Committed dist/Get-BravoSystemReport.ps1 matches fresh build (ignoring GeneratedAt timestamp)"
-
-          Write-Host "[OK] Committed dist/ matches fresh build"
+          Write-Host "[OK] Committed dist matches fresh build (ignoring GeneratedAt timestamp)"
 
       - name: Contract change guard (SchemaVersion + CHANGELOG)
         if: github.event_name == 'pull_request'

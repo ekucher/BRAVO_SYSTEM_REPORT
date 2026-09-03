@@ -248,6 +248,15 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     It 'HTML-експорт містить REDACTED-токени (маскування дійшло до export-етапу, а не лише до JSON)' {
         $script:SanitizeStrictRawHtml | Should -Match 'REDACTED-COMPUTERNAME-'
     }
+
+    It 'HTML НЕ містить реального OutputPath (footer-витік v0.6.1 acceptance-review): шлях у footer — замаскований Report.OutputPath, не сирий параметр' {
+        # Негативний скан на literal шлях каталогу звітів цього прогону:
+        # раніше footer брав сирий $OutputDir-параметр в обхід report-моделі
+        # (єдине місце реальної ідентичності в sanitized HTML — містив
+        # C:\Users\<username>\... попри -Sanitize).
+        $script:SanitizeStrictRawHtml | Should -Not -Match ([regex]::Escape($script:SanitizeStrictDir))
+        $script:SanitizeStrictRawHtml | Should -Match 'REDACTED-PATH-'
+    }
 }
 
 Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors / ConnectionsProcessName+SmbShares / UacFullPolicy / Autoruns / ScheduledTasks' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {

@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-03 19:50:56
+    GeneratedAt: 2026-09-03 21:00:08
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1066,6 +1066,54 @@ function Get-BravoStorageFreeSpaceSeverity {
     return 'Healthy'
 }
 
+# Чиста функція: канонічна нормалізація типу партиції (v0.6.1 acceptance-
+# review fix). Get-Partition.Type мапить GPT GUID у зрозумілі рядки
+# ('System'/'Reserved'/'Recovery'), але для MBR-дисків (legacy BIOS) WinRE-
+# розділ (MbrType 0x27) НЕ мапиться у 'Recovery' — .Type дає 'IFS'/'Unknown',
+# і такий том раніше помилково потрапляв у звичайний аналіз вільного місця
+# (систематичний false CRITICAL на MBR-парку: WinRE штатно заповнений 90%+).
+# Прецедентність визначена рівно один раз тут:
+#   1) GPT GUID (авторитетне джерело: EFI System / MSR / Recovery);
+#   2) MBR type 0x27 (39) → Recovery;
+#   3) IsSystem → System (явна системна партиція не стає data-томом);
+#   4) наявний Type як є ('Basic'/'IFS'/... — дані, НЕ Reserved);
+#   5) інакше 'Unknown'.
+function Resolve-BravoPartitionType {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Type = '',
+        [AllowNull()][AllowEmptyString()][string]$GptType = '',
+        [AllowNull()]$MbrType = $null,
+        [AllowNull()]$IsSystem = $null
+    )
+
+    $gptGuid = ([string]$GptType).Trim().Trim('{}').ToLowerInvariant()
+    switch ($gptGuid) {
+        'c12a7328-f81f-11d2-ba4b-00a0c93ec93b' { return 'System' }
+        'e3c9e316-0b5c-4db8-817d-f92df00215ae' { return 'Reserved' }
+        'de94bba4-06d1-4d40-a16a-bfd50179d6ac' { return 'Recovery' }
+    }
+
+    $mbrText = ([string]$MbrType).Trim()
+    if ($mbrText) {
+        $mbrValue = -1
+        if ($mbrText -match '^0x[0-9a-fA-F]+$') {
+            try { $mbrValue = [Convert]::ToInt32($mbrText.Substring(2), 16) } catch { $mbrValue = -1 }
+        } else {
+            $parsed = 0
+            if ([int]::TryParse($mbrText, [ref]$parsed)) { $mbrValue = $parsed }
+        }
+        if ($mbrValue -eq 39) { return 'Recovery' }
+    }
+
+    if ($IsSystem -eq $true) { return 'System' }
+
+    $typeText = ([string]$Type).Trim()
+    if ($typeText) { return $typeText }
+
+    return 'Unknown'
+}
+
 function Convert-BravoBytesToGB {
     param([Parameter(Mandatory = $false)]$Bytes)
 
@@ -1133,6 +1181,16 @@ function Get-BravoStorageDeepAudit {
         try {
             $volumes = Get-Volume -ErrorAction Stop
             $getPartitionAvailable = [bool](Get-Command Get-Partition -ErrorAction SilentlyContinue)
+
+            # Один список усіх партицій для fallback-кореляції нижче (v0.6.1
+            # acceptance-review fix): primary-шлях Get-Partition -Volume може
+            # штатно не спрацювати для окремого тому — тоді шукаємо партицію
+            # за стабільними ідентифікаторами (volume GUID path в AccessPaths,
+            # літера диска), НЕ за збігом розміру.
+            $allPartitionsForCorrelation = @()
+            if ($getPartitionAvailable) {
+                try { $allPartitionsForCorrelation = @(Get-Partition -ErrorAction Stop) } catch { $allPartitionsForCorrelation = @() }
+            }
             foreach ($volume in $volumes) {
                 $freePercent = if ($volume.Size -gt 0) {
                     [Math]::Round(($volume.SizeRemaining / $volume.Size) * 100, 2)
@@ -1151,13 +1209,42 @@ function Get-BravoStorageDeepAudit {
                 # вдалась/недоступна) — свідомо НЕ трактується як Reserved.
                 $partitionType = ''
                 if ($getPartitionAvailable) {
+                    $correlatedPartition = $null
                     try {
                         $correlatedPartition = Get-Partition -Volume $volume -ErrorAction Stop | Select-Object -First 1
-                        if ($correlatedPartition) { $partitionType = [string]$correlatedPartition.Type }
                     } catch {
                         # Кореляція може штатно не спрацювати (напр. том без
                         # видимої партиції в поточному контексті) — не помилка
-                        # збору, $partitionType лишається '' (не Reserved).
+                        # збору, нижче є fallback за стабільними ідентифікаторами.
+                    }
+
+                    # Fallback-кореляція: volume GUID path (\\?\Volume{...}\)
+                    # присутній у AccessPaths відповідної партиції; для томів
+                    # з літерою — збіг DriveLetter. Свідомо БЕЗ heuristic-збігу
+                    # за самим лише розміром.
+                    if (-not $correlatedPartition -and $allPartitionsForCorrelation.Count -gt 0) {
+                        $volumeGuidPath = [string]$volume.Path
+                        if ($volumeGuidPath) {
+                            $correlatedPartition = $allPartitionsForCorrelation |
+                                Where-Object { $_.AccessPaths -and (@($_.AccessPaths) -contains $volumeGuidPath) } |
+                                Select-Object -First 1
+                        }
+                        if (-not $correlatedPartition -and $volume.DriveLetter) {
+                            $correlatedPartition = $allPartitionsForCorrelation |
+                                Where-Object { [string]$_.DriveLetter -eq [string]$volume.DriveLetter } |
+                                Select-Object -First 1
+                        }
+                    }
+
+                    if ($correlatedPartition) {
+                        # Канонічна нормалізація (GPT GUID / MBR 0x27 / IsSystem
+                        # / Type) — єдина точка класифікації, див.
+                        # Resolve-BravoPartitionType вище.
+                        $partitionType = Resolve-BravoPartitionType `
+                            -Type $correlatedPartition.Type `
+                            -GptType $correlatedPartition.GptType `
+                            -MbrType $correlatedPartition.MbrType `
+                            -IsSystem $correlatedPartition.IsSystem
                     }
                 }
 
@@ -1560,6 +1647,28 @@ function Get-BravoStorageRiskSummary {
         # кореляція через Get-Partition вище в Get-BravoStorageDeepAudit),
         # а не лише за відсутністю DriveLetter.
         if ((-not $driveLetter) -and ($partitionType -in @('System', 'Reserved', 'Recovery'))) {
+            $risk.ReservedVolumes += $volumeRisk
+            continue
+        }
+
+        # Некорельований том без літери (PartitionType ''/'Unknown' — кореляція
+        # з партицією не вдалась навіть через fallback) з малим вільним місцем
+        # (v0.6.1 acceptance-review fix): це з високою ймовірністю прихований
+        # системний розділ (напр. MBR WinRE на машині, де кореляція зірвалась),
+        # а не data-том. НЕ породжуємо неправдивий CRITICAL/WARNING (не
+        # знижуємо Health Score без доказу, що це реальні дані), але й НЕ
+        # ховаємо мовчки: INFO-знахідка просить оператора перевірити вручну,
+        # а сам том іде в ReservedVolumes (семантика "виключений з capacity-
+        # аналізу"; його PartitionType ''/'Unknown' у записі відрізняє його від
+        # справжніх System/Reserved/Recovery). Здоровий некорельований том
+        # (вільного місця достатньо) поводиться як раніше — звичайний аналіз
+        # (потрапляє в Healthy нижче), без INFO-шуму.
+        if ((-not $driveLetter) -and ($partitionType -eq '' -or $partitionType -eq 'Unknown') -and ($freePercent -lt $warningThreshold)) {
+            Add-AuditFinding `
+                -Severity 'INFO' `
+                -Category 'Storage.UnknownVolume' `
+                -Message ("Том без літери диска {0}: тип партиції не визначено, вільно {1}% ({2} GB з {3} GB). Ймовірно прихований системний розділ; перевірте вручну, чи це не data-том." -f $displayName, $freePercent, $freeGB, $sizeGB) `
+                -Recommendation 'Якщо це звичайний data-том (folder-mounted), звільніть місце; якщо системний/recovery розділ — це штатний стан.'
             $risk.ReservedVolumes += $volumeRisk
             continue
         }
@@ -5298,7 +5407,7 @@ function Export-BravoHtmlReport {
     <section id="tab-updates" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔄</span>Updates</h2><div class="grid"><div class="card"><h3>Життєвий цикл ОС</h3>$(New-BravoInfoRowHtml 'Продукт' $script:Report.Updates.OS.Product)$(New-BravoInfoRowHtml 'Версія' $script:Report.Updates.OS.DisplayVersion)$(New-BravoInfoRowHtml 'Версія з реєстру' $script:Report.Updates.OS.RegistryDisplayVersion)$(New-BravoInfoRowHtml 'Full build' $script:Report.Updates.OS.FullBuild)$(New-BravoInfoRowHtml 'Канал' $script:Report.Updates.OS.Channel)$(New-BravoInfoRowHtml 'EditionID' $script:Report.Updates.OS.EditionId)$(New-BravoInfoRowHtml 'Кінець підтримки' $script:Report.Updates.OS.SupportEndDate)$(New-BravoInfoRowHtml 'Днів до кінця підтримки' $script:Report.Updates.OS.DaysToEndOfSupport)<div class="info-row"><span class="info-label">Статус підтримки</span><span class="info-value"><span class="status-pill $updatesSupportStatusClass">$(ConvertTo-BravoHtmlText $updatesSupportStatusText)</span></span></div>$(New-BravoInfoRowHtml 'Дані lifecycle від' $script:Report.Updates.OS.LifecycleDataUpdatedAt)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Служба wuauserv' $script:Report.Updates.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Тип запуску' $script:Report.Updates.WindowsUpdate.ServiceStartType)$(New-BravoInfoRowHtml 'Політика оновлень' $script:Report.Updates.WindowsUpdate.AutoUpdateOption)$(New-BravoInfoRowHtml 'WSUS' $(if($script:Report.Updates.WindowsUpdate.ManagedByWSUS){$script:Report.Updates.WindowsUpdate.WSUSServer}else{'Ні'}))$(New-BravoInfoRowHtml 'Останній пошук' $script:Report.Updates.WindowsUpdate.LastDetectSuccess)$(New-BravoInfoRowHtml 'Остання установка' $script:Report.Updates.WindowsUpdate.LastInstallSuccess)$(New-BravoInfoRowHtml 'Потрібне перезавантаження' $pendingRebootText)$(New-BravoInfoRowHtml 'Статус пошуку' $updatesSearchStatusText)$(New-BravoInfoRowHtml 'Тривалість пошуку, сек' $script:Report.Updates.Search.DurationSeconds)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Потрібно встановити</div><div class="storage-summary-value">$($script:Report.Updates.Pending.Total)$(if($script:Report.Updates.Pending.IsTruncated){" <span class=`"risk risk-warning`">детально: $($script:Report.Updates.Pending.Detailed)</span>"})</div></div><div class="storage-summary-item"><div class="storage-summary-label">Security</div><div class="storage-summary-value"><span class="risk risk-critical">$($script:Report.Updates.Pending.Security)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Драйвери</div><div class="storage-summary-value"><span class="risk risk-warning">$($script:Report.Updates.Pending.Driver)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Завантажено</div><div class="storage-summary-value"><span class="risk risk-ok">$($script:Report.Updates.Pending.Downloaded)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Обсяг, MB</div><div class="storage-summary-value">$($script:Report.Updates.Pending.TotalSizeMB)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Встановлено оновлень</div><div class="storage-summary-value">$($script:Report.Updates.Installed.Total)</div></div></div><h3>Оновлення, які потрібно встановити</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-pending' -Placeholder 'Пошук по назві, KB, категорії...')<div class="table-scroll"><table id="table-updates-pending" class="data-table"><thead><tr><th>Title</th><th>KB</th><th>Categories</th><th>Severity</th><th>Size MB</th><th>Downloaded</th><th>Released</th></tr></thead><tbody>$pendingUpdatesRows</tbody></table></div><h3>Останні встановлені оновлення</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-installed' -Placeholder 'Пошук по KB, опису, користувачу...')<div class="table-scroll"><table id="table-updates-installed" class="data-table"><thead><tr><th>HotFixID</th><th>Description</th><th>Installed by</th><th>Installed on</th></tr></thead><tbody>$installedUpdatesRows</tbody></table></div></section>
     <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical</div><div class="storage-summary-value"><span class="risk risk-critical">$($findingsGrouped.CriticalCount)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning</div><div class="storage-summary-value"><span class="risk risk-warning">$($findingsGrouped.WarningCount)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Info</div><div class="storage-summary-value"><span class="risk risk-unknown">$($findingsGrouped.InfoCount)</span></div></div></div>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div></section>
   </main>
-  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $(ConvertTo-BravoHtmlText $OutputDir)</p></footer>
+  <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $(ConvertTo-BravoHtmlText $script:Report.OutputPath)</p></footer>
 </div>
 <script>
 (function(){

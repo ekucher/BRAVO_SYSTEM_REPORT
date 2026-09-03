@@ -189,6 +189,81 @@ Describe 'Get-BravoStorageRiskSummary' {
         @($risk.HealthyVolumes).Count | Should -Be 1
     }
 
+    It 'некорельований том без літери (PartitionType="", 4% вільно) НЕ породжує Critical — INFO Storage.UnknownVolume + виключення з capacity-аналізу (v0.6.1 acceptance-review)' {
+        $storageDeep = [PSCustomObject]@{
+            Volumes = @(
+                [PSCustomObject]@{
+                    DriveLetter = $null
+                    FileSystemLabel = ''
+                    FileSystem = 'NTFS'
+                    DriveType = 'Fixed'
+                    HealthStatus = 'Healthy'
+                    SizeGB = 1.0
+                    FreeGB = 0.04
+                    FreePercent = 4.0
+                    PartitionType = ''
+                }
+            )
+        }
+
+        $risk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+        $risk.Summary.CriticalCount | Should -Be 0
+        $risk.Summary.WarningCount | Should -Be 0
+        $risk.Summary.ReservedCount | Should -Be 1
+        @($script:CapturedFindings | Where-Object { $_.Severity -eq 'CRITICAL' }).Count | Should -Be 0
+        $unknownFindings = @($script:CapturedFindings | Where-Object { $_.Category -eq 'Storage.UnknownVolume' })
+        $unknownFindings.Count | Should -Be 1
+        $unknownFindings[0].Severity | Should -Be 'INFO'
+    }
+
+    It 'некорельований том без літери (PartitionType="Unknown", 8% вільно) — та сама поведінка: без Warning, INFO + Reserved' {
+        $storageDeep = [PSCustomObject]@{
+            Volumes = @(
+                [PSCustomObject]@{
+                    DriveLetter = $null
+                    FileSystemLabel = ''
+                    FileSystem = ''
+                    DriveType = 'Fixed'
+                    HealthStatus = 'Healthy'
+                    SizeGB = 0.75
+                    FreeGB = 0.06
+                    FreePercent = 8.0
+                    PartitionType = 'Unknown'
+                }
+            )
+        }
+
+        $risk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+        $risk.Summary.WarningCount | Should -Be 0
+        $risk.Summary.ReservedCount | Should -Be 1
+        @($script:CapturedFindings | Where-Object { $_.Category -eq 'Storage.UnknownVolume' }).Count | Should -Be 1
+    }
+
+    It 'звичайний том З літерою диска (C:, 4% вільно) ДАЛІ породжує Critical finding — canonical thresholds не зламані' {
+        $storageDeep = [PSCustomObject]@{
+            Volumes = @(
+                [PSCustomObject]@{
+                    DriveLetter = 'C'
+                    FileSystemLabel = 'System'
+                    FileSystem = 'NTFS'
+                    DriveType = 'Fixed'
+                    HealthStatus = 'Healthy'
+                    SizeGB = 500
+                    FreeGB = 20
+                    FreePercent = 4.0
+                    PartitionType = 'Basic'
+                }
+            )
+        }
+
+        $risk = Get-BravoStorageRiskSummary -StorageDeep $storageDeep
+
+        $risk.Summary.CriticalCount | Should -Be 1
+        @($script:CapturedFindings | Where-Object { $_.Severity -eq 'CRITICAL' -and $_.Category -eq 'Storage.FreeSpace' }).Count | Should -Be 1
+    }
+
     It 'том З літерою диска і тим самим % вільного місця ДАЛІ породжує Warning finding' {
         $storageDeep = [PSCustomObject]@{
             Volumes = @(
@@ -234,5 +309,47 @@ Describe 'Get-BravoStorageRiskSummary' {
 
         $risk.Summary.ReservedCount | Should -Be 1
         $risk.Summary.HealthyCount | Should -Be 0
+    }
+}
+
+Describe 'Resolve-BravoPartitionType (канонічна класифікація партицій, v0.6.1 acceptance-review)' {
+    It 'GPT EFI System GUID -> System (незалежно від Type)' {
+        Resolve-BravoPartitionType -Type 'Unknown' -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' | Should -Be 'System'
+    }
+
+    It 'GPT MSR GUID -> Reserved' {
+        Resolve-BravoPartitionType -Type '' -GptType 'e3c9e316-0b5c-4db8-817d-f92df00215ae' | Should -Be 'Reserved'
+    }
+
+    It 'GPT Recovery GUID -> Recovery (upper-case GUID теж матчиться)' {
+        Resolve-BravoPartitionType -Type 'Unknown' -GptType '{DE94BBA4-06D1-4D40-A16A-BFD50179D6AC}' | Should -Be 'Recovery'
+    }
+
+    It 'MBR WinRE (MbrType=39, десяткова форма Get-Partition) -> Recovery, навіть коли Type=IFS' {
+        Resolve-BravoPartitionType -Type 'IFS' -MbrType 39 | Should -Be 'Recovery'
+    }
+
+    It 'MBR WinRE у hex-формі (0x27) -> Recovery' {
+        Resolve-BravoPartitionType -Type 'Unknown' -MbrType '0x27' | Should -Be 'Recovery'
+    }
+
+    It 'IsSystem=true без GPT/MBR-збігу -> System (явна системна партиція не стає data-томом)' {
+        Resolve-BravoPartitionType -Type 'IFS' -MbrType 7 -IsSystem $true | Should -Be 'System'
+    }
+
+    It 'GPT basic-data + Type=Basic -> Basic (data-том, НЕ Reserved)' {
+        Resolve-BravoPartitionType -Type 'Basic' -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' | Should -Be 'Basic'
+    }
+
+    It 'MBR IFS data-партиція (MbrType=7) без IsSystem -> IFS (passthrough, НЕ Recovery)' {
+        Resolve-BravoPartitionType -Type 'IFS' -MbrType 7 | Should -Be 'IFS'
+    }
+
+    It 'порожні входи -> Unknown' {
+        Resolve-BravoPartitionType -Type '' -GptType '' -MbrType $null -IsSystem $null | Should -Be 'Unknown'
+    }
+
+    It 'null-и не ламають функцію (кореляція без даних) -> Unknown' {
+        Resolve-BravoPartitionType | Should -Be 'Unknown'
     }
 }
