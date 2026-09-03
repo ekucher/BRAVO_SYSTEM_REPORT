@@ -345,19 +345,6 @@ Get-BravoUpdatesAudit
 # попередніх версій) став непотрібним.
 Update-BravoHealthScore
 
-# --- Sanitize (P1/v0.4.3) ---
-# Виконується ПІСЛЯ Health Score (маскування не впливає на Score/Status —
-# рахунок уже фінальний) і ДО будь-якого export'а, щоб JSON/HTML/CSV/ZIP
-# усі отримали вже замасковані дані з одного проходу.
-if ($Sanitize) {
-    try {
-        Invoke-BravoReportSanitization -Report $script:Report -Level $SanitizeLevel | Out-Null
-        Write-Host "$IconOk Sanitize: дані замасковано (рівень $SanitizeLevel)" -ForegroundColor Yellow
-    } catch {
-        Add-ExportError -Section 'Sanitize' -Message $_.Exception.Message
-    }
-}
-
 # ============================================================
 # ЗБЕРЕЖЕННЯ ЗВІТІВ
 # ============================================================
@@ -372,67 +359,111 @@ try {
 }
 
 $script:Report.OutputPath = $outputDir
-$baseFileName = "BravoSystemReport_$($env:COMPUTERNAME)_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+$reportTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+
+# --- Sanitize (P1/v0.4.3, fail-closed з v0.6.1) ---
+# Виконується ПІСЛЯ Health Score (маскування не впливає на Score/Status —
+# рахунок уже фінальний), ПІСЛЯ Report.OutputPath (щоб саме поле теж
+# потрапило під маскування), і ДО будь-якого export'а, щоб JSON/HTML/CSV/ZIP
+# усі отримали вже замасковані дані з одного проходу. Fail-closed: якщо
+# маскування впало посередині (частина полів замаскована, частина — ні),
+# жоден звіт НЕ пишеться на диск (exit code 5) — часткове маскування
+# небезпечніше за відсутність звіту.
+$script:SanitizeFailed = $false
+if ($Sanitize) {
+    $sanitizeResult = Invoke-BravoReportSanitizationGated -Report $script:Report -Level $SanitizeLevel
+    if ($sanitizeResult.Success) {
+        Write-Host "$IconOk Sanitize: дані замасковано (рівень $SanitizeLevel)" -ForegroundColor Yellow
+    } else {
+        $script:SanitizeFailed = $true
+        Write-Host "[ERROR] Sanitize перервано помилкою — жоден звіт НЕ згенеровано (fail-closed): $($sanitizeResult.ErrorMessage)" -ForegroundColor Red
+    }
+}
+
+# Ім'я файлу теж має бути безпечним при -Sanitize: реальний $env:COMPUTERNAME
+# використовується лише коли sanitize вимкнено або провалився (у разі
+# провалу звіти взагалі не пишуться нижче, тому ім'я тут не потрапляє на
+# диск, але лишається консистентним з рештою пайплайна).
+$baseFileNameComputer = if ($Sanitize -and -not $script:SanitizeFailed) { $script:Report.ComputerName } else { $env:COMPUTERNAME }
+$baseFileName = "BravoSystemReport_${baseFileNameComputer}_$reportTimestamp"
 
 Write-Host ''
 Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
 Write-Host ''
-Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
+if ($script:SanitizeFailed) {
+    Write-Host "[ERROR] Sanitize fail-closed: жоден звіт НЕ записано в $outputDir" -ForegroundColor Red
+} else {
+    Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
-# JSON — Health Score вже фінальний (рахувався до початку export-етапів),
-# тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
-# Пишеться ПЕРШИМ (не останнім), щоб потрапити до ZIP нижче — але через це
-# ExportErrors від наступних export-етапів (HTML/CSV/ZIP/Email) у ньому ще
-# не відомі на момент цього запису. Тому наприкінці пайплайну JSON
-# перезаписується ще раз, якщо ExportErrors змінились — це ЄДИНИЙ можливий
-# повторний запис (не Health Score, не HTML, без re-zip), набагато простіше
-# й безпечніше за попередній "гейт" повторного перерахунку.
-$exportErrorCountBeforeExport = @($script:Report.ExportErrors).Count
-Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    # Локальний helper — синхронізує JSON на диску з поточним станом
+    # ExportErrors, якщо він змінився з моменту попереднього запису. JSON
+    # пишеться ПЕРШИМ (щоб потрапити до ZIP), але наступні export-етапи
+    # (HTML/PDF/TXT/MD/CSV/ZIP/Email) можуть додати власні ExportErrors —
+    # тому виклик повторюється в кількох контрольних точках нижче (після
+    # CSV/до ZIP, після ZIP/до Email, після Email), а не лише один раз
+    # наприкінці — щоб і ZIP-вкладення, і Email-вкладення відображали
+    # актуальний на момент пакування/відправки стан ExportErrors.
+    function Sync-BravoJsonIfExportErrorsChanged {
+        param([int]$PriorCount)
+        if (@($script:Report.ExportErrors).Count -gt $PriorCount) {
+            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+            $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+        }
+        return @($script:Report.ExportErrors).Count
+    }
 
-# HTML
-Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
-
-# PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
-# виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
-# встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
-# взагалі, тож PDF теж пропускається (нема з чого конвертувати).
-if ($ExportPdf -and -not $JSONOnly) {
-    Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
-}
-
-# TXT (plain-text summary — v0.6.0 Reports and UX, той самий формат
-# слугує й copy-friendly support summary) — не залежить від HTML/PDF,
-# генерується прямо з $script:Report, тож не гейтується -JSONOnly.
-Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
-
-# MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
-# самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
-# $script:Report, тож не гейтується -JSONOnly.
-Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
-
-# CSV
-Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
-
-$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
-
-# ZIP
-Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
-$script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
-
-# Email — останній export-етап. Тіло листа й вкладення відображають стан на
-# момент відправки (Health Score вже фінальний; JSON-вкладення може не
-# містити ExportErrors від самого Email — лист не може повідомити про власну
-# невдалу відправку заднім числом, це очікуване обмеження).
-Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
-
-# Якщо HTML/CSV/ZIP/Email додали нові ExportErrors після першого запису JSON —
-# перезаписуємо JSON ще раз, щоб файл на диску (не копія в ZIP) був
-# авторитетним щодо ExportErrors. Health Score тут не перераховується (не
-# залежить від ExportErrors), тож це просто один додатковий запис файлу.
-if (@($script:Report.ExportErrors).Count -gt $exportErrorCountBeforeExport) {
+    # JSON — Health Score вже фінальний (рахувався до початку export-етапів),
+    # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
+    $exportErrorCount = @($script:Report.ExportErrors).Count
     Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+
+    # HTML
+    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+
+    # PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
+    # виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
+    # встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
+    # взагалі, тож PDF теж пропускається (нема з чого конвертувати).
+    if ($ExportPdf -and -not $JSONOnly) {
+        Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
+    }
+
+    # TXT (plain-text summary — v0.6.0 Reports and UX, той самий формат
+    # слугує й copy-friendly support summary) — не залежить від HTML/PDF,
+    # генерується прямо з $script:Report, тож не гейтується -JSONOnly.
+    Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
+
+    # MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
+    # самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
+    # $script:Report, тож не гейтується -JSONOnly.
+    Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
+
+    # CSV
+    Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
+
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+
+    # JSON у ZIP має відображати ExportErrors від HTML/PDF/TXT/MD/CSV, а не
+    # лише від початкового запису — синхронізуємо перед пакуванням.
+    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+
+    # ZIP
+    Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
+
+    # Якщо сам ZIP додав ExportError — JSON на диску (не копія всередині вже
+    # запакованого ZIP) все одно має бути авторитетним перед відправкою Email.
+    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+
+    # Email — останній export-етап. Тіло листа й вкладення відображають стан на
+    # момент відправки (Health Score вже фінальний; JSON-вкладення може не
+    # містити ExportErrors від самого Email — лист не може повідомити про власну
+    # невдалу відправку заднім числом, це очікуване обмеження).
+    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+
+    # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
+    # (не вкладення вже відправленого листа) відображає це.
+    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
 }
 
 # Фінал
@@ -447,7 +478,11 @@ $zipPath = Join-Path $outputDir "$baseFileName.zip"
 Write-Host ''
 Write-Host '=== АУДИТ МАШИНИ ЗАВЕРШЕНО ===' -ForegroundColor Green
 Write-Host ''
-Write-Host "$IconFolder Звіти збережено: $outputDir" -ForegroundColor Cyan
+if ($script:SanitizeFailed) {
+    Write-Host "$IconError Звіти НЕ згенеровано (Sanitize fail-closed): $outputDir" -ForegroundColor Red
+} else {
+    Write-Host "$IconFolder Звіти збережено: $outputDir" -ForegroundColor Cyan
+}
 if (Test-Path -LiteralPath $jsonPath) { Write-Host "$IconJson JSON: $baseFileName.json" -ForegroundColor White }
 if ((-not $JSONOnly) -and (Test-Path -LiteralPath $htmlPath)) { Write-Host "$IconHtml HTML: $baseFileName.html" -ForegroundColor White }
 if ($CSV -and (Test-Path -LiteralPath $csvPath)) { Write-Host "$IconCsv CSV: $baseFileName.csv" -ForegroundColor White }
@@ -463,7 +498,7 @@ Write-Host "Знахідки: $($script:Report.Health.Findings.Count); поми�
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
 Write-Host ''
 
-# --- Exit code contract (P0.5, розширено -Strict у P1) ---
+# --- Exit code contract (P0.5, розширено -Strict у P1, code 5 у v0.6.1) ---
 # 0 = аудит успішно завершено, без помилок збору/експорту (і, у -Strict
 #     режимі, без CRITICAL Health.Status);
 # 1 = аудит завершено, але були CollectionErrors і/або ExportErrors;
@@ -471,6 +506,10 @@ Write-Host ''
 # 3 = обов'язковий вихідний файл (JSON) не згенеровано;
 # 4 = лише у -Strict режимі: аудит завершено без CollectionErrors/ExportErrors,
 #     але Health.Status аудитованої машини = CRITICAL.
+# 5 = -Sanitize провалився посередині маскування (fail-closed) — жоден звіт
+#     не записано на диск, щоб частково замаскований звіт ніколи не потрапив
+#     користувачу. Перевіряється ПЕРШИМ у ланцюжку — причина відсутності
+#     JSON тут інша (свідома відмова писати), ніж у коді 3 (export-баг).
 #
 # За замовчуванням (без -Strict) Health Status (WARNING/CRITICAL) НЕ впливає
 # на exit code — це властивість аудитованої машини (наскільки вона здорова),
@@ -478,7 +517,9 @@ Write-Host ''
 # для CI-гейтів, яким потрібен ненульовий exit code саме на "машина в
 # критичному стані", а не лише на "інструмент не зміг щось зібрати/записати".
 $script:ExitCode = 0
-if (-not (Test-Path -LiteralPath $jsonPath)) {
+if ($script:SanitizeFailed) {
+    $script:ExitCode = 5
+} elseif (-not (Test-Path -LiteralPath $jsonPath)) {
     $script:ExitCode = 3
 } elseif ((@($script:Report.CollectionErrors).Count -gt 0) -or (@($script:Report.ExportErrors).Count -gt 0)) {
     $script:ExitCode = 1
@@ -492,7 +533,9 @@ if (-not (Test-Path -LiteralPath $jsonPath)) {
 # запису звіту, самі звіти вже записані) — лише консольне попередження,
 # щоб не спотворювати ExportErrors/Health невидимим для користувача чином
 # (JSON на цей момент уже записаний, повторний запис не відбувається).
-if (-not $NoOpenFolder) {
+# При $script:SanitizeFailed директорія свідомо не відкривається — там
+# немає звітів, які варто показувати оператору.
+if (-not $NoOpenFolder -and -not $script:SanitizeFailed) {
     try { Start-Process explorer.exe -ArgumentList "`"$outputDir`"" -ErrorAction SilentlyContinue } catch {
         Write-Host "[WARNING] Не вдалося відкрити директорію звітів: $($_.Exception.Message)" -ForegroundColor Yellow
     }

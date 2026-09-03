@@ -107,11 +107,33 @@ function Get-BravoStorageDeepAudit {
     if (Get-Command Get-Volume -ErrorAction SilentlyContinue) {
         try {
             $volumes = Get-Volume -ErrorAction Stop
+            $getPartitionAvailable = [bool](Get-Command Get-Partition -ErrorAction SilentlyContinue)
             foreach ($volume in $volumes) {
                 $freePercent = if ($volume.Size -gt 0) {
                     [Math]::Round(($volume.SizeRemaining / $volume.Size) * 100, 2)
                 } else {
                     $null
+                }
+
+                # Кореляція з партицією (Release Blocker Fixes v0.6.1) —
+                # best-effort: том без літери диска НЕ завжди справжній
+                # зарезервований розділ (EFI/MSR/WinRE) — це може бути й
+                # звичайний NTFS/ReFS том, змонтований у порожню папку
+                # (folder-mounted volume, напр. C:\Data\PostgreSQL). Без
+                # цієї кореляції такі томи раніше помилково потрапляли до
+                # ReservedVolumes у Get-BravoStorageRiskSummary й випадали
+                # з аналізу вільного місця. Порожній рядок (кореляція не
+                # вдалась/недоступна) — свідомо НЕ трактується як Reserved.
+                $partitionType = ''
+                if ($getPartitionAvailable) {
+                    try {
+                        $correlatedPartition = Get-Partition -Volume $volume -ErrorAction Stop | Select-Object -First 1
+                        if ($correlatedPartition) { $partitionType = [string]$correlatedPartition.Type }
+                    } catch {
+                        # Кореляція може штатно не спрацювати (напр. том без
+                        # видимої партиції в поточному контексті) — не помилка
+                        # збору, $partitionType лишається '' (не Reserved).
+                    }
                 }
 
                 $storage.Volumes += [PSCustomObject]@{
@@ -124,6 +146,7 @@ function Get-BravoStorageDeepAudit {
                     SizeGB            = Convert-BravoBytesToGB $volume.Size
                     FreeGB            = Convert-BravoBytesToGB $volume.SizeRemaining
                     FreePercent       = $freePercent
+                    PartitionType     = $partitionType
                 }
 
                 if ($volume.HealthStatus -and [string]$volume.HealthStatus -notin @('Healthy','Unknown')) {
@@ -350,10 +373,18 @@ function Get-BravoStorageDeepAudit {
                         Add-AuditFinding -Severity 'WARNING' -Category 'Storage.Reliability' -Message "Диск '$($physicalDisk.FriendlyName)' має Wear=$($counter.Wear)% — близько до кінця ресурсу SSD/NVMe." -Recommendation 'Заплануйте заміну диска та перевірте резервні копії.'
                     }
                 } catch {
-                    Add-AuditError -Section 'StorageDeep.ReliabilityCounters' -Message $_.Exception.Message
+                    # Відсутність reliability counters для ОКРЕМОГО диска —
+                    # штатний стан (USB/віртуальний/деякі RAID-контрольовані
+                    # диски без SMART-passthrough), не помилка збору: інші
+                    # диски в цьому ж циклі продовжують оброблятись незалежно
+                    # (Release Blocker Fixes v0.6.1 — раніше суперечило
+                    # власному коментарю вище, який уже описував це як
+                    # benign, але код все одно викликав Add-AuditError).
                 }
             }
         } catch {
+            # Get-PhysicalDisk сам по собі впав — це вже помилка збору
+            # (не per-disk сценарій), на відміну від catch вище.
             Add-AuditError -Section 'StorageDeep.ReliabilityCounters' -Message $_.Exception.Message
         }
     }
@@ -460,15 +491,18 @@ function Get-BravoStorageRiskSummary {
         $freeGB = $volume.FreeGB
         $sizeGB = $volume.SizeGB
 
+        $partitionType = [string]$volume.PartitionType
+
         $volumeRisk = [PSCustomObject]@{
-            DriveLetter  = $driveLetter
-            Name         = $displayName
-            Label        = $label
-            FileSystem   = $volume.FileSystem
-            HealthStatus = $volume.HealthStatus
-            SizeGB       = $sizeGB
-            FreeGB       = $freeGB
-            FreePercent  = $freePercent
+            DriveLetter   = $driveLetter
+            Name          = $displayName
+            Label         = $label
+            FileSystem    = $volume.FileSystem
+            HealthStatus  = $volume.HealthStatus
+            SizeGB        = $sizeGB
+            FreeGB        = $freeGB
+            FreePercent   = $freePercent
+            PartitionType = $partitionType
         }
 
         if ($null -eq $freePercent) {
@@ -490,7 +524,17 @@ function Get-BravoStorageRiskSummary {
         # Critical/Warning findings і знижувати Health Score на КОЖНІЙ Windows-
         # машині було б систематичним false positive. Дані про них лишаються
         # видимими в таблиці Storage Deep (без Add-AuditFinding).
-        if (-not $driveLetter) {
+        #
+        # Відсутність літери диска сама по собі НЕ є доказом, що том —
+        # системно-зарезервований розділ (Release Blocker Fixes v0.6.1):
+        # звичайний NTFS/ReFS том, змонтований у порожню папку
+        # (folder-mounted volume, напр. C:\Data\PostgreSQL), теж не має
+        # літери диска, але це реальні дані, для яких аналіз вільного місця
+        # так само важливий, як і для звичайних томів. Тому Reserved
+        # визначається за фактичним типом партиції (PartitionType,
+        # кореляція через Get-Partition вище в Get-BravoStorageDeepAudit),
+        # а не лише за відсутністю DriveLetter.
+        if ((-not $driveLetter) -and ($partitionType -in @('System', 'Reserved', 'Recovery'))) {
             $risk.ReservedVolumes += $volumeRisk
             continue
         }

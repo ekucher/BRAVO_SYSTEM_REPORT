@@ -1,15 +1,35 @@
 ﻿# MODULE: 35-Collectors-Users.ps1
 # Збір інформації про локальних користувачів та адміністраторів.
 
+# Резолвить well-known SID вбудованої локальної групи (S-1-5-32-*) у
+# ЛОКАЛІЗОВАНУ назву групи для цієї машини — locale-independent, на відміну
+# від жорсткого англ. літералу (Get-LocalGroupMember -Group з англ. назвою
+# на не-EN збірці Windows нічого не знаходить). Канонічна реалізація цього
+# патерну (Release Blocker Fixes v0.6.1) — раніше дублювалась лише для
+# Administrators тут; тепер також використовується для Remote Desktop Users
+# (src/34-Collectors-Security.ps1).
+function Resolve-BravoWellKnownGroupName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Sid,
+
+        [Parameter(Mandatory = $true)]
+        [string]$FallbackName
+    )
+
+    try {
+        $sidObject = New-Object Security.Principal.SecurityIdentifier($Sid)
+        return $sidObject.Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
+    } catch {
+        return $FallbackName
+    }
+}
+
 function Get-LocalAdministratorsSafe {
     $members = @()
 
-    try {
-        $adminGroupSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
-        $adminGroupName = $adminGroupSid.Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
-    } catch {
-        $adminGroupName = 'Administrators'
-    }
+    $adminGroupName = Resolve-BravoWellKnownGroupName -Sid 'S-1-5-32-544' -FallbackName 'Administrators'
 
     if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
         try {

@@ -1,5 +1,37 @@
 ﻿## v0.6.1 — 2026-09-03
 
+### Release Blocker Fixes
+
+Закриває 21 підтверджений пункт (8×P0, 13×P1) незалежного review PR #85 на `release/v0.6.1-stable`. `ScriptVersion` лишається `0.6.1`; `SchemaVersion` `0.6.19` → `0.6.20` (нові поля `Storage.Volumes[].PartitionType`, `Security.Defender.AMRunningMode`).
+
+**P0 — приватність/цілісність:**
+
+- **Sanitize fail-closed**: `src/45-Sanitize.ps1` (`Invoke-BravoReportSanitizationGated`) + `src/90-Main.ps1` — раніше збій маскування посередині проходу (`Invoke-BravoReportSanitization`) реєструвався як `ExportError`, і пайплайн продовжував писати ЧАСТКОВО замасковані звіти на диск. Тепер увесь export-блок (JSON/HTML/PDF/TXT/MD/CSV/ZIP/Email) виконується лише за умови успішного маскування; збій — новий exit code **5**, жоден файл не пишеться.
+- **Безпечні імена файлів і `Report.OutputPath`**: `$baseFileName` при `-Sanitize` більше не містить реального `$env:COMPUTERNAME`; `Report.OutputPath` (реальний локальний шлях) тепер теж маскується (`src/45-Sanitize.ps1`, `$maskPath`) — раніше встановлювався ПІСЛЯ Sanitize-блоку й фізично не потрапляв під маскування.
+- **Motherboard.SerialNumber** і **Services.AutomaticStopped[].StartName** (крім вбудованих ідентичностей `LocalSystem`/`NT AUTHORITY\*`) тепер маскуються — раніше пропущені поряд з BIOS/RAM/Disks/Monitors і LocalAdmins/AllowedUsers відповідно.
+- **Sanitize тепер маскує per-adapter `Network.Adapters[].DNSSuffixSearchOrder`** (`src/45-Sanitize.ps1`) — раніше маскувався лише `Network.Routing.DNSSuffixSearchOrder`, і реальний корпоративний DNS suffix витікав у safe-sharing звіти через записи адаптерів. Той самий deterministic маскер (`DNSSUFFIX`), однаковий suffix у Routing і в адаптера отримує однаковий токен; маскується вже в Basic. +5 regression-кейсів у `tests/Sanitize.Tests.ps1` (Basic/Strict/кілька значень/cross-section токен/null-empty) + DNS-suffix sentinel у leakage-тесті.
+- **Event Log severity — locale-independent**: `ConvertTo-BravoEventLogSummary` (`src/37-Collectors-Events.ps1`) тепер рахує Critical/Error/Warning за числовим `.Level` (1/2/3), а не за локалізованим MUI-рядком `.LevelDisplayName` — на не-англомовних збірках Windows лічильники раніше завжди були нульовими.
+- **Storage: folder-mounted томи більше не помилково класифікуються як Reserved**: `src/32-Collectors-Storage.ps1` тепер кореляціює том з реальним типом партиції (`Get-Partition`, нове поле `PartitionType`) — відсутність літери диска сама по собі більше не є доказом системно-зарезервованого розділу (EFI/MSR/WinRE); звичайний NTFS/ReFS том, змонтований у порожню папку (напр. `C:\Data\PostgreSQL`), тепер коректно потрапляє під звичайний аналіз вільного місця.
+- **CI: dist reproducibility** — новий крок у `local-windows-validation.yml` (`git diff --exit-code -- dist/` одразу після build) перевіряє, що закомічений `dist/` дійсно відповідає свіжій збірці з `src/`.
+
+**P1:**
+
+- **HTML: видалено мертву картку "Windows Update"** (OS-таб, `src/51-Export-Html.ps1`) — джерело даних (`Report.WindowsUpdate.*`) уже нічим не заповнюється відколи існує канонічна вкладка "Updates" (`Report.Updates.*`); картка й таблиця "Pending Windows Updates" завжди були порожні.
+- **.NET Framework 4.8.1 build-матриця**: `src/39b-Collectors-Runtime.ps1` тепер враховує офіційно бекпортовані build 19045 (Windows 10 22H2) і 20348 (Server 2022 RTM), не лише поріг `>= 22621`.
+- **PowerShell 7 update-порівняння**: тепер повне `[version]` (Major.Minor.Build), не лише Major.Minor — `Core7LatestKnown` отримало явний patch-компонент.
+- Актуалізовано PowerShell 7 latest-known version до `7.6.5` та повний semantic-version comparison покрито regression tests.
+- **RDP "Remote Desktop Users" — locale-independent**: новий канонічний `Resolve-BravoWellKnownGroupName` (`src/35-Collectors-Users.ps1`, той самий SID-патерн, що вже використовувався для Administrators) резолвить групу через well-known SID `S-1-5-32-555`, а не жорсткий англ. літерал.
+- **Secure Boot: access-denied ≠ NotSupported**: новий `Get-BravoSecureBootStatus` (`src/34-Collectors-Security.ps1`) розрізняє `UnauthorizedAccessException` (непідвищена сесія, статус `Unavailable`) від справжньої апаратної відсутності (Legacy BIOS/VM, статус `NotSupported`).
+- **Storage reliability counters**: відсутність лічильників для ОКРЕМОГО диска (USB/віртуальний/деякі RAID-контрольовані) більше не реєструється як `CollectionError` — узгоджено з уже наявним коментарем файлу, що описував це як штатний стан.
+- **Defender passive mode**: нове поле `Security.Defender.AMRunningMode`; WARNING на вимкнений Real-Time Protection більше не спрацьовує безумовно — придушується, коли Defender свідомо в `Passive`/`SxS Passive` режимі (активний сторонній антивірус).
+- **Мертве посилання `Processes.TopCPU`** у рекомендаціях CPU-findings (`src/31-Collectors-Hardware.ps1`) замінено на реально існуюче `Processes.TopMemory`.
+- **JSON/ZIP/Email consistency**: `Sync-BravoJsonIfExportErrorsChanged` (`src/90-Main.ps1`) синхронізує JSON на диску з поточним станом `ExportErrors` у трьох контрольних точках (перед ZIP, перед Email, після Email) замість одного фінального перезапису — раніше і ZIP, і Email могли пакувати/надсилати застарілий JSON.
+- **`tests/WorkflowEncoding.Tests.ps1` більше не skip'ається в CI**: `local-windows-validation.yml` тепер встановлює `powershell-yaml` тим самим bootstrap-патерном, що й Pester.
+
+**Не підтверджено (закрито як NOT APPLICABLE)**: Scheduled Tasks profile-гейтинг (`Deep`/`Forensic`) — код і `docs/ROADMAP.md` уже узгоджені, розбіжності не знайдено.
+
+**Тести**: нові/розширені `tests/Sanitize.Tests.ps1`, `tests/EventLogSummary.Tests.ps1`, `tests/StorageThresholds.Tests.ps1`, `tests/RuntimeCollectors.Tests.ps1` (новий), `tests/RdpGroupResolution.Tests.ps1` (новий), `tests/SecurityPureFunctions.Tests.ps1` (новий — `Get-BravoSecureBootStatus`, `Test-BravoDefenderRealTimeProtectionWarning`).
+
 ### Release Sync & Governance Fixes
 
 - Синхронізація `release/v0.6.1-stable` з `developer` (merge, без force-push) після того, як PR #86 (Markdown summary) змержено в `developer` вже після відкриття `release/v0.6.1-stable`.

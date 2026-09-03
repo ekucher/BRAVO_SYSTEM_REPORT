@@ -272,7 +272,9 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
     }
 
     It 'Security.SecureBoot.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Full-профілі' {
-        $script:DeepSecurityReport.Security.SecureBoot.Status | Should -BeIn @('Enabled', 'Disabled', 'NotSupported', 'Unknown')
+        # 'Unavailable' (Release Blocker Fixes v0.6.1) — access-denied
+        # (непідвищена сесія), окремо від справжнього 'NotSupported'.
+        $script:DeepSecurityReport.Security.SecureBoot.Status | Should -BeIn @('Enabled', 'Disabled', 'NotSupported', 'Unavailable', 'Unknown')
     }
 
     It 'Security.TPM.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Full-профілі' {
@@ -831,9 +833,38 @@ Describe 'Release Sync & Governance Fixes — OpenFolder не породжує E
         Test-Path -LiteralPath $mainPath | Should -BeTrue
 
         $content = Get-Content -LiteralPath $mainPath -Raw
-        $openFolderMatch = [regex]::Match($content, 'if \(-not \$NoOpenFolder\) \{.*?\n\}', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+        # Умова розширена в Release Blocker Fixes v0.6.1 (-and -not
+        # $script:SanitizeFailed — папка не відкривається, якщо fail-closed
+        # sanitize нічого не записав) — regex толерантний до додаткових
+        # `-and ...` умов у тому самому `if`, не лише точного літералу.
+        $openFolderMatch = [regex]::Match($content, 'if \(-not \$NoOpenFolder[^\{]*\) \{.*?\n\}', [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
         $openFolderMatch.Success | Should -BeTrue -Because 'блок OpenFolder має існувати в src/90-Main.ps1'
         $openFolderMatch.Value | Should -Not -Match 'Add-ExportError' -Because 'невдача відкриття папки — UX, не export-помилка; ExitCode вже зафіксований раніше й не повинен розходитись із мовчки зміненим ExportErrors'
+    }
+}
+
+Describe 'Release Blocker Fixes v0.6.1 — Sanitize fail-closed (статична перевірка джерела src/90-Main.ps1)' {
+    BeforeAll {
+        $script:MainContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\src\90-Main.ps1') -Raw
+    }
+
+    It 'Sanitize викликається через Invoke-BravoReportSanitizationGated, не напряму через Invoke-BravoReportSanitization' {
+        $script:MainContent | Should -Match 'Invoke-BravoReportSanitizationGated'
+    }
+
+    It 'export-блок (JSON/HTML/PDF/TXT/MD/CSV/ZIP/Email) виконується лише в else-гілці "if ($script:SanitizeFailed)"' {
+        $script:MainContent | Should -Match '\$script:SanitizeFailed\s*=\s*\$false'
+        $script:MainContent | Should -Match 'if\s*\(\s*\$script:SanitizeFailed\s*\)\s*\{[^}]*\}\s*else\s*\{'
+    }
+
+    It 'exit code 5 зарезервовано для Sanitize fail-closed і перевіряється ПЕРШИМ у ланцюжку' {
+        $exitCodeBlock = [regex]::Match($script:MainContent, '\$script:ExitCode\s*=\s*0.*?(?=\r?\n\r?\n)', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+        $exitCodeBlock.Success | Should -BeTrue -Because 'блок exit-code contract має існувати в src/90-Main.ps1'
+        $exitCodeBlock.Value | Should -Match 'if\s*\(\s*\$script:SanitizeFailed\s*\)\s*\{\s*\$script:ExitCode\s*=\s*5'
+    }
+
+    It 'при $script:SanitizeFailed директорія звітів НЕ відкривається (-NoOpenFolder-подібна поведінка)' {
+        $script:MainContent | Should -Match 'if\s*\(-not\s*\$NoOpenFolder\s*-and\s*-not\s*\$script:SanitizeFailed\)'
     }
 }

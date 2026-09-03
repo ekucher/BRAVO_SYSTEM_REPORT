@@ -9,9 +9,11 @@
 #   MAC-адреси, серійні номери, локальних адміністраторів, install path ПЗ.
 # -SanitizeLevel Strict: усе з Basic + приватні IPv4/gateway/DNS-сервери.
 #
-# Свідомо НЕ реалізовано (немає відповідних полів моделі, які можна було б
-# замаскувати): service account names — колектори служб не збирають LogOnAs;
-# якщо колись з'явиться, сюди додається окрема категорія.
+# Fail-closed (v0.6.1): маскування виконується через
+# Invoke-BravoReportSanitizationGated — якщо воно впаде посередині проходу
+# (частина полів замаскована, частина ні), виклик у src/90-Main.ps1
+# перериває ВЕСЬ export-пайплайн (жоден звіт не пишеться на диск), а не
+# лише реєструє ExportError і продовжує з частково замаскованими даними.
 
 # Створює маскер-функцію для однієї категорії значень: однакове вхідне
 # значення завжди повертає той самий токен (консистентність у межах одного
@@ -106,10 +108,20 @@ function Invoke-BravoReportSanitization {
         }
     }
 
-    # --- MAC-адреси ---
+    # --- MAC-адреси + per-adapter DNS suffix ---
     if ($Report.Network -and $Report.Network.Adapters) {
         foreach ($adapter in @($Report.Network.Adapters)) {
             if ($adapter.MACAddress) { $adapter.MACAddress = & $maskMac $adapter.MACAddress }
+
+            # Per-adapter DNSSuffixSearchOrder (Release Blocker Fixes v0.6.1) —
+            # та сама категорія DNSSUFFIX, що й Routing.DNSSuffixSearchOrder
+            # вище: той самий маскер, тож однаковий suffix у Routing і в
+            # адаптера отримує однаковий токен. Маскується завжди (Basic) —
+            # DNS suffix ідентифікує домен/організацію так само незалежно від
+            # того, в якій секції звіту він з'явився.
+            if ($adapter.DNSSuffixSearchOrder) {
+                $adapter.DNSSuffixSearchOrder = @($adapter.DNSSuffixSearchOrder | ForEach-Object { & $maskDnsSuffix $_ })
+            }
         }
     }
 
@@ -159,6 +171,13 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # Материнська плата (Hardware.Motherboard.SerialNumber, Release Blocker
+    # Fixes v0.6.1) — та сама категорія SERIAL, раніше пропущена поряд з
+    # BIOS/RAM/Disks/Monitors, хоча поле збирається тим самим колектором.
+    if ($Report.Hardware -and $Report.Hardware.Motherboard -and $Report.Hardware.Motherboard.SerialNumber) {
+        $Report.Hardware.Motherboard.SerialNumber = & $maskSerial $Report.Hardware.Motherboard.SerialNumber
+    }
+
     # --- Локальні адміністратори ---
     if ($Report.Users -and $Report.Users.LocalAdmins) {
         $Report.Users.LocalAdmins = @($Report.Users.LocalAdmins | ForEach-Object { & $maskAdmin $_ })
@@ -168,6 +187,20 @@ function Invoke-BravoReportSanitization {
     # що й LocalAdmins — той самий маскер, узгоджені токени в межах звіту) ---
     if ($Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.AllowedUsers) {
         $Report.Security.RemoteAccess.AllowedUsers = @($Report.Security.RemoteAccess.AllowedUsers | ForEach-Object { & $maskAdmin $_ })
+    }
+
+    # --- Облікові записи автоматичних служб (Services.AutomaticStopped[].StartName,
+    # Release Blocker Fixes v0.6.1) — та сама категорія ADMIN, що й
+    # LocalAdmins/AllowedUsers/ScheduledTasks.Author вище. Вбудовані системні
+    # ідентичності (LocalSystem, NT AUTHORITY\*) НЕ є персональними обліковими
+    # записами — маскувати їх лише додало б шуму без користі для privacy.
+    if ($Report.Services -and $Report.Services.AutomaticStopped) {
+        $builtInServiceIdentities = @('LocalSystem', 'NT AUTHORITY\SYSTEM', 'NT AUTHORITY\LOCAL SERVICE', 'NT AUTHORITY\NETWORK SERVICE')
+        foreach ($service in @($Report.Services.AutomaticStopped)) {
+            if ($service.StartName -and $service.StartName -notin $builtInServiceIdentities) {
+                $service.StartName = & $maskAdmin $service.StartName
+            }
+        }
     }
 
     # --- Чутливі шляхи встановлення ПЗ ---
@@ -268,5 +301,40 @@ function Invoke-BravoReportSanitization {
         }
     }
 
+    # --- Report.OutputPath (Release Blocker Fixes v0.6.1) — реальний
+    # локальний шлях, куди збережено звіти (напр. C:\Users\jdoe\Reports) —
+    # та сама категорія PATH, що й InstallLocation/Autoruns/SmbShares. Це
+    # поле встановлюється в src/90-Main.ps1 ДО виклику санітизації (щоб
+    # маскування встигло його покрити), тому на момент цього виклику вже
+    # заповнене.
+    if ($Report.OutputPath) { $Report.OutputPath = & $maskPath $Report.OutputPath }
+
     return $Report
+}
+
+# Fail-closed gate (v0.6.1) навколо Invoke-BravoReportSanitization: сама
+# функція вище мутує $Report по посиланню (властивість вкладених
+# PSCustomObject/hashtable — не value type), тому виняток, кинутий
+# ПОСЕРЕДИНІ проходу, залишає $Report у частково замаскованому стані.
+# Ця обгортка не намагається відкотити часткові зміни (немає дешевого
+# способу без deep-clone усього звіту заздалегідь) — натомість повертає
+# Success=$false, і виклик у src/90-Main.ps1 на підставі цього прапорця
+# свідомо не пише ЖОДЕН файл на диск, замість ризикувати випадковим
+# витоком через недомаскований звіт.
+function Invoke-BravoReportSanitizationGated {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $Report,
+
+        [ValidateSet('Basic', 'Strict')]
+        [string]$Level = 'Basic'
+    )
+
+    try {
+        Invoke-BravoReportSanitization -Report $Report -Level $Level | Out-Null
+        return [PSCustomObject]@{ Success = $true; ErrorMessage = '' }
+    } catch {
+        return [PSCustomObject]@{ Success = $false; ErrorMessage = $_.Exception.Message }
+    }
 }

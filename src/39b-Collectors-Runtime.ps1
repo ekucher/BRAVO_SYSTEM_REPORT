@@ -9,14 +9,21 @@ function Get-BravoRuntimeAudit {
 
     # --- .NET Framework 4.x ---
     try {
-        # .NET Framework 4.8.1 підтримується лише на Windows 11 22H2+ (build 22621+)
-        # та Windows Server 2022 23H2/Annual Channel+ (build 25398+, теж >= 22621).
-        # На старіших ОС (Windows 7 SP1–10, Server 2012–2022 LTSC) 4.8.1 не існує
-        # як окремий пакет — інсталятор там блокується "не підтримується цією ОС",
+        # .NET Framework 4.8.1 підтримується на Windows 11 22H2+ (build 22621+),
+        # Windows Server 2022 23H2/Annual Channel+ (build 25398+, теж >= 22621),
+        # а також офіційно бекпортований (KB5029250 і новіші кумулятивні
+        # оновлення) на Windows 10 22H2 (build 19045) і базовий Windows
+        # Server 2022 RTM (build 20348) — обидва НЕ покриваються єдиним
+        # порогом "-ge 22621" (Release Blocker Fixes v0.6.1: раніше такі
+        # машини помилково отримували рекомендацію "максимум 4.8", хоча
+        # 4.8.1 для них реально доступний). На старіших ОС (Windows 7
+        # SP1–10 до 22H2, Server 2012–2019) 4.8.1 не існує як окремий
+        # пакет — інсталятор там блокується "не підтримується цією ОС",
         # тож максимум, який можна рекомендувати, — 4.8.
+        $dotNet481SupportedBuilds = @(19045, 20348) # Win10 22H2, Server 2022 RTM
         $osBuildNumber = 0
         $osBuildParsed = [int]::TryParse([string]$script:Report.OS.Build, [ref]$osBuildNumber)
-        $supports481 = $osBuildParsed -and ($osBuildNumber -ge 22621)
+        $supports481 = $osBuildParsed -and (($osBuildNumber -ge 22621) -or ($osBuildNumber -in $dotNet481SupportedBuilds))
 
         if ($supports481) {
             $maxCompatibleVersion = '4.8.1'
@@ -69,7 +76,12 @@ function Get-BravoRuntimeAudit {
 
     # --- PowerShell 7 (Core), встановлений поруч ---
     try {
-        $latestKnownCore7 = '7.6' # оновлено 2026-08, звірити при наступному ревю
+        # Явний patch-компонент (не лише Major.Minor) — Release Blocker Fixes
+        # v0.6.1: без нього нижче порівняння як повний [version] (замість
+        # лише Major/Minor) не мало б сенсу. 7.6.5 — актуальний stable
+        # реліз PowerShell/PowerShell станом на 2026-09-03 (release date
+        # 2026-08-14) — звірити при наступному ревю.
+        $latestKnownCore7 = '7.6.5' # оновлено 2026-09, звірити при наступному ревю
         $script:Report.PowerShell.Core7LatestKnown = $latestKnownCore7
 
         $core7InstallsPath = 'HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions'
@@ -87,8 +99,14 @@ function Get-BravoRuntimeAudit {
                 $core7VersionParsed = [version]($core7Install.SemanticVersion -replace '-.*$','')
                 $latestKnownParsed = [version]$latestKnownCore7
 
-                if (($core7VersionParsed.Major -lt $latestKnownParsed.Major) -or
-                    ($core7VersionParsed.Major -eq $latestKnownParsed.Major -and $core7VersionParsed.Minor -lt $latestKnownParsed.Minor)) {
+                # Повне порівняння [version] (Major.Minor.Build), не лише
+                # Major/Minor (Release Blocker Fixes v0.6.1) — попередня
+                # логіка ігнорувала patch-версію: 7.4.5 проти "найновішої
+                # відомої" 7.4.0 не позначався б як застарілий, а 7.6.5
+                # (новіший за задекларовану "найновішу відому" 7.6.0)
+                # хибно позначався б як застарілий через порівняння лише
+                # Major/Minor, що завжди рівні.
+                if ($core7VersionParsed -lt $latestKnownParsed) {
                     $script:Report.PowerShell.Core7UpdateAvailable = $true
                     Add-AuditFinding -Severity 'WARNING' -Category 'PowerShell' -Message "PowerShell 7 застарів: $($script:Report.PowerShell.Core7Version) (найновіша відома версія: $latestKnownCore7)" -Recommendation 'Оновіть PowerShell 7 через winget (winget upgrade Microsoft.PowerShell) або MSI з github.com/PowerShell/PowerShell.'
                 }

@@ -133,6 +133,64 @@ function ConvertFrom-BravoNetAccountsOutput {
     }
 }
 
+# Чиста функція (Release Blocker Fixes v0.6.1): чи потрібен WARNING на
+# вимкнений Real-Time Protection. Passive/SxS Passive — свідомий, штатний
+# стан Defender, коли активний сторонній антивірус, не сигнал проблеми.
+# Винесено окремо для Pester-покриття без запуску Get-BravoSecurityAudit.
+function Test-BravoDefenderRealTimeProtectionWarning {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [Nullable[bool]]$RealTimeProtectionEnabled,
+
+        [AllowNull()]
+        [string]$AMRunningMode
+    )
+
+    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive'))
+}
+
+# Чиста-за-даними обгортка над Confirm-SecureBootUEFI (Release Blocker
+# Fixes v0.6.1) — винесена окремо, щоб розрізняти access-denied (сесія без
+# elevation — не доказ апаратної відсутності Secure Boot) від справжнього
+# NotSupported (Legacy BIOS/VM без UEFI), і щоб цю логіку можна було
+# перевірити Pester Mock без запуску всього Get-BravoSecurityAudit.
+function Get-BravoSecureBootStatus {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $secureBootEnabled = Confirm-SecureBootUEFI -ErrorAction Stop
+        return [PSCustomObject]@{
+            Supported = $true
+            Enabled   = [bool]$secureBootEnabled
+            Status    = if ($secureBootEnabled) { 'Enabled' } else { 'Disabled' }
+            Error     = ''
+        }
+    } catch [System.UnauthorizedAccessException] {
+        # Access denied — Confirm-SecureBootUEFI вимагає підвищеної
+        # (elevated) сесії; це НЕ доказ апаратної відсутності Secure Boot,
+        # а лише брак прав у поточному контексті виконання (раніше
+        # змішувалось з реальним "NotSupported" — Legacy BIOS/VM).
+        return [PSCustomObject]@{
+            Supported = $null
+            Enabled   = $null
+            Status    = 'Unavailable'
+            Error     = $_.Exception.Message
+        }
+    } catch {
+        # Будь-який інший виняток (типово System.PlatformNotSupportedException
+        # на Legacy BIOS — немає UEFI, Secure Boot фізично неможливий, або
+        # аналогічний стан на частині VM) — штатний стан машини.
+        return [PSCustomObject]@{
+            Supported = $false
+            Enabled   = $null
+            Status    = 'NotSupported'
+            Error     = $_.Exception.Message
+        }
+    }
+}
+
 function Get-BravoSecurityAudit {
     [CmdletBinding()]
     param()
@@ -219,28 +277,18 @@ function Get-BravoSecurityAudit {
         # "не підтримується" — щоб не подовжувати найшвидший профіль зайвими
         # WMI/cmdlet-викликами без цінності.
         if ($Profile -in @('Full','Deep','Forensic')) {
-            try {
-                $secureBootEnabled = Confirm-SecureBootUEFI -ErrorAction Stop
-                $script:Report.Security.SecureBoot.Supported = $true
-                $script:Report.Security.SecureBoot.Enabled = [bool]$secureBootEnabled
-                $script:Report.Security.SecureBoot.Status = if ($secureBootEnabled) { 'Enabled' } else { 'Disabled' }
+            $secureBootResult = Get-BravoSecureBootStatus
+            $script:Report.Security.SecureBoot.Supported = $secureBootResult.Supported
+            $script:Report.Security.SecureBoot.Enabled = $secureBootResult.Enabled
+            $script:Report.Security.SecureBoot.Status = $secureBootResult.Status
+            $script:Report.Security.SecureBoot.Error = $secureBootResult.Error
 
-                if (-not $secureBootEnabled) {
-                    # INFO, не WARNING: Secure Boot вимкнений — поширений
-                    # свідомий вибір (dual-boot, старіше/специфічне обладнання,
-                    # dev-машини) — не впливає на Health Score/Status, лише
-                    # фіксується в звіті як факт стану.
-                    Add-AuditFinding -Severity 'INFO' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
-                }
-            } catch {
-                # Confirm-SecureBootUEFI кидає виняток і на Legacy BIOS (немає
-                # UEFI — Secure Boot фізично неможливий), і на частині VM —
-                # це штатний стан машини, не помилка збору (Add-AuditError
-                # НЕ викликається, щоб не давати хибний exit code 1 на кожній
-                # Legacy BIOS/VM-машині).
-                $script:Report.Security.SecureBoot.Supported = $false
-                $script:Report.Security.SecureBoot.Status = 'NotSupported'
-                $script:Report.Security.SecureBoot.Error = $_.Exception.Message
+            if ($secureBootResult.Status -eq 'Disabled') {
+                # INFO, не WARNING: Secure Boot вимкнений — поширений
+                # свідомий вибір (dual-boot, старіше/специфічне обладнання,
+                # dev-машини) — не впливає на Health Score/Status, лише
+                # фіксується в звіті як факт стану.
+                Add-AuditFinding -Severity 'INFO' -Category 'Security.SecureBoot' -Message 'Secure Boot підтримується, але вимкнено.' -Recommendation 'Увімкніть Secure Boot у UEFI/BIOS, якщо немає обґрунтованого винятку (dual-boot з несумісною ОС, специфічне обладнання).'
             }
 
             try {
@@ -338,6 +386,12 @@ function Get-BravoSecurityAudit {
                     $script:Report.Security.Defender.AntivirusSignatureVersion = [string]$defenderStatus.AntivirusSignatureVersion
                     $script:Report.Security.Defender.AMEngineVersion = [string]$defenderStatus.AMEngineVersion
                     $script:Report.Security.Defender.AMProductVersion = [string]$defenderStatus.AMProductVersion
+                    # AMRunningMode (Release Blocker Fixes v0.6.1) — 'Normal',
+                    # 'Passive' або 'SxS Passive', коли сторонній антивірус
+                    # присутній і Defender свідомо працює у пасивному режимі
+                    # (RealTimeProtectionEnabled=$false у цьому режимі —
+                    # штатний стан, не сигнал проблеми, див. WARNING нижче).
+                    $script:Report.Security.Defender.AMRunningMode = [string]$defenderStatus.AMRunningMode
                     $script:Report.Security.Defender.Status = 'Detected'
 
                     if ($defenderStatus.AntivirusSignatureLastUpdated) {
@@ -348,12 +402,14 @@ function Get-BravoSecurityAudit {
                     # RealTimeProtectionEnabled=$false на машині зі стороннім
                     # антивірусом (напр. цей же script:Report.Security.Antivirus.Product
                     # показує інший продукт) — очікуваний, не тривожний стан:
-                    # Defender свідомо переходить у passive mode. Тут навмисно
-                    # НЕ звіряємо з Antivirus.Product (окрема, вже зібрана
-                    # SecurityCenter2-знахідка) — просто повідомляємо факт, без
-                    # спроби вгадати "чи це нормально", щоб не плодити хибних
-                    # WARNING/не-WARNING рішень на основі непрямих ознак.
-                    if (-not $script:Report.Security.Defender.RealTimeProtectionEnabled) {
+                    # Defender свідомо переходить у passive mode. AMRunningMode
+                    # ('Passive'/'SxS Passive') — прямий, авторитетний сигнал
+                    # саме цього стану від самого Defender (Release Blocker
+                    # Fixes v0.6.1: раніше WARNING спрацьовував безумовно,
+                    # даючи хибну тривогу на кожній машині зі стороннім AV).
+                    # Не звіряємо з Antivirus.Product (окрема SecurityCenter2-
+                    # знахідка) — AMRunningMode надійніший прямий індикатор.
+                    if (Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $script:Report.Security.Defender.RealTimeProtectionEnabled -AMRunningMode $script:Report.Security.Defender.AMRunningMode) {
                         Add-AuditFinding -Severity 'WARNING' -Category 'Security.Defender' -Message 'Windows Defender Real-Time Protection вимкнено.' -Recommendation 'Перевірте, чи це свідоме рішення (напр. активний сторонній антивірус) — якщо ні, увімкніть Real-Time Protection.'
                     }
 
@@ -414,12 +470,21 @@ function Get-BravoSecurityAudit {
 
                 if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
                     try {
-                        $rdpGroupMembers = Get-LocalGroupMember -Group 'Remote Desktop Users' -ErrorAction Stop
+                        # SID S-1-5-32-555 (well-known, locale-independent) —
+                        # той самий канонічний резолвер, що й для Administrators
+                        # (Resolve-BravoWellKnownGroupName, src/35-Collectors-Users.ps1).
+                        # Група "Remote Desktop Users" локалізується разом з MUI
+                        # (напр. "Пользователи удалённого рабочего стола" на
+                        # ru-RU) — жорсткий англ. літерал раніше повністю не
+                        # знаходив групу на не-EN збірках Windows, тож
+                        # AllowedUsers завжди лишався порожнім (Release Blocker
+                        # Fixes v0.6.1).
+                        $rdpGroupName = Resolve-BravoWellKnownGroupName -Sid 'S-1-5-32-555' -FallbackName 'Remote Desktop Users'
+                        $rdpGroupMembers = Get-LocalGroupMember -Group $rdpGroupName -ErrorAction Stop
                         $script:Report.Security.RemoteAccess.AllowedUsers = @($rdpGroupMembers | ForEach-Object { $_.Name })
                     } catch {
-                        # Група "Remote Desktop Users" може не існувати
-                        # (локалізована назва на не-EN збірках, або взагалі
-                        # відсутня) — не помилка збору.
+                        # Група "Remote Desktop Users" може справді не існувати
+                        # на цій машині — не помилка збору.
                     }
                 }
             }

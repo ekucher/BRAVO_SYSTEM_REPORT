@@ -7,10 +7,12 @@ BeforeAll {
     function New-BravoFakeReport {
         [ordered]@{
             ComputerName = 'REAL-PC'
+            OutputPath = 'C:\Users\jdoe\Reports'
             Dashboard = [ordered]@{ Header = [ordered]@{ ComputerName = 'REAL-PC' } }
             Meta = [ordered]@{ UserName = 'jdoe'; UserDomainName = 'CORP' }
             Hardware = [ordered]@{
                 ComputerSystem = [ordered]@{ Domain = 'corp.local' }
+                Motherboard = [ordered]@{ Manufacturer = 'ASUS'; Product = 'ROG STRIX'; SerialNumber = 'SN-MB-1'; Version = 'Rev 1.0' }
                 RAM = [ordered]@{ Modules = @([PSCustomObject]@{ SerialNumber = 'SN-RAM-1' }) }
                 Disks = [ordered]@{
                     PhysicalDisks = @([PSCustomObject]@{ SerialNumber = 'SN-DISK-1' })
@@ -19,6 +21,13 @@ BeforeAll {
                 Monitors = @([PSCustomObject]@{ SerialNumber = 'SN-MONITOR-1'; Model = 'XG27ACS' })
             }
             BIOS = [ordered]@{ SerialNumber = 'SN-BIOS-1' }
+            Services = [ordered]@{
+                AutomaticStopped = @(
+                    [PSCustomObject]@{ Name = 'SvcA'; DisplayName = 'Service A'; StartName = 'CORP\svc-account' }
+                    [PSCustomObject]@{ Name = 'SvcB'; DisplayName = 'Service B'; StartName = 'LocalSystem' }
+                    [PSCustomObject]@{ Name = 'SvcC'; DisplayName = 'Service C'; StartName = 'NT AUTHORITY\NETWORK SERVICE' }
+                )
+            }
             Network = [ordered]@{
                 General = [ordered]@{ Hostname = 'REAL-PC'; Domain = 'corp.local' }
                 IP = [ordered]@{
@@ -41,7 +50,14 @@ BeforeAll {
                     DNSSuffixSearchOrder = @('corp.local')
                     RoutingTable = @([PSCustomObject]@{ DestinationPrefix = '192.168.1.0/24'; NextHop = '192.168.1.1' })
                 }
-                Adapters = @([PSCustomObject]@{ MACAddress = 'AA-BB-CC-DD-EE-FF'; IPv4 = @('192.168.1.10'); Gateway = @('192.168.1.1'); DNS = @('192.168.1.1') })
+                Adapters = @(
+                    # Adapter 0: 'corp.local' навмисно збігається з Routing.DNSSuffixSearchOrder —
+                    # перевірка deterministic cross-section токена (той самий маскер).
+                    [PSCustomObject]@{ MACAddress = 'AA-BB-CC-DD-EE-FF'; IPv4 = @('192.168.1.10'); Gateway = @('192.168.1.1'); DNS = @('192.168.1.1'); DNSSuffixSearchOrder = @('corp.local', 'internal.local', 'branch.company.ua') }
+                    # Adapter 1/2: null/empty DNSSuffixSearchOrder — sanitizer не повинен падати.
+                    [PSCustomObject]@{ MACAddress = ''; IPv4 = @(); Gateway = @(); DNS = @(); DNSSuffixSearchOrder = $null }
+                    [PSCustomObject]@{ MACAddress = ''; IPv4 = @(); Gateway = @(); DNS = @(); DNSSuffixSearchOrder = @() }
+                )
                 Connections = [ordered]@{
                     ListeningPorts = @([PSCustomObject]@{ LocalAddress = '192.168.1.10' })
                     EstablishedConnections = @([PSCustomObject]@{ LocalAddress = '192.168.1.10'; RemoteAddress = '192.168.1.20' })
@@ -102,6 +118,24 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Network.IP.PublicIPv4 | Should -Match '^REDACTED-PUBLIC-IP-'
     }
 
+    It 'маскує per-adapter DNSSuffixSearchOrder навіть у Basic (Release Blocker Fixes v0.6.1) — усі значення, жодного original literal' {
+        $adapterSuffixes = @($script:report.Network.Adapters[0].DNSSuffixSearchOrder)
+        $adapterSuffixes.Count | Should -Be 3
+        $adapterSuffixes | ForEach-Object { $_ | Should -Match '^REDACTED-DNSSUFFIX-' }
+        $adapterSuffixes | Should -Not -Contain 'corp.local'
+        $adapterSuffixes | Should -Not -Contain 'internal.local'
+        $adapterSuffixes | Should -Not -Contain 'branch.company.ua'
+    }
+
+    It 'той самий DNS suffix у Routing і в адаптера отримує однаковий deterministic токен' {
+        $script:report.Network.Adapters[0].DNSSuffixSearchOrder[0] | Should -Be $script:report.Network.Routing.DNSSuffixSearchOrder[0]
+    }
+
+    It 'null/порожній per-adapter DNSSuffixSearchOrder не ламає санітизацію і лишається без змін' {
+        $script:report.Network.Adapters[1].DNSSuffixSearchOrder | Should -Be $null
+        @($script:report.Network.Adapters[2].DNSSuffixSearchOrder).Count | Should -Be 0
+    }
+
     It 'маскує MAC-адреси і серійні номери (BIOS, RAM, PhysicalDisks, Storage Deep)' {
         $script:report.Network.Adapters[0].MACAddress | Should -Match '^REDACTED-MAC-'
         $script:report.BIOS.SerialNumber | Should -Match '^REDACTED-SERIAL-'
@@ -113,6 +147,22 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
     It 'маскує серійний номер монітора (v0.5.0-tail), Model лишається' {
         $script:report.Hardware.Monitors[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
         $script:report.Hardware.Monitors[0].Model | Should -Be 'XG27ACS'
+    }
+
+    It 'маскує серійний номер материнської плати (Release Blocker Fixes v0.6.1), Manufacturer/Product лишаються' {
+        $script:report.Hardware.Motherboard.SerialNumber | Should -Match '^REDACTED-SERIAL-'
+        $script:report.Hardware.Motherboard.Manufacturer | Should -Be 'ASUS'
+        $script:report.Hardware.Motherboard.Product | Should -Be 'ROG STRIX'
+    }
+
+    It 'маскує Report.OutputPath (Release Blocker Fixes v0.6.1)' {
+        $script:report.OutputPath | Should -Match '^REDACTED-PATH-'
+    }
+
+    It 'маскує StartName облікових записів служб (Release Blocker Fixes v0.6.1), крім вбудованих ідентичностей' {
+        $script:report.Services.AutomaticStopped[0].StartName | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Services.AutomaticStopped[1].StartName | Should -Be 'LocalSystem'
+        $script:report.Services.AutomaticStopped[2].StartName | Should -Be 'NT AUTHORITY\NETWORK SERVICE'
     }
 
     It 'маскує MAC-адреси в ARP-кеші (v0.5.0) навіть у Basic, IP-адреса в ARP лишається' {
@@ -196,6 +246,14 @@ Describe 'Invoke-BravoReportSanitization -Level Strict' {
         $script:report.Network.IP.PublicIPv4 | Should -Match '^REDACTED-PUBLIC-IP-'
     }
 
+    It 'per-adapter DNSSuffixSearchOrder замасковано і в Strict — жодного original literal' {
+        $adapterSuffixes = @($script:report.Network.Adapters[0].DNSSuffixSearchOrder)
+        $adapterSuffixes | ForEach-Object { $_ | Should -Match '^REDACTED-DNSSUFFIX-' }
+        $adapterSuffixes | Should -Not -Contain 'corp.local'
+        $adapterSuffixes | Should -Not -Contain 'internal.local'
+        $adapterSuffixes | Should -Not -Contain 'branch.company.ua'
+    }
+
     It 'редагує GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) — лише в Strict' {
         $script:report.Network.IP.PublicIPv4ISP | Should -Be 'REDACTED-GEOIP'
         $script:report.Network.IP.PublicIPv4Organization | Should -Be 'REDACTED-GEOIP'
@@ -204,5 +262,57 @@ Describe 'Invoke-BravoReportSanitization -Level Strict' {
         $script:report.Network.IP.PublicIPv4Region | Should -Be 'REDACTED-GEOIP'
         $script:report.Network.IP.PublicIPv4City | Should -Be 'REDACTED-GEOIP'
         $script:report.Network.IP.PublicIPv4Timezone | Should -Be 'REDACTED-GEOIP'
+    }
+}
+
+Describe 'Invoke-BravoReportSanitizationGated (fail-closed gate, Release Blocker Fixes v0.6.1)' {
+    It 'успішне маскування — Success=$true, порожній ErrorMessage' {
+        $report = New-BravoFakeReport
+        $result = Invoke-BravoReportSanitizationGated -Report $report -Level 'Basic'
+        $result.Success | Should -Be $true
+        $result.ErrorMessage | Should -Be ''
+    }
+
+    It 'збій усередині Invoke-BravoReportSanitization — Success=$false, виняток НЕ прокидається назовні' {
+        Mock Invoke-BravoReportSanitization { throw 'Симульований збій маскування посередині проходу' }
+        $report = New-BravoFakeReport
+        { $script:gatedResult = Invoke-BravoReportSanitizationGated -Report $report -Level 'Basic' } | Should -Not -Throw
+        $script:gatedResult.Success | Should -Be $false
+        $script:gatedResult.ErrorMessage | Should -Match 'Симульований збій'
+    }
+}
+
+Describe 'Sanitize leakage — жодне чутливе значення НЕ потрапляє в серіалізований JSON (Strict)' {
+    It 'sentinel-значення відсутні в ConvertTo-Json виводі після Strict-санітизації' {
+        $report = New-BravoFakeReport
+        $report.ComputerName = 'HOSTNAME_SENTINEL'
+        $report.Dashboard.Header.ComputerName = 'HOSTNAME_SENTINEL'
+        $report.Network.General.Hostname = 'HOSTNAME_SENTINEL'
+        $report.Meta.UserName = 'USERNAME_SENTINEL'
+        $report.Meta.UserDomainName = 'DOMAIN_SENTINEL'
+        $report.Hardware.Motherboard.SerialNumber = 'MOTHERBOARD_SERIAL_SENTINEL'
+        $report.Services.AutomaticStopped[0].StartName = 'CORP\SERVICE_ACCOUNT_SENTINEL'
+        $report.Network.IP.PublicIPv4 = '203.0.113.99'
+        $report.Network.IP.PublicIPv4ISP = 'ISP_SENTINEL'
+        $report.Network.IP.PublicIPv4City = 'CITY_SENTINEL'
+        $report.Network.IP.PrimaryIPv4 = '10.20.30.40'
+        $report.OutputPath = 'C:\Users\SECRETUSER\Reports'
+        $report.Network.Adapters[0].DNSSuffixSearchOrder = @('DNS_SUFFIX_SENTINEL.corp.example.com')
+
+        Invoke-BravoReportSanitization -Report $report -Level 'Strict' | Out-Null
+        $json = $report | ConvertTo-Json -Depth 10
+
+        $json | Should -Not -Match 'HOSTNAME_SENTINEL'
+        $json | Should -Not -Match 'USERNAME_SENTINEL'
+        $json | Should -Not -Match 'DOMAIN_SENTINEL'
+        $json | Should -Not -Match 'MOTHERBOARD_SERIAL_SENTINEL'
+        $json | Should -Not -Match 'SERVICE_ACCOUNT_SENTINEL'
+        $json | Should -Not -Match '203\.0\.113\.99'
+        $json | Should -Not -Match 'ISP_SENTINEL'
+        $json | Should -Not -Match 'CITY_SENTINEL'
+        $json | Should -Not -Match '10\.20\.30\.40'
+        $json | Should -Not -Match 'SECRETUSER'
+        $json | Should -Not -Match 'C:\\\\Users\\\\SECRETUSER'
+        $json | Should -Not -Match 'DNS_SUFFIX_SENTINEL'
     }
 }
