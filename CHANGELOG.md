@@ -1,4 +1,12 @@
-﻿## Unreleased — v0.6.0: TXT summary (закриває заодно Copy-friendly support summary)
+﻿## Unreleased — v0.6.0: Markdown summary
+
+- Новий опційний параметр `-MD` (`src/05-Params.ps1`), форвардиться через wrapper і elevation-relaunch тим самим генеричним механізмом, що й `-TXT`.
+- `Export-BravoMdReport` (`src/56-Export-Md.ps1`) генерує `$BaseFileName.md` — Markdown summary для Redmine/GitHub: заголовок, таблиця ключових метрик (OS/Uptime/CPU/RAM/Disk), таблиця findings через `Get-BravoFindingsGrouped` (PR #82, той самий формат сортування, що й TXT/HTML), таблиця collection errors якщо є.
+- Закриває пункт ROADMAP "Markdown summary для Redmine/GitHub" — той самий принцип, що й TXT summary, але з таблицями Markdown замість plain text.
+- `.md` додається в `GeneratedFiles`, тож потрапляє в ZIP-пакування, якщо `-Zip` активний. Не гейтується `-JSONOnly`.
+- Тести: +2 E2E (`-MD` створює `.md` з очікуваними маркерами / без `-MD` файл не створюється).
+
+## Unreleased — v0.6.0: TXT summary (закриває заодно Copy-friendly support summary)
 
 - Новий опційний параметр `-TXT` (`src/05-Params.ps1`), форвардиться через wrapper і elevation-relaunch тим самим генеричним механізмом, що й решта параметрів.
 - `Export-BravoTxtReport` (`src/55-Export-Txt.ps1`) генерує `$BaseFileName.txt` — plain-text summary: заголовок (ComputerName/Profile/Timestamp/Health Score/Status/StatusReason), ключові метрики (OS/Uptime/CPU/RAM/Disk коротко), findings через `Get-BravoFindingsGrouped` (PR #82, той самий формат сортування, що й HTML), collection errors якщо є.
