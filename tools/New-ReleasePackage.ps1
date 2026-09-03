@@ -37,6 +37,20 @@ function Resolve-PackageVersion {
         [string]$RepoPath
     )
 
+    # src\90-Main.ps1 — основне, завжди актуальне джерело версії (ScriptVersion).
+    # CHANGELOG.md — fallback: у поточному форматі заголовки мають вигляд
+    # "## Unreleased — ..." (не "## vX.Y.Z"), тому регекс нижче зазвичай не
+    # спрацьовує — це очікувано, не помилка; спрацює лише якщо колись
+    # з'явиться заголовок конкретного релізу в форматі "## vX.Y.Z".
+    $MainScript = Join-Path $RepoPath "src\90-Main.ps1"
+    if (Test-Path -LiteralPath $MainScript) {
+        $MainContent = Get-Content -LiteralPath $MainScript -Raw -Encoding UTF8
+        $ScriptVersionMatch = [regex]::Match($MainContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
+        if ($ScriptVersionMatch.Success) {
+            return $ScriptVersionMatch.Groups["Version"].Value
+        }
+    }
+
     $ChangelogPath = Join-Path $RepoPath "CHANGELOG.md"
     if (Test-Path -LiteralPath $ChangelogPath) {
         $Changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
@@ -46,16 +60,7 @@ function Resolve-PackageVersion {
         }
     }
 
-    $MainModule = Join-Path $RepoPath (Join-Path "src" "90-Main.ps1")
-    if (Test-Path -LiteralPath $MainModule) {
-        $SourceContent = Get-Content -LiteralPath $MainModule -Raw -Encoding UTF8
-        $ScriptVersionMatch = [regex]::Match($SourceContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
-        if ($ScriptVersionMatch.Success) {
-            return $ScriptVersionMatch.Groups["Version"].Value
-        }
-    }
-
-    throw "Cannot detect package version from CHANGELOG.md or src/90-Main.ps1"
+    throw "Cannot detect package version from CHANGELOG.md or src\90-Main.ps1"
 }
 
 Write-Host "=== BRAVO SYSTEM REPORT RELEASE PACKAGE ==="
@@ -78,9 +83,16 @@ function Resolve-PackageRelativePath {
     return (Join-Path $RepoPath $normalized)
 }
 
-$RuntimeScript = Resolve-PackageRelativePath -RepoPath $RepoPath -RelativePath "dist/Get-BravoSystemReport.ps1"
-if (-not (Test-Path -LiteralPath $RuntimeScript)) {
-    throw "Runtime script not found: $RuntimeScript. Спочатку виконайте Build-BRAVO-SystemReport.ps1."
+$DistScript = Resolve-PackageRelativePath -RepoPath $RepoPath -RelativePath "dist/Get-BravoSystemReport.ps1"
+$DistSha512 = "$DistScript.sha512"
+if (-not (Test-Path -LiteralPath $DistScript) -or -not (Test-Path -LiteralPath $DistSha512)) {
+    throw "dist\Get-BravoSystemReport.ps1 (+ .sha512) не знайдено. Спершу виконайте: .\Build-BRAVO-SystemReport.ps1 -CreateSha512"
+}
+
+$ActualHash = (Get-FileHash -LiteralPath $DistScript -Algorithm SHA512).Hash.Trim()
+$RecordedHash = (Get-Content -LiteralPath $DistSha512 -Raw).Trim()
+if ($ActualHash -ne $RecordedHash) {
+    throw "dist\Get-BravoSystemReport.ps1.sha512 не відповідає dist\Get-BravoSystemReport.ps1. Перезберіть через .\Build-BRAVO-SystemReport.ps1 -CreateSha512"
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -119,6 +131,7 @@ $IncludeFiles = @(
     "README.md",
     "CHANGELOG.md",
     "LICENSE.md",
+    "docs/AI_RULES.md",
     "docs/ARCHITECTURE.md",
     "docs/PROJECT_RULES.md",
     "docs/ROADMAP.md",
@@ -200,12 +213,29 @@ $ZipStream = New-Object System.IO.FileStream($ZipPath, [System.IO.FileMode]::Cre
 $ZipArchive = New-Object System.IO.Compression.ZipArchive($ZipStream, [System.IO.Compression.ZipArchiveMode]::Create)
 
 try {
-    Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
-        Sort-Object FullName |
-        ForEach-Object {
-            $EntryName = $_.FullName.Substring($StagingRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\')
-            Add-ZipEntry -Archive $ZipArchive -SourcePath $_.FullName -EntryName $EntryName
-        }
+    # Push-Location + Resolve-Path -Relative замість ручного
+    # .Substring($StagingRoot.Length): на машинах, де $OutputPath (напр.
+    # побудований з $env:TEMP) резолвиться у 8.3 коротку форму (типу
+    # "BRAVOR~1"), а Get-ChildItem повертає .FullName у довгій формі,
+    # наївна арифметика по довжині рядка з'їжджає — файли пакувались із
+    # "хвостом" шляху замість чистого відносного імені (напр.
+    # "5.1/BRAVO-SystemReport-Quick.bat" замість "BRAVO-SystemReport-Quick.bat",
+    # спостережено на self-hosted CI runner). Resolve-Path -Relative рахує
+    # відносний шлях через провайдер PowerShell від поточної локації —
+    # коректно незалежно від того, в якій формі (коротка/довга) виражені
+    # проміжні сегменти шляху.
+    Push-Location -LiteralPath $StagingRoot
+    try {
+        Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
+            Sort-Object FullName |
+            ForEach-Object {
+                $EntryName = (Resolve-Path -LiteralPath $_.FullName -Relative) -replace '^\.[\\/]', '' -replace '\\', '/'
+                Add-ZipEntry -Archive $ZipArchive -SourcePath $_.FullName -EntryName $EntryName
+            }
+    }
+    finally {
+        Pop-Location
+    }
 }
 finally {
     $ZipArchive.Dispose()

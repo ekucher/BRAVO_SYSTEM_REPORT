@@ -1,13 +1,30 @@
-﻿name: Ручна перевірка PowerShell
+name: PowerShell Static & Hosted Validation
+
+# Release Sync & Governance Fixes (v0.6.1): цей workflow був лише
+# workflow_dispatch (ручний запуск, самою перевіркою структури репозиторію).
+# Розширено PR-тригером і кількома portable-перевірками, що не потребують
+# реальної Windows-машини (WMI/CIM/Get-WinEvent/Get-NetAdapter/Get-SmbShare/
+# Edge/реєстр HKLM тощо) — усе, що цього потребує, свідомо лишається
+# виключно в self-hosted local-windows-validation.yml (Quick/Full/Deep
+# runtime tests, повний Pester-набір). Тут запускається лише явний
+# Windows-незалежний підмножина: parser check і parameter-surface guard.
 
 on:
+  pull_request:
+    branches:
+      - main
+      - developer
+      - 'release/**'
+  push:
+    branches:
+      - developer
   workflow_dispatch:
 
 jobs:
-  repository-check:
-    name: Ручна перевірка структури репозиторію
+  static-validation:
+    name: Static validation (hosted, без Windows-only залежностей)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Отримати код
@@ -23,8 +40,14 @@ jobs:
           test -f "Get-BravoSystemReport.ps1"
           echo "[OK] Знайдено root wrapper"
 
-          test -f "src/Get-BravoSystemReport.ps1"
-          echo "[OK] Знайдено основний PowerShell-скрипт"
+          test -f "src/90-Main.ps1"
+          echo "[OK] Знайдено модульний entrypoint src/90-Main.ps1"
+
+          test -f "src/BRAVO.build.json"
+          echo "[OK] Знайдено build-маніфест src/BRAVO.build.json"
+
+          test -f "dist/Get-BravoSystemReport.ps1"
+          echo "[OK] Знайдено зібраний runtime dist/Get-BravoSystemReport.ps1"
 
           test -f "README.md"
           echo "[OK] Знайдено README.md"
@@ -33,3 +56,88 @@ jobs:
           echo "[OK] Знайдено CHANGELOG.md"
 
           echo "[SUCCESS] Структура репозиторію коректна"
+
+      - name: PowerShell parser check (src/*.ps1, dist, root wrapper)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $targets = @()
+          $targets += Get-ChildItem -Path 'src' -Filter '*.ps1' -File
+          $targets += Get-Item 'dist/Get-BravoSystemReport.ps1'
+          $targets += Get-Item 'Get-BravoSystemReport.ps1'
+
+          $failures = @()
+          foreach ($file in $targets) {
+              $tokens = $null
+              $parseErrors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
+
+              if ($parseErrors.Count -gt 0) {
+                  $messages = ($parseErrors | ForEach-Object { "$($_.Message) (line $($_.Extent.StartLineNumber))" }) -join '; '
+                  $failures += "$($file.FullName): $messages"
+              }
+          }
+
+          if ($failures.Count -gt 0) {
+              $failures | ForEach-Object { Write-Host "::error::$_" }
+              throw "Parser errors found in $($failures.Count) file(s)."
+          }
+
+          Write-Host "[OK] Parser check passed for $($targets.Count) files"
+
+      - name: Version consistency (ScriptVersion / SchemaVersion vs README / ROADMAP)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $mainContent = Get-Content -Raw 'src/90-Main.ps1'
+          $modelContent = Get-Content -Raw 'src/20-ReportModel.ps1'
+
+          $scriptVersion = [regex]::Match($mainContent, '\$ScriptVersion\s*=\s*"([^"]+)"').Groups[1].Value
+          $schemaVersion = [regex]::Match($modelContent, "SchemaVersion\s*=\s*'([^']+)'").Groups[1].Value
+
+          if (-not $scriptVersion) { throw "ScriptVersion не знайдено в src/90-Main.ps1" }
+          if (-not $schemaVersion) { throw "SchemaVersion не знайдено в src/20-ReportModel.ps1" }
+
+          Write-Host "[INFO] ScriptVersion=$scriptVersion SchemaVersion=$schemaVersion"
+
+          foreach ($doc in @('README.md', 'docs/ROADMAP.md')) {
+              $text = Get-Content -Raw $doc
+
+              if ($text -notmatch [regex]::Escape("ScriptVersion $scriptVersion")) {
+                  throw "$doc не згадує актуальний ScriptVersion $scriptVersion (version drift)"
+              }
+              if ($text -notmatch [regex]::Escape("SchemaVersion $schemaVersion")) {
+                  throw "$doc не згадує актуальний SchemaVersion $schemaVersion (version drift)"
+              }
+          }
+
+          Write-Host "[OK] Version consistency підтверджено в README.md / docs/ROADMAP.md"
+
+      - name: Встановити Pester
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+
+      - name: Windows-незалежні Pester-тести (parser per-file + parameter surface)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -MinimumVersion 5.0
+
+          # Свідомо НЕ весь tests/ — решта Pester-набору залежить від
+          # WMI/CIM/Get-WinEvent/Get-NetAdapter/Get-SmbShare/Edge/реєстру
+          # HKLM і реального Windows runtime; це залишається виключно на
+          # self-hosted раннері (.github/workflows/local-windows-validation.yml).
+          $result = Invoke-Pester -Path @(
+              'tests/SourceParserCheck.Tests.ps1',
+              'tests/ParameterSurface.Tests.ps1'
+          ) -PassThru
+
+          if ($result.FailedCount -gt 0) {
+              throw "$($result.FailedCount) Pester test(s) failed."
+          }
+
+          Write-Host "[OK] $($result.PassedCount) Windows-незалежних Pester-тестів пройшли"

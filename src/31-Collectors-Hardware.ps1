@@ -1,5 +1,69 @@
-# MODULE: 31-Collectors-Hardware.ps1
-# Збір базової інформації про апаратне забезпечення.
+﻿# MODULE: 31-Collectors-Hardware.ps1
+# Збір базової інформації про апаратне забезпечення: CPU, RAM, ComputerSystem/
+# chassis type, Motherboard, GPU, Monitors.
+
+# Чиста функція: EDID-текстові поля WmiMonitorID (ManufacturerName/
+# UserFriendlyName/SerialNumberID) приходять як масив UInt16-кодів символів
+# з нульовим заповненням у хвості фіксованої довжини — конвертує в звичайний
+# рядок, відкидаючи нульові байти.
+function ConvertFrom-BravoWmiMonitorCharArray {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [array]$Value
+    )
+
+    if (-not $Value) { return '' }
+    return -join ([char[]]($Value | Where-Object { $_ -ne 0 }))
+}
+
+# Чиста функція: SMBIOS chassis type code (Win32_SystemEnclosure.ChassisTypes)
+# -> людяний опис. Повний перелік значно довший (SMBIOS specification,
+# System Enclosure or Chassis Types), тут — найпоширеніші коди для робочих
+# станцій/ноутбуків/серверів; невідомий код повертається як "Unknown ($code)",
+# а не помилка.
+function Get-BravoChassisTypeText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [Nullable[int]]$ChassisTypeCode
+    )
+
+    if ($null -eq $ChassisTypeCode) { return 'Unknown' }
+
+    $chassisTypeMap = @{
+        1 = 'Other'; 2 = 'Unknown'; 3 = 'Desktop'; 4 = 'Low Profile Desktop'
+        5 = 'Pizza Box'; 6 = 'Mini Tower'; 7 = 'Tower'; 8 = 'Portable'
+        9 = 'Laptop'; 10 = 'Notebook'; 11 = 'Hand Held'; 12 = 'Docking Station'
+        13 = 'All in One'; 14 = 'Sub Notebook'; 15 = 'Space-saving'; 16 = 'Lunch Box'
+        17 = 'Main System Chassis'; 18 = 'Expansion Chassis'; 19 = 'SubChassis'
+        20 = 'Bus Expansion Chassis'; 21 = 'Peripheral Chassis'; 22 = 'Storage Chassis'
+        23 = 'Rack Mount Chassis'; 24 = 'Sealed-case PC'; 30 = 'Tablet'
+        31 = 'Convertible'; 32 = 'Detachable'
+    }
+
+    if ($chassisTypeMap.ContainsKey($ChassisTypeCode)) { return $chassisTypeMap[$ChassisTypeCode] }
+    return "Unknown ($ChassisTypeCode)"
+}
+
+# --- P1: централізовані CPU/RAM thresholds ---
+# Єдине джерело порогів для Dashboard-плиток CPU/RAM і для Health.Findings —
+# щоб перевантаження CPU/RAM (на відміну від попередньої поведінки) впливало
+# на Health Score і потрапляло у Findings tab, а не лише в колір dashboard-картки.
+function Get-BravoHardwareThresholds {
+    [CmdletBinding()]
+    param()
+
+    return [ordered]@{
+        CpuWarningPercent = 75
+        CpuCriticalPercent = 90
+        RamWarningPercent = 85
+        RamCriticalPercent = 95
+    }
+}
 
 function Get-BravoHardwareAudit {
     [CmdletBinding()]
@@ -20,7 +84,18 @@ function Get-BravoHardwareAudit {
         $script:Report.Hardware.CPU.Cores = $cpuInfo.NumberOfCores
         $script:Report.Hardware.CPU.LogicalProcessors = $cpuInfo.NumberOfLogicalProcessors
         $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
-        $script:Report.Hardware.CPU.LoadPercent = [Math]::Round(($cpuInfo.LoadPercentage | Measure-Object -Average).Average)
+
+        # LoadPercentage — опціональна властивість WMI, на частині VM (особливо
+        # одразу після старту) повертає $null. Це очікуваний, не помилковий стан
+        # (не CollectionError) — трапляється регулярно на щойно піднятих VM,
+        # включно з CI-раннерами, і не мало б штрафувати Health Score чи ламати
+        # інваріант "CollectionErrors=0" в EndToEnd-тесті на кожному такому
+        # прогоні. [Math]::Round($null) мовчки стає 0 — залишаємо цю поведінку,
+        # 0% тут означає "невідомо", а не підтверджений нуль.
+        $cpuLoadAverage = ($cpuInfo.LoadPercentage | Measure-Object -Average).Average
+        if ($null -ne $cpuLoadAverage) {
+            $script:Report.Hardware.CPU.LoadPercent = [Math]::Round($cpuLoadAverage)
+        }
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
         $script:Report.Hardware.RAM.TotalGB = $totalPhysicalMemoryGB
@@ -42,13 +117,31 @@ function Get-BravoHardwareAudit {
             $script:Report.Hardware.RAM.UsedPercent = $usedPercent
         }
 
+        $hardwareThresholds = Get-BravoHardwareThresholds
+
         $script:Report.Dashboard.Metrics.CPU.Value = "$($script:Report.Hardware.CPU.LoadPercent)%"
         $script:Report.Dashboard.Metrics.CPU.Details = "$($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків"
-        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge 90) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge 75) { 'WARNING' } else { 'OK' }
+        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuCriticalPercent) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuWarningPercent) { 'WARNING' } else { 'OK' }
 
         $script:Report.Dashboard.Metrics.RAM.Value = "$($script:Report.Hardware.RAM.UsedPercent)%"
         $script:Report.Dashboard.Metrics.RAM.Details = "$($script:Report.Hardware.RAM.UsedGB) GB використано з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB"
-        $script:Report.Dashboard.Metrics.RAM.Status = if ($script:Report.Hardware.RAM.UsedPercent -ge 95) { 'CRITICAL' } elseif ($script:Report.Hardware.RAM.UsedPercent -ge 85) { 'WARNING' } else { 'OK' }
+        $script:Report.Dashboard.Metrics.RAM.Status = if ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamCriticalPercent) { 'CRITICAL' } elseif ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamWarningPercent) { 'WARNING' } else { 'OK' }
+
+        # CPU LoadPercent буває $null (щойно піднята VM — див. коментар вище,
+        # це не помилка), тож findings пишемо лише коли значення реально відоме.
+        if ($null -ne $script:Report.Hardware.CPU.LoadPercent) {
+            if ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuCriticalPercent) {
+                Add-AuditFinding -Severity 'CRITICAL' -Category 'Hardware.CPU' -Message "Завантаження CPU критично високе: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Перевірте процеси з найбільшим споживанням памʼяті (Processes.TopMemory) — можливий runaway-процес або недостатня продуктивність для навантаження.'
+            } elseif ($script:Report.Hardware.CPU.LoadPercent -ge $hardwareThresholds.CpuWarningPercent) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Hardware.CPU' -Message "Завантаження CPU підвищене: $($script:Report.Hardware.CPU.LoadPercent)%." -Recommendation 'Спостерігайте за динамікою навантаження CPU, за потреби перевірте Processes.TopMemory.'
+            }
+        }
+
+        if ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamCriticalPercent) {
+            Add-AuditFinding -Severity 'CRITICAL' -Category 'Hardware.RAM' -Message "Використання RAM критично високе: $($script:Report.Hardware.RAM.UsedPercent)% ($($script:Report.Hardware.RAM.UsedGB) GB з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB)." -Recommendation 'Перевірте процеси з найбільшим споживанням пам''яті (Processes.TopMemory) — можливий memory leak або недостатньо RAM для навантаження.'
+        } elseif ($script:Report.Hardware.RAM.UsedPercent -ge $hardwareThresholds.RamWarningPercent) {
+            Add-AuditFinding -Severity 'WARNING' -Category 'Hardware.RAM' -Message "Використання RAM підвищене: $($script:Report.Hardware.RAM.UsedPercent)% ($($script:Report.Hardware.RAM.UsedGB) GB з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB)." -Recommendation 'Спостерігайте за динамікою використання RAM, за потреби перевірте Processes.TopMemory.'
+        }
 
         if ($Profile -in @('Full','Deep','Forensic')) {
             try {
@@ -66,6 +159,90 @@ function Get-BravoHardwareAudit {
                 }
             } catch {
                 Add-AuditError -Section 'Hardware.RAM.Modules' -Message $_.Exception.Message
+            }
+
+            try {
+                $chassisInfo = Get-AuditObject -ClassName 'Win32_SystemEnclosure' -First
+                if ($chassisInfo -and $chassisInfo.ChassisTypes -and $chassisInfo.ChassisTypes.Count -gt 0) {
+                    $chassisTypeCode = [int]$chassisInfo.ChassisTypes[0]
+                    $script:Report.Hardware.ComputerSystem.ChassisTypeCode = $chassisTypeCode
+                    $script:Report.Hardware.ComputerSystem.ChassisType = Get-BravoChassisTypeText -ChassisTypeCode $chassisTypeCode
+                }
+            } catch {
+                Add-AuditError -Section 'Hardware.ChassisType' -Message $_.Exception.Message
+            }
+
+            try {
+                $baseBoardInfo = Get-AuditObject -ClassName 'Win32_BaseBoard' -First
+                if ($baseBoardInfo) {
+                    $script:Report.Hardware.Motherboard.Manufacturer = $baseBoardInfo.Manufacturer
+                    $script:Report.Hardware.Motherboard.Product = $baseBoardInfo.Product
+                    $script:Report.Hardware.Motherboard.SerialNumber = $baseBoardInfo.SerialNumber
+                    $script:Report.Hardware.Motherboard.Version = $baseBoardInfo.Version
+                }
+            } catch {
+                Add-AuditError -Section 'Hardware.Motherboard' -Message $_.Exception.Message
+            }
+
+            try {
+                $videoControllers = Get-AuditObject -ClassName 'Win32_VideoController'
+                foreach ($videoController in $videoControllers) {
+                    $script:Report.Hardware.GPU += [PSCustomObject]@{
+                        Name           = $videoController.Name
+                        # AdapterRAM — 32-bit DWORD у WMI: для карт з >4 GB VRAM
+                        # значення переповнюється/спотворюється (відома проблема
+                        # Win32_VideoController, не баг цього колектора) —
+                        # публікуємо як є, з приміткою в docs, а не намагаємось
+                        # "виправити" здогадками.
+                        AdapterRAMBytes = $videoController.AdapterRAM
+                        DriverVersion  = $videoController.DriverVersion
+                        VideoProcessor = $videoController.VideoProcessor
+                        CurrentResolution = if ($videoController.CurrentHorizontalResolution -and $videoController.CurrentVerticalResolution) { "$($videoController.CurrentHorizontalResolution)x$($videoController.CurrentVerticalResolution)" } else { '' }
+                        Status         = $videoController.Status
+                    }
+                }
+            } catch {
+                Add-AuditError -Section 'Hardware.GPU' -Message $_.Exception.Message
+            }
+
+            if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
+                try {
+                    # WmiMonitorID (namespace root\wmi) — EDID-дані фізичних
+                    # моніторів, доступні лише через CIM/WMI (не WMI-класи в
+                    # root\cimv2, тому не через Get-AuditObject/-UseCim wrapper).
+                    # Текстові поля EDID приходять як масиви UInt16-кодів
+                    # символів з нульовим заповненням у хвості — конвертуємо
+                    # чистою функцією, щоб не тягнути нулі в рядок.
+                    $monitorIds = Get-CimInstance -Namespace 'root\wmi' -ClassName 'WmiMonitorID' -ErrorAction Stop
+                    $monitorParams = @{}
+                    try {
+                        Get-CimInstance -Namespace 'root\wmi' -ClassName 'WmiMonitorBasicDisplayParams' -ErrorAction Stop | ForEach-Object {
+                            $monitorParams[$_.InstanceName] = $_
+                        }
+                    } catch {
+                        # Фізичні розміри — необов'язковий бонус, відсутність
+                        # цього класу не має валити збір моніторів взагалі.
+                    }
+
+                    foreach ($monitorId in $monitorIds) {
+                        $displayParams = $monitorParams[$monitorId.InstanceName]
+                        $script:Report.Hardware.Monitors += [PSCustomObject]@{
+                            InstanceName        = $monitorId.InstanceName
+                            Active              = $monitorId.Active
+                            Manufacturer        = ConvertFrom-BravoWmiMonitorCharArray -Value $monitorId.ManufacturerName
+                            Model               = ConvertFrom-BravoWmiMonitorCharArray -Value $monitorId.UserFriendlyName
+                            SerialNumber        = ConvertFrom-BravoWmiMonitorCharArray -Value $monitorId.SerialNumberID
+                            YearOfManufacture   = $monitorId.YearOfManufacture
+                            WeekOfManufacture   = $monitorId.WeekOfManufacture
+                            WidthCm             = if ($displayParams) { $displayParams.MaxHorizontalImageSize } else { $null }
+                            HeightCm            = if ($displayParams) { $displayParams.MaxVerticalImageSize } else { $null }
+                        }
+                    }
+                } catch {
+                    # Namespace root\wmi/WmiMonitorID може бути недоступний
+                    # (напр. віртуальна машина без реального дисплея, RDP-сесія
+                    # без monitor EDID) — штатний стан, не помилка збору.
+                }
             }
         }
 

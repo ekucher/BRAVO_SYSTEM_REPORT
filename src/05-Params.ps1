@@ -10,12 +10,22 @@ param(
 
     [switch]$JSONOnly,
     [switch]$CSV,
+    [switch]$TXT,
+    [switch]$MD,
     [switch]$Zip = $true,
+    [switch]$NoZip,
     [switch]$NoEmoji,
     [switch]$NoElevate,
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipPublicIP,
+    [switch]$SkipGeoIP,
+    [switch]$Offline,
+    [switch]$Strict,
+    [switch]$Sanitize,
+    [ValidateSet('Basic','Strict')]
+    [string]$SanitizeLevel = 'Basic',
 
     [int]$EventLogDays = 0,
 
@@ -24,5 +34,7 @@ param(
 
     [string]$EmailTo,
     [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
-    [string]$SmtpServer = ''
+    [string]$SmtpServer = '',
+
+    [switch]$ExportPdf
 )
