@@ -24,7 +24,7 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 
 ## Поточний статус
 
-Поточна стабільна версія: **ScriptVersion 0.5.1** (контракт JSON-звіту: **SchemaVersion 0.6.1**).
+Поточна стабільна версія: **ScriptVersion 0.6.1** (контракт JSON-звіту: **SchemaVersion 0.6.19**).
 
 `ScriptVersion` версіонує реліз інструмента (`src/90-Main.ps1`), `SchemaVersion` — структуру JSON-контракту (`src/20-ReportModel.ps1`); вони змінюються незалежно.
 

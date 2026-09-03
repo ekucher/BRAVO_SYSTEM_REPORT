@@ -2,7 +2,7 @@
 
 ## Поточний статус
 
-Поточна стабільна версія: **ScriptVersion 0.5.1** (SchemaVersion 0.6.14). v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs) повністю закрито 2026-09-02 (PR #57-#69).
+Поточна стабільна версія: **ScriptVersion 0.6.1** (SchemaVersion 0.6.19). v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs) повністю закрито 2026-09-02 (PR #57-#69). v0.6.x Reports and UX (Findings grouped, JSON schema docs, TXT summary) та v0.6.1 (Dark Mode, Edge CLI PDF) та v0.7.0 CI/Quality Gates — повністю закрито 2026-09-03.
 
 ## Stabilization milestone (зовнішнє ТЗ P0-P3)
 

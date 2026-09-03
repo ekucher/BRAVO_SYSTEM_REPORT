@@ -1,4 +1,6 @@
-﻿## Unreleased — v0.6.0: TXT summary (закриває заодно Copy-friendly support summary)
+﻿## v0.6.1 — 2026-09-03
+
+### v0.6.0: TXT summary (закриває заодно Copy-friendly support summary)
 
 - Новий опційний параметр `-TXT` (`src/05-Params.ps1`), форвардиться через wrapper і elevation-relaunch тим самим генеричним механізмом, що й решта параметрів.
 - `Export-BravoTxtReport` (`src/55-Export-Txt.ps1`) генерує `$BaseFileName.txt` — plain-text summary: заголовок (ComputerName/Profile/Timestamp/Health Score/Status/StatusReason), ключові метрики (OS/Uptime/CPU/RAM/Disk коротко), findings через `Get-BravoFindingsGrouped` (PR #82, той самий формат сортування, що й HTML), collection errors якщо є.
@@ -6,21 +8,21 @@
 - `.txt` додається в `GeneratedFiles`, тож потрапляє в ZIP-пакування, якщо `-Zip` активний. Не гейтується `-JSONOnly` (генерується прямо з моделі, не залежить від HTML).
 - Тести: +2 E2E (`-TXT` створює `.txt` з очікуваними маркерами / без `-TXT` файл не створюється).
 
-## Unreleased — v0.6.0: JSON schema documentation
+### v0.6.0: JSON schema documentation
 
 - Новий `docs/SCHEMA.md` — навігаційна документація структури `$script:Report`: кожен верхньорівневий розділ моделі (`Meta`, `Dashboard`, `Health`, `OS`, `Hardware`, `Network`, `Security`, `EventLogs`, `Software`, `Updates` тощо) з коротким описом призначення, ключовими полями та посиланням на відповідний `src/3X-Collectors-*.ps1`. Не документує кожне поле дослівно — фокус на навігації для розробника, що вперше бачить схему.
 - Розділ про `SchemaVersion` (поточне значення, семантика PATCH-інкременту) і явно сформульоване правило "нова/змінена форма моделі → бампнути SchemaVersion в тому самому коміті" — те саме правило, яке вже застосовувалось у кожному PR цієї сесії, тепер задокументоване в одному місці.
 - Закриває одночасно два пункти ROADMAP: "JSON schema documentation" (v0.6.0 Reports and UX) і "Додати `docs/SCHEMA.md`" (Технічний борг) — той самий документ.
 - Тести: +3 sanity (`tests/DocsSchema.Tests.ps1` — файл існує, згадує `SchemaVersion`, згадує кожен верхньорівневий розділ моделі).
 
-## Unreleased — v0.6.0: Findings grouped by severity/category
+### v0.6.0: Findings grouped by severity/category
 
 - Нова чиста функція `Get-BravoFindingsGrouped` (`src/40-Health.ps1`) — сортує `Health.Findings` за severity (`CRITICAL` → `WARNING` → `INFO`, невідомий severity в кінець), потім за `Category`; рахує підсумкові лічильники `CriticalCount`/`WarningCount`/`InfoCount`. Покрита 5 unit-тестами (`tests/FindingsGrouped.Tests.ps1`).
 - Вкладка Findings у HTML-звіті тепер показує findings у сортованому порядку (раніше — у порядку збору, без структури) + нові плитки-лічильники Critical/Warning/Info зверху таблиці (той самий стиль `storage-summary-grid`, що й на вкладці Hardware/Storage).
 - Функція спроєктована для перевикористання в TXT/Markdown summary (наступні пункти v0.6.0 Reports and UX) — єдина точка групування для всіх форматів звіту.
 - Тести: +5 unit +1 E2E (перевикористовує наявний Dark Mode E2E-прогін, без додаткового запуску).
 
-## Unreleased — v0.6.1: Edge CLI PDF (закриває v0.6.1 повністю)
+### v0.6.1: Edge CLI PDF (закриває v0.6.1 повністю)
 
 **v0.6.1 Interactive HTML Dashboard & Tabs секцію тепер повністю закрито.**
 
@@ -31,7 +33,7 @@
 - `-JSONOnly` вимикає й PDF (нема з чого конвертувати — HTML взагалі не генерується).
 - Тести: +1 unit (`Get-BravoEdgeExecutablePath`) +2 E2E (`-ExportPdf` створює `.pdf` якщо Edge присутній / без `-ExportPdf` `.pdf` не створюється).
 
-## Unreleased — v0.6.1: Dark Mode
+### v0.6.1: Dark Mode
 
 - CSS-змінні для card/nav/table поверхонь HTML-звіту (`--panel`, `--nav-bg`, `--btn-bg`, `--tab-panel-bg`, `--metric-card-bg`, `--toolbar-bg`, `--search-bg`, `--table-scroll-bg`, `--th-bg`, `--storage-item-bg`, `--progress-track`, `--title-text`) — заміняють раніше hardcoded hex-кольори в `src/51-Export-Html.ps1`.
 - `@media (prefers-color-scheme: dark)` — дефолтна темна палітра без явного вибору користувача (system-рівень).
@@ -40,7 +42,7 @@
 - Вибір теми зберігається через `localStorage`, обгорнуто в try/catch — на `file://` протоколі деякі браузери обмежують доступ (SecurityError), тоді тема перемикається лише в межах поточної сесії перегляду, без збереження між відкриттями файлу (не критично, звіт відкривається offline).
 - Print CSS (`@media print`) свідомо лишається завжди білим — для друку тема не має значення.
 
-## Unreleased — v0.7.0 CI: Forensic -JSONOnly smoke test + HTML/JSONOnly validation (закриває v0.7.0 CI/Quality Gates повністю)
+### v0.7.0 CI: Forensic -JSONOnly smoke test + HTML/JSONOnly validation (закриває v0.7.0 CI/Quality Gates повністю)
 
 **v0.7.0 CI/Quality Gates тепер повністю закрито.**
 
@@ -49,19 +51,19 @@
   - звичайний прогін БЕЗ `-JSONOnly` (`-Profile Quick`) -> і JSON, і HTML присутні.
 - Без змін коду `src/`, без rebuild `dist`.
 
-## Unreleased — v0.7.0 CI: Full runtime test
+### v0.7.0 CI: Full runtime test
 
 - Новий `Describe 'v0.7.0 CI/Quality Gates — Full runtime test'` (`tests/ExecutionContract.Tests.ps1`) — окремий наскрізний прогін `-Profile Full -Offline` (не Deep/Forensic, які вже переперевикористовуються всіма v0.5.0 Deep Inventory Describe-блоками). Перевіряє exit code 0, `CollectionErrors=0`/`ExportErrors=0`, JSON валідний, `Profile='Full'` у звіті, та Full-специфічні поля реально заповнені (не залишились дефолтом Quick): `Network.Adapters[].Status` (збагачення `Get-NetAdapter`, PR #60), `Hardware.Motherboard` (PR #59).
 - М'яке твердження для Motherboard (Manufacturer АБО Product непорожні) — той самий принцип, що й у аналогічному Deep-тесті вище, деякі VM/hypervisor лишають `Manufacturer` порожнім.
 
-## Unreleased — v0.7.0 CI: Parser check per-file для src/*.ps1
+### v0.7.0 CI: Parser check per-file для src/*.ps1
 
 - Новий `tests/SourceParserCheck.Tests.ps1` — синтаксична перевірка КОЖНОГО `src/*.ps1` файлу окремо через `[System.Management.Automation.Language.Parser]::ParseFile` (той самий AST-based підхід, що й уже наявний крок "PowerShell parser check for dist" у `.github/workflows/local-windows-validation.yml`, застосований до окремих модулів, а не лише до зібраного монолітного `dist/Get-BravoSystemReport.ps1`).
 - Перевага над "лише dist": помилка вказує на конкретний вихідний файл і рядок, а не на зсунуту позицію всередині згенерованого монолітного файлу.
 - Жоден `src/*.ps1` не виконується (не dot-source) — лише токенізація/AST-парсинг, безпечно для модулів із побічними ефектами й залежністю від параметрів скрипту.
 - Тест входить у звичайний `Invoke-Pester -Path tests`, тож автоматично запускається і локально, і в CI ("Run Pester tests" крок).
 
-## Unreleased — Security Baseline: Scheduled tasks (закриває секцію повністю)
+### Security Baseline: Scheduled tasks (закриває секцію повністю)
 
 **Security Baseline секцію v0.5.0 Deep Inventory тепер повністю закрито.**
 
@@ -73,7 +75,7 @@
 - HTML: нова таблиця 'Scheduled Tasks' на вкладці Security.
 - Тести: +1 Sanitize +1 E2E.
 
-## Unreleased — Security Baseline: Autoruns
+### Security Baseline: Autoruns
 
 - **Security.Autoruns[]** — реєстрові ключі Run/RunOnce у HKLM/HKCU (+ Wow6432Node на 64-bit) та папки автозавантаження User/AllUsers Startup. Кожен запис: Name/Command/Source/Hive. Гейтовано окремо `-Profile Deep/Forensic` (не Full — суттєво більший обсяг даних, ніж решта Security-блоку).
 - Нова чиста функція `ConvertFrom-BravoRegistryKeyProperties` (`src/34-Collectors-Security.ps1`) витягує реальні Name/Value пари з `Get-ItemProperty`, відкидаючи службові `PS*`-метавластивості (`PSPath`/`PSParentPath`/`PSChildName`/`PSDrive`/`PSProvider`) — покрита 3 unit-тестами (`tests/RegistryKeyProperties.Tests.ps1`).
@@ -83,7 +85,7 @@
 - HTML: нова таблиця 'Autoruns' на вкладці Security.
 - Тести: +3 unit +1 Sanitize +1 E2E.
 
-## Unreleased — Security Baseline: UAC full policy
+### Security Baseline: UAC full policy
 
 - **Security.UAC** розширено повною політикою (`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`): `ConsentPromptBehaviorAdminCode`/`ConsentPromptBehaviorAdminText`, `ConsentPromptBehaviorUserCode`/`ConsentPromptBehaviorUserText`, `PromptOnSecureDesktop`, `FilterAdministratorToken`.
 - Дві нові чисті функції `Get-BravoUacAdminPromptText`/`Get-BravoUacUserPromptText` (`src/34-Collectors-Security.ps1`) мапують DWORD-код у людяний опис (Elevate without prompting / Prompt for credentials/consent / ...) — покриті 6 unit-тестами (`tests/UacPromptText.Tests.ps1`).
@@ -92,7 +94,7 @@
 - HTML: нова картка 'UAC full policy' на вкладці Security.
 - Тести: +6 unit +1 E2E.
 
-## Unreleased — fix: BitLocker/Secure Boot вимкнено — INFO, не WARNING; Storage Deep таблиця узгоджена з Findings
+### fix: BitLocker/Secure Boot вимкнено — INFO, не WARNING; Storage Deep таблиця узгоджена з Findings
 
 За результатами аналізу Health Score на реальному звіті виявлено дві проблеми:
 
@@ -106,7 +108,7 @@
 
 Без змін контракту моделі, без бампу SchemaVersion.
 
-## Unreleased — Network Audit: ProcessName для з'єднань + SMB shares (закриває секцію повністю)
+### Network Audit: ProcessName для з'єднань + SMB shares (закриває секцію повністю)
 
 **Network Audit секцію тепер повністю закрито.**
 
@@ -117,7 +119,7 @@
 - HTML: нові таблиці 'Listening Ports', 'Established Connections', 'SMB Shares' на вкладці Network.
 - Тести: +4 unit (lookup) +2 Sanitize +3 E2E.
 
-## Unreleased — Hardware Inventory: Monitors (закриває секцію повністю)
+### Hardware Inventory: Monitors (закриває секцію повністю)
 
 **Hardware Inventory секцію тепер повністю закрито.**
 
@@ -129,7 +131,7 @@
 - HTML: нова таблиця 'Monitors' на вкладці Hardware.
 - Тести: +4 unit +1 Sanitize (Basic).
 
-## Unreleased — v0.5.0 Deep Inventory: Hardware Diagnostics (Disk/Ntfs/StorPort/StorNVMe/WHEA/Kernel-Power/BugCheck)
+### v0.5.0 Deep Inventory: Hardware Diagnostics (Disk/Ntfs/StorPort/StorNVMe/WHEA/Kernel-Power/BugCheck)
 
 **Останній пункт "Updates and Event Logs" v0.5.0 Deep Inventory. Уся секція v0.5.0 Deep Inventory (Hardware Inventory / Storage Audit / Network Audit / Security Baseline / Updates and Event Logs) тепер ПОВНІСТЮ закрита** (крім свідомо відкладених Autoruns/Scheduled tasks).
 
@@ -140,7 +142,7 @@
 - HTML: нова таблиця 'Hardware Diagnostics' на вкладці Services.
 - Тести: +1 E2E (`ExecutionContract.Tests.ps1`, той самий `-Profile Deep` прогін, перейменовано на `.../HardwareDiagnostics`).
 
-## Unreleased — v0.5.0 Deep Inventory: Event Logs summary (System/Application/Setup/Security)
+### v0.5.0 Deep Inventory: Event Logs summary (System/Application/Setup/Security)
 
 Три пункти v0.5.0 Deep Inventory / Updates and Event Logs в одному PR: per-log summary (System/Application/Setup/Security), Provider summary, Critical/Error/Warning grouping.
 
@@ -154,7 +156,7 @@
 - Sanitize: НЕ додано — узгоджено з уже наявним `EventLogs.TopErrorSources[].LastMessage` (System log), який теж не маскується; повідомлення подій журналів свідомо поза межами поточної Sanitize-моделі (як і раніше).
 - Тести: +4 unit + 1 E2E (`ExecutionContract.Tests.ps1`, той самий `-Profile Deep` прогін, перейменовано на `.../EventLogSummary`).
 
-## Unreleased — v0.5.0 Deep Inventory: SMART/NVMe health (останній пункт Storage Audit)
+### v0.5.0 Deep Inventory: SMART/NVMe health (останній пункт Storage Audit)
 
 **Storage Audit секцію v0.5.0 Deep Inventory тепер повністю закрито.**
 
@@ -168,7 +170,7 @@
 - Sanitize: не потрібен — `FriendlyName` (модель диска) і `DeviceId` (індекс) не є PII.
 - 4 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / SMART'` (перейменовано), той самий `-Profile Deep` прогін.
 
-## Unreleased — v0.5.0 Deep Inventory: Shadow Copies (VSS) + Storage Spaces
+### v0.5.0 Deep Inventory: Shadow Copies (VSS) + Storage Spaces
 
 Два пункти v0.5.0 Deep Inventory / Storage Audit в одному PR: Shadow Copies/VSS, Storage Spaces. Заразом виявлено й позначено заднім числом уже реалізований раніше пункт "Pagefile" (`Win32_PageFileUsage`, був у коді, але не позначений у ROADMAP).
 
@@ -182,7 +184,7 @@
 - Sanitize: не потрібен — жодне з нових полів не містить MAC/IP/username (VolumeName — це шлях `\\?\Volume{guid}\`, FriendlyName — довільна назва пулу, не PII).
 - 3 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / ShadowCopies+StoragePools'` (перейменовано), той самий `-Profile Deep` прогін.
 
-## Unreleased — v0.5.0 Deep Inventory: Routing table + ARP + WinHTTP proxy
+### v0.5.0 Deep Inventory: Routing table + ARP + WinHTTP proxy
 
 Три пункти v0.5.0 Deep Inventory / Network Audit в одному PR: Routing table, ARP/Neighbor table, WinHTTP proxy.
 
@@ -199,7 +201,7 @@
 - 3 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Routing+ARP+Proxy'` (перейменовано), той самий `-Profile Deep` прогін.
 
 Усі 111 Pester-тестів проходять (106 попередніх + 5 нових). `dist` перебудовано, sha512 звірено.
-## Unreleased — v0.5.0 Deep Inventory: Password policy + Audit policy
+### v0.5.0 Deep Inventory: Password policy + Audit policy
 
 Десятий і одинадцятий пункти v0.5.0 Deep Inventory (Security Baseline) — останні два класичні compliance-показники цього розділу.
 
@@ -211,7 +213,7 @@
 - 2 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Password+Audit policy'` (перейменовано), той самий `-Profile Deep` прогін; + 3 unit-тести для `ConvertFrom-BravoNetAccountsOutput`.
 
 Усі 106 Pester-тестів проходять (101 попередніх + 2 E2E + 3 unit). `dist` перебудовано, sha512 звірено. **Security Baseline у v0.5.0 Deep Inventory тепер повністю закрито** (крім свідомо відкладених Autoruns/Scheduled tasks — більший обсяг даних).
-## Unreleased — v0.5.0 Deep Inventory: RDP NLA/scope + WinRM + SMB signing
+### v0.5.0 Deep Inventory: RDP NLA/scope + WinRM + SMB signing
 
 Сьомий, восьмий і дев'ятий пункти v0.5.0 Deep Inventory (Security Baseline) — три remote-access security перевірки в одному PR.
 
@@ -225,7 +227,7 @@
 - 3 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / RDP / WinRM / SMB signing'` (перейменовано), той самий `-Profile Deep` прогін.
 
 Усі 101 Pester-тест проходить (98 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
-## Unreleased — v0.5.0 Deep Inventory: Defender details
+### v0.5.0 Deep Inventory: Defender details
 
 Шостий пункт v0.5.0 Deep Inventory (Security Baseline) — деталі Windows Defender.
 
@@ -238,7 +240,7 @@
 - 2 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Defender'` (перейменовано), той самий `-Profile Deep` прогін.
 
 Усі 98 Pester-тестів проходять (96 попередніх + 2 нових). `dist` перебудовано, sha512 звірено.
-## Unreleased — v0.5.0 Deep Inventory: SMBv1 + TLS registry status
+### v0.5.0 Deep Inventory: SMBv1 + TLS registry status
 
 П'ятий пункт v0.5.0 Deep Inventory (Security Baseline) — два класичні security-показники.
 
@@ -250,7 +252,7 @@
 - 2 нових E2E Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / SMBv1 / TLS'` (перейменовано), той самий `-Profile Deep` прогін.
 
 Усі 96 Pester-тестів проходять (88 попередніх + 6 unit + 2 E2E). `dist` перебудовано, sha512 звірено.
-## Unreleased — v0.5.0 Deep Inventory: Network adapters speed/status/driver
+### v0.5.0 Deep Inventory: Network adapters speed/status/driver
 
 Четвертий пункт v0.5.0 Deep Inventory (Network Audit) — деталі мережевих адаптерів.
 
@@ -261,7 +263,7 @@
 - 1 новий Pester-тест у тому самому `Describe 'v0.5.0 Deep Inventory — ... / Network Adapters'` (перейменовано), той самий `-Profile Deep` E2E-прогін.
 
 Усі 88 Pester-тестів проходять (87 попередніх + 1 новий). `dist` перебудовано, sha512 звірено.
-## Unreleased — v0.5.0 Deep Inventory: Chassis type, Motherboard, GPU
+### v0.5.0 Deep Inventory: Chassis type, Motherboard, GPU
 
 Третій пункт v0.5.0 Deep Inventory (Hardware Inventory) — базові дані про корпус, материнську плату й відеокарти.
 
@@ -275,7 +277,7 @@
 - 3 нових Pester-тести в тому самому `Describe 'v0.5.0 Deep Inventory — ... / Hardware Inventory'` (`tests/ExecutionContract.Tests.ps1`, перейменовано), той самий `-Profile Deep` E2E-прогін — без додаткового окремого прогону.
 
 Усі 87 Pester-тестів проходять (84 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
-## Unreleased — v0.5.0 Deep Inventory: BitLocker status
+### v0.5.0 Deep Inventory: BitLocker status
 
 Другий пункт v0.5.0 Deep Inventory (Storage Audit) — статус шифрування томів.
 
@@ -287,7 +289,7 @@
 - Тест-блок `Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker'` (`tests/ExecutionContract.Tests.ps1`) переведено з `-Profile Full` на `-Profile Deep` — той самий E2E-прогін тепер покриває й BitLocker (гейтовано лише Deep/Forensic), без другого окремого прогону; додано 1 новий тест.
 
 Усі 84 Pester-тести проходять (83 попередніх + 1 новий). `dist` перебудовано, sha512 звірено.
-## Unreleased — v0.5.0 Deep Inventory: Secure Boot + TPM
+### v0.5.0 Deep Inventory: Secure Boot + TPM
 
 Перший пункт v0.5.0 Deep Inventory (Hardware Inventory) — Deep Security базові дані.
 
@@ -300,7 +302,7 @@
 
 Усі 83 Pester-тести проходять (79 попередніх + 4 нових). `dist` перебудовано, sha512 звірено.
 
-## Unreleased — v0.4.1 Release Stabilization: перевірка release package + docs/RELEASE.md
+### v0.4.1 Release Stabilization: перевірка release package + docs/RELEASE.md
 
 - Новий `tests/ReleasePackage.Tests.ps1` (5 тестів): `tools/New-ReleasePackage.ps1` створює ZIP -> розпаковується у temporary directory -> запускається `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого пакета -> перевіряється створення валідного JSON/HTML, sha512 runtime всередині пакета, sha256 самого ZIP, наявність усіх `.bat`-лаунчерів і `MANIFEST.txt`.
 - **Побічно спіймано й виправлено реальний баг** у `tools/New-ReleasePackage.ps1`, який до цього ніколи не запускався в CI: на self-hosted раннері з коротким 8.3-ім'ям облікового запису (`BRAVOR~1`) ручна арифметика `.Substring($StagingRoot.Length)` при формуванні імен файлів у ZIP з'їжджала - файли пакувались з "хвостом" шляху (напр. `5.1/BRAVO-SystemReport-Quick.bat` замість `BRAVO-SystemReport-Quick.bat`). Відтворено локально (штучний 8.3-каталог), виправлено на `Push-Location` + `Resolve-Path -Relative` (робастно незалежно від форми проміжних сегментів шляху).
@@ -308,7 +310,7 @@
 - Побічно: `docs/SECURITY.md` більше не називає `-Sanitize` "майбутнім" параметром.
 
 Усі 79 Pester-тестів проходять (74 попередніх + 5 нових). `dist` перебудовано, sha512 звірено. Закриває решту ROADMAP v0.4.1 Release Stabilization.
-## Unreleased — P1/v0.4.3: CI validation для -Sanitize (закриває останній пункт v0.4.3)
+### P1/v0.4.3: CI validation для -Sanitize (закриває останній пункт v0.4.3)
 
 - Новий блок `Describe 'P1 — CI validation для -SanitizeLevel Strict'` у `tests/ExecutionContract.Tests.ps1` (6 тестів): наскрізний прогін через wrapper з `-Profile Full -Sanitize -SanitizeLevel Strict -Offline`, перевіряє exit code 0, валідність структури JSON після маскування (`CollectionErrors`/`ExportErrors` = 0), і точково — що `ComputerName`/`Meta.UserName`/`Meta.UserDomainName`/`Network.General.Hostname`/`Dashboard.Header.ComputerName` замасковані у відповідний `REDACTED-*` формат, `Network.IP.IPv4`/`PrimaryIPv4`/adapters IPv4 замасковані, MAC-адреси замасковані (плюс regex-перевірка відсутності будь-якого literal MAC-патерну в сирому JSON), серійні номери BIOS/PhysicalDisks замасковані, і що HTML-експорт теж містить `REDACTED-*` токени (маскування дійшло до export-етапу, не лише до JSON).
 - **Свідомо відхилено** підхід "сліпий regex-скан усього JSON/HTML на IPv4-патерн", запропонований у ROADMAP: перевірено вручну на реальному звіті (`-Profile Full`) — версії встановленого ПЗ (`Software.Installed[].Version`, напр. `10.0.11.50`) масово збігаються з форматом IPv4 (кожен октет ≤255) і дають десятки false positive. Замінено на точкові перевірки конкретних полів схеми, які реально маскує `Invoke-BravoReportSanitization`.
@@ -316,7 +318,7 @@
 
 Усі 74 Pester-тести проходять (68 попередніх + 6 нових). `dist` перебудовано, sha512 звірено. Закриває останній відкритий пункт ROADMAP v0.4.3 Safe Sharing (окрім свідомо відкладеного "service account names" — колектор служб не збирає ці дані).
 
-## Unreleased — fix: false-positive WARNING на WinRE/EFI-розділах без літери диска
+### fix: false-positive WARNING на WinRE/EFI-розділах без літери диска
 
 - **Проблема**: Get-BravoStorageRiskSummary (src/32-Collectors-Storage.ps1) оцінював томи без літери диска (Windows Recovery Environment partition, EFI System Partition) тими самими порогами вільного місця (5%/10%), що й звичайні томи з даними. WinRE Partition — фіксованого розміру (типово ~0.5-1 GB) і майже завжди заповнений на 90%+ образом відновлення, недоступний користувачу через Провідник чи звичайне очищення файлів. Це породжувало WARNING finding (`Storage.FreeSpace`) практично на КОЖНІЙ Windows 10/11 машині — systematic false positive, що штучно знижував Health Score.
 - **Фікс**: томи без `DriveLetter` тепер виносяться в окремий бакет `ReservedVolumes` (`Summary.ReservedCount`) — не потрапляють у `CriticalVolumes`/`WarningVolumes`, не викликають `Add-AuditFinding`, не впливають на Health Score. Дані про них лишаються видимими в таблиці `Storage Deep` (HTML), і в Dashboard додано окрему плитку "System-reserved (без літери)" (`src/51-Export-Html.ps1`) — щоб не ховати інформацію мовчки, а явно показати, що ці томи свідомо виключені з ризик-оцінки.
@@ -324,11 +326,11 @@
 
 Усі 68 Pester-тестів проходять (65 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
 
-## Unreleased — docs: закрито пункт "уніфікувати network schema" (ROADMAP v0.4.2)
+### docs: закрито пункт "уніфікувати network schema" (ROADMAP v0.4.2)
 
 Пункт ROADMAP "Уніфікувати network schema" перевірено і закрито без змін коду — станом на 2026-09-02 у кодовій базі й так немає top-level дублікатів `Network.IPv4`/`Network.PrimaryIPv4`/`Network.PublicIPv4`. Єдине джерело правди — вкладена структура `Network.IP.{IPv4, PrimaryIPv4, PrimaryInterface, PublicIPv4*}`, оголошена в `src/20-ReportModel.ps1` і послідовно використовувана в `src/33-Collectors-Network.ps1`, `src/45-Sanitize.ps1`, `src/51-Export-Html.ps1`, `src/52-Export-Csv.ps1`. Історичні баги з неправильним шляхом (`Network.PrimaryIPv4` замість `Network.IP.PrimaryIPv4`) вже виправлені в попередніх раундах (див. записи нижче про CI/HTML export).
 
-## Unreleased — P1/v0.4.3: -Sanitize / -SanitizeLevel (маскування чутливих даних)
+### P1/v0.4.3: -Sanitize / -SanitizeLevel (маскування чутливих даних)
 
 П'ятий пункт P1 / v0.4.3 Safe Sharing — маскування чутливих даних перед передачею звіту третім сторонам.
 
@@ -342,7 +344,7 @@
 
 Усі 65 Pester-тестів проходять (51 попередніх + 14 нових). `dist` перебудовано, sha512 звірено.
 
-## Unreleased — P1/v0.4.2: -Strict (exit code 4 на CRITICAL Health.Status)
+### P1/v0.4.2: -Strict (exit code 4 на CRITICAL Health.Status)
 
 Четвертий пункт P1 / v0.4.2 Runtime Quality — режим strict validation.
 
@@ -354,7 +356,7 @@
 
 Усі 51 Pester-тест проходить (48 попередніх + 3 нових). `dist` перебудовано, sha512 звірено.
 
-## Unreleased — P1: параметри -Offline та -SkipGeoIP
+### P1: параметри -Offline та -SkipGeoIP
 
 Третій пункт P1 / v0.4.3 Safe Sharing — контроль над зовнішніми HTTPS-запитами скрипта.
 
@@ -367,7 +369,7 @@
 
 Усі 48 Pester-тестів проходять (46 попередніх + 2 нових: наявність параметрів у wrapper, наскрізна поведінка `-Offline`). `dist` перебудовано, sha512 звірено.
 
-## Unreleased — P1: CPU/RAM findings, узгодження Disk threshold у Health Score
+### P1: CPU/RAM findings, узгодження Disk threshold у Health Score
 
 Другий пункт P1 — CPU/RAM findings, за тим самим патерном, що й попередній storage thresholds PR.
 
@@ -378,7 +380,7 @@
 
 Усі 46 Pester-тестів проходять (44 попередніх + 2 нових). `dist` перебудовано, sha512 звірено. На тестовій машині (CPU/RAM у межах норми) кількість findings не змінилась — підтверджено відсутність хибних спрацювань.
 
-## Unreleased — P1: централізовані storage thresholds
+### P1: централізовані storage thresholds
 
 Перший пункт milestone "v0.4.2 Runtime Quality" / P1 зовнішнього ТЗ — уніфікація порогів вільного місця для basic і Deep/Forensic storage audit.
 
@@ -389,7 +391,7 @@
 
 Усі 44 Pester-тести проходять (36 попередніх + 8 нових). `dist` перебудовано, sha512 звірено.
 
-## Unreleased — Stabilization P0-B: Windows Lifecycle data model
+### Stabilization P0-B: Windows Lifecycle data model
 
 Закриває P0.6/P0.7 з зовнішнього ТЗ на стабілізацію — **Stabilization P0 тепер повністю завершено** (P0-A виконано раніше, див. запис нижче).
 
@@ -399,7 +401,7 @@
 
 Усі 36 Pester-тестів проходять (36/36, без пропусків). `dist` перебудовано, sha512 звірено.
 
-## Unreleased — Stabilization P0: execution contract, exit codes, ExportErrors
+### Stabilization P0: execution contract, exit codes, ExportErrors
 
 За зовнішнім технічним завданням на стабілізацію (P0-P3) реалізовано **P0** (execution contract, exit codes, розділення CollectionErrors/ExportErrors). P0.6/P0.7 (Windows Lifecycle dataset — повноцінна нова функція, якої в коді не існувало) і P1-P3 свідомо відкладені в окремі майбутні PR.
 
@@ -414,7 +416,7 @@
 
 Усі 33 Pester-тести проходять (23 попередні + 10 нових). `dist` перебудовано, sha512 звірено. Функціонально перевірено через кореневий wrapper (не лише `dist`): успішний прогін (exit 0), `-NoZip`, `-Zip:$false`, default Profile, форсована export-помилка (exit 1, ExportErrors у фінальному JSON).
 
-## Unreleased — п'ятий раунд глибокого код-ревю: ще локале-баги, race condition, CSV-injection аудит
+### п'ятий раунд глибокого код-ревю: ще локале-баги, race condition, CSV-injection аудит
 
 Два незалежні паралельні ревю: (1) систематичний пошук того самого класу локале-залежних багів по всій кодовій базі (уже двічі знаходили цей клас у попередніх раундах), (2) CSV-injection ризик + повторний глибокий прохід Users/ProcessesServices колекторів.
 
@@ -426,7 +428,7 @@
 
 Усі 23 Pester-тести проходять. `dist` перебудовано, sha512 звірено. Функціонально перевірено на Full-профілі: `Processes.TopMemory` (10 записів, без помилок), `Users.LocalAdmins` (коректний список без сміттєвих записів).
 
-## Unreleased — четвертий раунд глибокого код-ревю: XSS-екранування, локале-баг у власному фіксі
+### четвертий раунд глибокого код-ревю: XSS-екранування, локале-баг у власному фіксі
 
 Два незалежні паралельні ревю: (1) регресія в найостаннішому коміті + COM-ресурси Windows Update collector'а + мертві поля моделі даних, (2) систематичний аудит `51-Export-Html.ps1` на предмет пропущеного HTML-екранування. Під час верифікації власного фіксу знайдено й одразу виправлено ще один локале-баг (той самий клас, що й у попередньому раунді).
 
@@ -440,7 +442,7 @@
 
 Усі 23 Pester-тести проходять. `dist` перебудовано, sha512 звірено. Функціонально перевірено: `New-ReleasePackage.ps1` (реальна збірка ZIP), HTML progress-bar значення (до і після локале-фіксу, побайтова звірка з консольним виводом).
 
-## Unreleased — третій раунд глибокого код-ревю: release-скрипт не запускався, self-zip race
+### третій раунд глибокого код-ревю: release-скрипт не запускався, self-zip race
 
 Два незалежні паралельні ревю: (1) накопичена логіка `src/90-Main.ps1` (редагувався в кожному з 4 попередніх коміти поспіль — найбільший ризик прихованих регресій), (2) периферійні файли, які ще не рев'ювались (bat-лаунчери, `tools/*.ps1`, актуальність документації). Кожна знахідка перевірена особисто перед фіксом.
 
@@ -453,7 +455,7 @@
 
 Усі 23 Pester-тести проходять. `dist` перебудовано, sha512 звірено.
 
-## Unreleased — другий раунд глибокого код-ревю: CI завжди падав, Email зі старими даними
+### другий раунд глибокого код-ревю: CI завжди падав, Email зі старими даними
 
 Два незалежні паралельні ревю: (1) саме останні 2 коміти попереднього ревю на предмет нових регресій, (2) раніше нерев'юєні модулі (Network/Users/ProcessesServices/Software collectors, Csv/Zip/Email export, Core, ReportModel, tests/, CI). Кожна знахідка перевірена особисто перед фіксом.
 
@@ -468,7 +470,7 @@
 
 Усі 23 Pester-тести проходять. `dist` перебудовано, sha512 звірено. Функціонально перевірено: `-Zip:$false` (прямий виклик), sha512-звірка, повний Quick-прогін з CollectionErrors=0.
 
-## Unreleased — глибоке код-ревю: виправлено 9 підтверджених багів і 3 правдоподібні
+### глибоке код-ревю: виправлено 9 підтверджених багів і 3 правдоподібні
 
 Знайдено двома незалежними глибокими ревю (collector-и та export/core/main), кожна знахідка перевірена особисто читанням коду перед фіксом.
 
@@ -488,7 +490,7 @@
 
 Усі 23 Pester-тести проходять. `dist/Get-BravoSystemReport.ps1` + `.sha512` перебудовані.
 
-## Unreleased — ревю проєкту: OS-aware .NET-сумісність, прибирання legacy, CI-гварди, Pester-тести
+### ревю проєкту: OS-aware .NET-сумісність, прибирання legacy, CI-гварди, Pester-тести
 
 - **[Bugfix]** `39b-Collectors-Runtime.ps1`: `Get-BravoRuntimeAudit` більше не радить сліпо ставити .NET Framework 4.8.1 — тепер визначає максимальну сумісну версію за `OS.Build` (Windows 11 22H2+/Server 2022 23H2+, build ≥ 22621 → 4.8.1; старіші ОС, включно з Windows Server 2019, → 4.8). Раніше на Windows Server 2019 рекомендація "встановіть 4.8.1" блокувалась інсталятором з повідомленням "не підтримується цією операційною системою" — підтверджено реальним прогоном на Server 2019 (build 17763), тепер коректно показує `4.8`.
 - Видалено застарілий монолітний `src/Get-BravoSystemReport.ps1` (не редагувався з моменту переходу на модульну архітектуру; вводив в оману щодо "основного" скрипта, зокрема в `powershell-static-check.yml`).
@@ -500,7 +502,7 @@
 - `docs/AI_RULES.md`: усунуто протиріччя між п.6 (обов'язковий бамп `SchemaVersion` при зміні контракту) і п.9 (заборона змінювати `SchemaVersion` без явного запиту) — уточнено, що п.9 стосується довільних бампів, не пов'язаних із поточним запитом.
 - `patch/v0.2.0-stabilization.*` свідомо залишено без змін — історичний артефакт міграції, не заважає поточній роботі.
 
-## Unreleased — перевірка оновлень .NET Framework/PowerShell, Catalog-посилання для pending updates
+### перевірка оновлень .NET Framework/PowerShell, Catalog-посилання для pending updates
 
 - Додано модуль `39b-Collectors-Runtime.ps1` (`Get-BravoRuntimeAudit`): офлайн-перевірка можливості оновлення .NET Framework 4.x (порівняння release-key з еталоном 4.8.1) та Windows PowerShell/PowerShell 7 (Core) (порівняння з еталоном 7.4, виявлення встановлення через `HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions`). Генерує WARNING/INFO-знахідки через `Add-AuditFinding` — раніше версія .NET лише відображалась, ніяк не впливаючи на Health Score.
 - `20-ReportModel.ps1`: нові поля `DotNet.ReleaseKey`, `DotNet.LatestKnownVersion`, `DotNet.UpdateAvailable`, `PowerShell.Core7Installed`, `PowerShell.Core7Version`, `PowerShell.Core7LatestKnown`, `PowerShell.Core7UpdateAvailable`.
@@ -509,23 +511,23 @@
 - `90-Main.ps1`: inline-блок визначення версії .NET Framework замінено викликом `Get-BravoRuntimeAudit`.
 - `SchemaVersion` піднято `0.5.1` → `0.5.2` (нові поля `DotNet.*`, `PowerShell.Core7*`, `WindowsUpdate.PendingUpdates[].CatalogUrl`).
 
-## Unreleased — менше шуму в findings: trigger-start служби, деталі помилок System log
+### менше шуму в findings: trigger-start служби, деталі помилок System log
 
 - `36-Collectors-ProcessesServices.ps1`: додано whitelist відомих trigger-start/опціональних служб (`edgeupdate`, `edgeupdatem`, `gupdate`, `gupdatem`, `MapsBroker`, `sppsvc`, `WbioSrvc`, `RemoteRegistry`) — вони більше не рахуються у WARNING-знахідці "Автоматичних служб не запущено" (лишаються видимими в `Services.AutomaticStopped` для прозорості, просто не впливають на severity/score).
 - `37-Collectors-Events.ps1`: додано `EventLogs.TopErrorSources` — топ-10 джерел помилок System log (Source, Count, останнє повідомлення) за період, замість самого лише лічильника. Знахідка тепер містить топ-3 джерела прямо в тексті.
 - `20-ReportModel.ps1`: `SchemaVersion` `0.5.0` → `0.5.1` (нове поле `EventLogs.TopErrorSources`).
 - `51-Export-Html.ps1`: додано таблицю "Топ джерел помилок System log" у вкладку Services. Заразом виправлено супутній баг — таблиця "Automatic stopped services" мапилась на неіснуючі властивості `StartType`/`Status` (мали бути `StartMode`/`State`) і завжди показувала порожні колонки.
 
-## Unreleased — ScriptVersion 0.4.1
+### ScriptVersion 0.4.1
 
 - `ScriptVersion` (`src/90-Main.ps1`) піднято `0.4.0` → `0.4.1` — версія релізу інструмента, що друкується в банері консолі та в JSON (`ScriptVersion`), відображає накопичені зміни цього PR (Windows Update collector, privacy public IP, health score, CD-ROM fix тощо). Відрізняється від `SchemaVersion` (`0.5.0`), яка версіонує лише структуру JSON-контракту.
 
-## Unreleased — виправлено false positive CRITICAL для CD-ROM томів
+### виправлено false positive CRITICAL для CD-ROM томів
 
 - Виправлено `32-Collectors-Storage.ps1`: томи з `DriveType='CD-ROM'` більше не потрапляють у CRITICAL/WARNING знахідки Storage Risk через "0% вільно" (оптичні носії read-only, поняття вільного місця до них не застосовне). Такі томи тепер класифікуються як `HealthyVolumes`.
 - Знайдено під час валідації PR на Windows Server 2016: CD-ROM том з ISO показував `Health.Score` штучно нижчим через хибну CRITICAL-знахідку.
 
-## Unreleased — код-рев'ю: privacy, health score, dist rebuild
+### код-рев'ю: privacy, health score, dist rebuild
 
 - **[Blocker]** Перезібрано `dist/Get-BravoSystemReport.ps1` — Windows Update collector нарешті потрапив у виконуваний артефакт.
 - Додано прапорець `-SkipPublicIP` та гейтинг профілем (`Full`/`Deep`/`Forensic`) для запитів публічного IP/ISP/geo до сторонніх сервісів — для профілю `Quick` та за наявності прапорця дані більше не відправляються.
@@ -536,7 +538,7 @@
 - Видалено застарілий сміттєвий файл `tools/Publish-ToGitHub.ps1.broken`.
 - `SchemaVersion` піднято `0.4.1` → `0.5.0` (контракт звіту змінено: додана секція `WindowsUpdate`, нове поле `PublicIPv4Status='Skipped'`).
 
-## Unreleased — Windows Update audit
+### Windows Update audit
 
 - Додано модуль `39-Collectors-Updates.ps1` зі збором даних Windows Update.
 - Додано секцію `WindowsUpdate` у модель звіту (`SchemaVersion` піднято до `0.5.0`, див. запис вище).
@@ -547,7 +549,7 @@
 - Додано картку `Windows Update` та таблицю `Pending Windows Updates` з пошуком у вкладку OS HTML-звіту.
 - Додано `src/39-Collectors-Updates.ps1` у `BRAVO.build.json`.
 
-## Unreleased — автоматизація релізу
+### автоматизація релізу
 
 - Додано workflow `.github/workflows/release.yml`: реліз публікується при push-і тега `v*`.
 - Додано звірку версії між `src\90-Main.ps1`, `CHANGELOG.md` і тегом перед публікацією.
