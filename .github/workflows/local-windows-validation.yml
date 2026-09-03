@@ -102,16 +102,38 @@ jobs:
 
           Set-Location $env:GITHUB_WORKSPACE
 
-          # "Build modular monolith" step above just rebuilt dist/ IN-PLACE
-          # (same path as the committed files) - so git diff here compares
-          # the fresh build directly against committed HEAD. A difference
-          # means dist/ was committed manually without a matching src/
-          # change, or dist/ was not rebuilt after a src/ change.
-          git diff --exit-code -- dist/
+          # "Build modular monolith" step above just rebuilt dist/Get-BravoSystemReport.ps1
+          # IN-PLACE (same path as the committed file). The generated header
+          # embeds a live "GeneratedAt: <timestamp>" line (Build-BRAVO-SystemReport.ps1)
+          # that is different on every single rebuild by design, even with
+          # zero src/ changes - comparing byte-for-byte (or comparing the
+          # .sha512, which is a hash over that same non-deterministic content)
+          # would make this check fail on every CI run regardless of real
+          # drift. Normalize that one line out on both sides before
+          # comparing - this still catches the actual regression this check
+          # exists for (dist/ hand-edited, or not rebuilt after a src/
+          # change) without false-failing on the timestamp itself. Only the
+          # runtime script is compared; dist/*.sha512 is a hash of that
+          # script plus the timestamp and is therefore never reproducible
+          # across separate builds - it is already validated for internal
+          # self-consistency by "Verify SHA512 matches dist" above.
+          $normalizePattern = '(?m)^\s*GeneratedAt:.*$'
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "Generated dist artifacts differ from committed files. Run Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512 and commit both dist/Get-BravoSystemReport.ps1 and dist/Get-BravoSystemReport.ps1.sha512."
+          # git show (captured by PowerShell as a line array, which drops the
+          # file's final trailing newline when rejoined) and Get-Content -Raw
+          # (which preserves CRLF and any trailing blank lines verbatim)
+          # normalize line endings and end-of-file whitespace differently -
+          # collapse both to LF and trim trailing whitespace before
+          # comparing, so that is never a source of false difference here,
+          # only real content is.
+          $freshContent = (((Get-Content -LiteralPath 'dist\Get-BravoSystemReport.ps1' -Raw) -replace "`r`n", "`n") -replace $normalizePattern, 'GeneratedAt: NORMALIZED').TrimEnd()
+          $committedContent = (((git show 'HEAD:dist/Get-BravoSystemReport.ps1') -join "`n") -replace $normalizePattern, 'GeneratedAt: NORMALIZED').TrimEnd()
+
+          if ($freshContent -ne $committedContent) {
+            throw "Generated dist/Get-BravoSystemReport.ps1 differs from committed HEAD (ignoring the GeneratedAt timestamp line). Run Build-BRAVO-SystemReport.ps1 -Clean -CreateSha512 and commit both dist/Get-BravoSystemReport.ps1 and dist/Get-BravoSystemReport.ps1.sha512."
           }
+
+          Write-Host "[OK] Committed dist/Get-BravoSystemReport.ps1 matches fresh build (ignoring GeneratedAt timestamp)"
 
           Write-Host "[OK] Committed dist/ matches fresh build"
 
