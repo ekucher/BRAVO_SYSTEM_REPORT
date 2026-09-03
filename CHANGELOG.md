@@ -17,7 +17,8 @@
 
 - **HTML: видалено мертву картку "Windows Update"** (OS-таб, `src/51-Export-Html.ps1`) — джерело даних (`Report.WindowsUpdate.*`) уже нічим не заповнюється відколи існує канонічна вкладка "Updates" (`Report.Updates.*`); картка й таблиця "Pending Windows Updates" завжди були порожні.
 - **.NET Framework 4.8.1 build-матриця**: `src/39b-Collectors-Runtime.ps1` тепер враховує офіційно бекпортовані build 19045 (Windows 10 22H2) і 20348 (Server 2022 RTM), не лише поріг `>= 22621`.
-- **PowerShell 7 update-порівняння**: тепер повне `[version]` (Major.Minor.Build), не лише Major.Minor — `Core7LatestKnown` отримало явний patch-компонент (`7.6.0`).
+- **PowerShell 7 update-порівняння**: тепер повне `[version]` (Major.Minor.Build), не лише Major.Minor — `Core7LatestKnown` отримало явний patch-компонент.
+- Актуалізовано PowerShell 7 latest-known version до `7.6.5` та повний semantic-version comparison покрито regression tests.
 - **RDP "Remote Desktop Users" — locale-independent**: новий канонічний `Resolve-BravoWellKnownGroupName` (`src/35-Collectors-Users.ps1`, той самий SID-патерн, що вже використовувався для Administrators) резолвить групу через well-known SID `S-1-5-32-555`, а не жорсткий англ. літерал.
 - **Secure Boot: access-denied ≠ NotSupported**: новий `Get-BravoSecureBootStatus` (`src/34-Collectors-Security.ps1`) розрізняє `UnauthorizedAccessException` (непідвищена сесія, статус `Unavailable`) від справжньої апаратної відсутності (Legacy BIOS/VM, статус `NotSupported`).
 - **Storage reliability counters**: відсутність лічильників для ОКРЕМОГО диска (USB/віртуальний/деякі RAID-контрольовані) більше не реєструється як `CollectionError` — узгоджено з уже наявним коментарем файлу, що описував це як штатний стан.

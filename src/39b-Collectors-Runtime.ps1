@@ -78,11 +78,10 @@ function Get-BravoRuntimeAudit {
     try {
         # Явний patch-компонент (не лише Major.Minor) — Release Blocker Fixes
         # v0.6.1: без нього нижче порівняння як повний [version] (замість
-        # лише Major/Minor) не мало б сенсу. Точна поточна patch-версія PS7
-        # не перевірена наживо (немає інтернет-доступу в цьому середовищі
-        # на момент фіксу) — '.0' консервативне припущення, звірити при
-        # наступному ревю, як і раніше.
-        $latestKnownCore7 = '7.6.0' # оновлено 2026-08, звірити при наступному ревю
+        # лише Major/Minor) не мало б сенсу. 7.6.5 — актуальний stable
+        # реліз PowerShell/PowerShell станом на 2026-09-03 (release date
+        # 2026-08-14) — звірити при наступному ревю.
+        $latestKnownCore7 = '7.6.5' # оновлено 2026-09, звірити при наступному ревю
         $script:Report.PowerShell.Core7LatestKnown = $latestKnownCore7
 
         $core7InstallsPath = 'HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions'
