@@ -108,10 +108,20 @@ function Invoke-BravoReportSanitization {
         }
     }
 
-    # --- MAC-адреси ---
+    # --- MAC-адреси + per-adapter DNS suffix ---
     if ($Report.Network -and $Report.Network.Adapters) {
         foreach ($adapter in @($Report.Network.Adapters)) {
             if ($adapter.MACAddress) { $adapter.MACAddress = & $maskMac $adapter.MACAddress }
+
+            # Per-adapter DNSSuffixSearchOrder (Release Blocker Fixes v0.6.1) —
+            # та сама категорія DNSSUFFIX, що й Routing.DNSSuffixSearchOrder
+            # вище: той самий маскер, тож однаковий suffix у Routing і в
+            # адаптера отримує однаковий токен. Маскується завжди (Basic) —
+            # DNS suffix ідентифікує домен/організацію так само незалежно від
+            # того, в якій секції звіту він з'явився.
+            if ($adapter.DNSSuffixSearchOrder) {
+                $adapter.DNSSuffixSearchOrder = @($adapter.DNSSuffixSearchOrder | ForEach-Object { & $maskDnsSuffix $_ })
+            }
         }
     }
 

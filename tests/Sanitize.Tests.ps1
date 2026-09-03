@@ -50,7 +50,14 @@ BeforeAll {
                     DNSSuffixSearchOrder = @('corp.local')
                     RoutingTable = @([PSCustomObject]@{ DestinationPrefix = '192.168.1.0/24'; NextHop = '192.168.1.1' })
                 }
-                Adapters = @([PSCustomObject]@{ MACAddress = 'AA-BB-CC-DD-EE-FF'; IPv4 = @('192.168.1.10'); Gateway = @('192.168.1.1'); DNS = @('192.168.1.1') })
+                Adapters = @(
+                    # Adapter 0: 'corp.local' навмисно збігається з Routing.DNSSuffixSearchOrder —
+                    # перевірка deterministic cross-section токена (той самий маскер).
+                    [PSCustomObject]@{ MACAddress = 'AA-BB-CC-DD-EE-FF'; IPv4 = @('192.168.1.10'); Gateway = @('192.168.1.1'); DNS = @('192.168.1.1'); DNSSuffixSearchOrder = @('corp.local', 'internal.local', 'branch.company.ua') }
+                    # Adapter 1/2: null/empty DNSSuffixSearchOrder — sanitizer не повинен падати.
+                    [PSCustomObject]@{ MACAddress = ''; IPv4 = @(); Gateway = @(); DNS = @(); DNSSuffixSearchOrder = $null }
+                    [PSCustomObject]@{ MACAddress = ''; IPv4 = @(); Gateway = @(); DNS = @(); DNSSuffixSearchOrder = @() }
+                )
                 Connections = [ordered]@{
                     ListeningPorts = @([PSCustomObject]@{ LocalAddress = '192.168.1.10' })
                     EstablishedConnections = @([PSCustomObject]@{ LocalAddress = '192.168.1.10'; RemoteAddress = '192.168.1.20' })
@@ -109,6 +116,24 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
     It 'маскує DNS suffix і public IPv4' {
         $script:report.Network.Routing.DNSSuffixSearchOrder[0] | Should -Match '^REDACTED-DNSSUFFIX-'
         $script:report.Network.IP.PublicIPv4 | Should -Match '^REDACTED-PUBLIC-IP-'
+    }
+
+    It 'маскує per-adapter DNSSuffixSearchOrder навіть у Basic (Release Blocker Fixes v0.6.1) — усі значення, жодного original literal' {
+        $adapterSuffixes = @($script:report.Network.Adapters[0].DNSSuffixSearchOrder)
+        $adapterSuffixes.Count | Should -Be 3
+        $adapterSuffixes | ForEach-Object { $_ | Should -Match '^REDACTED-DNSSUFFIX-' }
+        $adapterSuffixes | Should -Not -Contain 'corp.local'
+        $adapterSuffixes | Should -Not -Contain 'internal.local'
+        $adapterSuffixes | Should -Not -Contain 'branch.company.ua'
+    }
+
+    It 'той самий DNS suffix у Routing і в адаптера отримує однаковий deterministic токен' {
+        $script:report.Network.Adapters[0].DNSSuffixSearchOrder[0] | Should -Be $script:report.Network.Routing.DNSSuffixSearchOrder[0]
+    }
+
+    It 'null/порожній per-adapter DNSSuffixSearchOrder не ламає санітизацію і лишається без змін' {
+        $script:report.Network.Adapters[1].DNSSuffixSearchOrder | Should -Be $null
+        @($script:report.Network.Adapters[2].DNSSuffixSearchOrder).Count | Should -Be 0
     }
 
     It 'маскує MAC-адреси і серійні номери (BIOS, RAM, PhysicalDisks, Storage Deep)' {
@@ -221,6 +246,14 @@ Describe 'Invoke-BravoReportSanitization -Level Strict' {
         $script:report.Network.IP.PublicIPv4 | Should -Match '^REDACTED-PUBLIC-IP-'
     }
 
+    It 'per-adapter DNSSuffixSearchOrder замасковано і в Strict — жодного original literal' {
+        $adapterSuffixes = @($script:report.Network.Adapters[0].DNSSuffixSearchOrder)
+        $adapterSuffixes | ForEach-Object { $_ | Should -Match '^REDACTED-DNSSUFFIX-' }
+        $adapterSuffixes | Should -Not -Contain 'corp.local'
+        $adapterSuffixes | Should -Not -Contain 'internal.local'
+        $adapterSuffixes | Should -Not -Contain 'branch.company.ua'
+    }
+
     It 'редагує GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) — лише в Strict' {
         $script:report.Network.IP.PublicIPv4ISP | Should -Be 'REDACTED-GEOIP'
         $script:report.Network.IP.PublicIPv4Organization | Should -Be 'REDACTED-GEOIP'
@@ -264,6 +297,7 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $report.Network.IP.PublicIPv4City = 'CITY_SENTINEL'
         $report.Network.IP.PrimaryIPv4 = '10.20.30.40'
         $report.OutputPath = 'C:\Users\SECRETUSER\Reports'
+        $report.Network.Adapters[0].DNSSuffixSearchOrder = @('DNS_SUFFIX_SENTINEL.corp.example.com')
 
         Invoke-BravoReportSanitization -Report $report -Level 'Strict' | Out-Null
         $json = $report | ConvertTo-Json -Depth 10
@@ -279,5 +313,6 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $json | Should -Not -Match '10\.20\.30\.40'
         $json | Should -Not -Match 'SECRETUSER'
         $json | Should -Not -Match 'C:\\\\Users\\\\SECRETUSER'
+        $json | Should -Not -Match 'DNS_SUFFIX_SENTINEL'
     }
 }
