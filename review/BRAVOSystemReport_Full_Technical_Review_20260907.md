@@ -32,7 +32,7 @@
 |---|---:|
 | Архітектура | **7.4/10** |
 | Коректність збору даних | **6.6/10** |
-| Security engineering (сам інструмент) | **7.5/10** |
+| Security engineering (сам інструмент) | **7.2/10** |
 | Privacy / `-Sanitize` | **5.5/10** |
 | CI/CD | **7.8/10** |
 | Release governance | **6.4/10** |
@@ -51,6 +51,8 @@
 ### Обмеження ревю
 
 Ревю виконано читанням коду release-гілки (head PR #85, `3db337e`), `main`, `developer`, історії git, PR/CI на GitHub. PowerShell-runtime у середовищі ревю немає, тому кожна знахідка позначена як **підтверджена кодом** або **правдоподібна** (потребує прогону на Windows). Пріоритети: **P1** — неправильний результат аудиту, порушення задекларованої гарантії або реальна exposure; **P2** — дефект з workaround або суттєвий борг; **P3** — гігієна.
+
+Процес: код читали кілька незалежних рецензентів за окремими лінзами (архітектура, колектори, privacy, security, export-шар); знахідки з лінз архітектури, колекторів і privacy (64) пройшли окрему adversarial-перевірку іншим рецензентом із калібруванням пріоритету (жодну не спростовано, чотири знижено з P1 до P2 або з P2 до P3); знахідки з лінз security та export-шару (28) перевірені вибірково автором ревю — у документ увійшли лише ті, що підтверджені кодом. Оцінки в таблиці — судження автора ревю на основі підтверджених знахідок.
 
 ---
 
@@ -300,11 +302,26 @@ $arguments += "-SmtpServer `"$SmtpServer`""
 $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptFullPath`" $($arguments -join ' ')"
 ```
 
-Без escaping лапок і без обробки trailing backslash. Шлях виду `C:\reports\` (з кінцевим `\` перед лапкою) ламає розбір аргументів Windows, значення з лапкою всередині — ламає командний рядок. Це відомий борг (PR #85 backlog), але саме він відділяє «звичайний запуск» від «запуску під адміністратором», тобто від головного сценарію інструмента.
+Без escaping лапок і без обробки trailing backslash. За правилами розбору командного рядка Windows `\"` — це екранована лапка, тому шлях із кінцевим `\` **не закриває свій аргумент**, і все, що йде далі, потрапляє у значення `-OutputPath`:
+
+```text
+користувач:   .\Get-BravoSystemReport.ps1 -OutputPath D:\audit\ -Sanitize      (tab-completion додає \)
+без прав адміністратора → relaunch:
+              -OutputPath "D:\audit\" -JSONOnly ... -Sanitize -SanitizeLevel Basic -UpdateSearchTimeoutSec 180 -EmailFrom "..."
+елевований процес бачить:
+              OutputPath = 'D:\audit" -JSONOnly ... -Sanitize -SanitizeLevel Basic ... -EmailFrom '
+              -Sanitize   = НЕ передано
+        ↓
+New-Item на шлях із лапкою падає → ExportError 'OutputPath' → fallback у каталог скрипта
+        ↓
+НЕзамаскований звіт записано поруч зі скриптом, exit code 1
+```
+
+`-EmailFrom` завжди додається (дефолт `systemaudit@<COMPUTERNAME>.local` не порожній), тож наступна лапка є завжди. Жоден тест не проганяє relaunch (усі E2E-тести передають `-SkipElevation`, CI працює під адміністратором). `.bat`-лаунчери безпечні (їхній `%REPORTS%` без кінцевого `\`), але ручний запуск із tab-completion — головний сценарій оператора. PR #85 згадує «trailing backslash/quoting» як P2/P3 backlog; наслідок для `-Sanitize` там не проаналізовано. **P1** (підтверджено кодом; поведінка розбору аргументів Windows задокументована).
 
 Поверхня параметрів існує у **трьох** ручних копіях: `05-Params`, wrapper, серіалізатор elevation. Тест `ParameterSurface` захищає лише перші дві; новий параметр, забутий у серіалізаторі, мовчки губиться при relaunch.
 
-Правильна модель — не будувати рядок вручну, а форвардити параметри файлом (temp JSON) або через `-EncodedCommand`, і додати серіалізатор до того самого AST-тесту.
+Правильна модель — не будувати рядок вручну, а форвардити параметри файлом (temp JSON) або через `-EncodedCommand`, додати серіалізатор до того самого AST-тесту і один E2E-тест relaunch-у зі шляхом, що закінчується на `\`.
 
 ---
 
@@ -378,7 +395,18 @@ $script:Report.Network.Routing.DefaultGateways =
 
 **Kernel-Power 41 рахується тричі.** Одна подія неочікуваного вимкнення дає CRITICAL за System summary, WARNING за HardwareDiagnostics і WARNING за SystemErrors — Health Score стає CRITICAL, а у `-Strict` — exit 4. **P2** (калібрування).
 
+**Deep/Forensic втрачають усі free-space findings, якщо `Get-Volume` впав.** У Deep/Forensic базовий прохід свідомо не емітить findings (делегує risk summary), а risk summary без даних `Get-Volume` нічого не рахує — fallback-у на базовий прохід немає. **P2.**
+
 **Мертва секція `WindowsUpdate`.** Top-level `Report.WindowsUpdate` оголошена в моделі з дефолтами, жоден модуль її не пише і не читає, але вона потрапляє в кожен JSON і в `SCHEMA.md` як «легасі». **P3.**
+
+**Дрібніше, але підтверджене кодом (P3):**
+
+- `Software.Installed` мовчки викидає все, що містить `Update` у назві (`-notlike '*Update*'`): «Microsoft Update Health Tools», агенти «... Update Service» тощо; `SCHEMA.md` при цьому обіцяє «повний список, без штучного обрізання»;
+- на Windows Server немає `root\SecurityCenter2` → `Antivirus.Product = ''` без `Status`/`Error`, невідрізнимо від «антивірус не встановлено»;
+- TLS 1.0/1.1, увімкнені через `Enabled = 0xFFFFFFFF` (патерн IIS Crypto), не флагуються — WARNING вимагає рівно `1`;
+- TXT/MD summary друкує `Uptime: 3d 75.5h` — `UptimeHours` це **загальні** години (`Round(TotalHours,1)`), а не залишок після днів;
+- `AuditPolicy.Subcategories[].Category` заповнюється з колонки `Policy Target` (завжди `System`), а не з категорії аудиту;
+- `Processes/Connections`: результат `Select-Object -First 200` з одним елементом стає скаляром, а не масивом, у JSON.
 
 ### Правдоподібні (потребують прогону)
 
@@ -435,6 +463,8 @@ Basic: PublicIPv4ISP/Organization/ASN/City   маскуються лише у St
 ```
 
 Три з цих пунктів бот Codex позначив як P1 **на фінальному SHA** PR #85 через десять хвилин після merge PR #87. PR body при цьому стверджує «No confirmed P0/P1 release blockers remain» і відносить event messages до «P2/P3 backlog».
+
+Додатково (P2, підтверджено кодом): навіть у Strict лишаються `Security.RemoteAccess.FirewallScope` (дозволені підмережі RDP) і, правдоподібно, `ScheduledTasks[].Name/Path` з SID-ами користувачів у назвах per-user задач; а **жоден формат не позначає, що звіт санітизований і на якому рівні** — `Meta` не має `Sanitized`/`SanitizeLevel`, рівень лише друкується в консоль. Отримувач не може відрізнити замаскований звіт від сирого інакше, ніж помітивши токени `REDACTED-*`, а sentinel-тест не має чого перевіряти.
 
 Для інструмента, чиї звіти явно призначені для передачі назовні, це P1: у `Security`-журналі текст події регулярно містить `Account Name`, `Workstation Name`, `Source Network Address`; `GeneratedFiles` — ім'я Windows-користувача оператора; `WinHttpProxy` — внутрішній домен.
 
@@ -701,6 +731,8 @@ checks = green
 [BLOCK] Sanitize: GeneratedFiles, WinHttpProxy.RawOutput, InstalledBy, WSUSServer, EventLogs.*LastMessage —
         маскувати або вирізати під -Sanitize; export-етапи не мутують модель після маскування
 [BLOCK] Routing.DefaultGateways/DNSServers/DNSSuffixSearchOrder — акумуляція масивів без scalar-unwrap + unit-тест
+[BLOCK] elevation relaunch: -Sanitize (і решта switch-ів) не губляться при -OutputPath із кінцевим \ + E2E-тест relaunch-у
+[BLOCK] Meta.Sanitized / Meta.SanitizeLevel у моделі — щоб отримувач і sentinel-тест бачили, що звіт замасковано
 [BLOCK] Sanitize leakage sentinel: негативний скан JSON/HTML/TXT/MD на реальні hostname/user/domain/
         DNS suffix/Security-текст/C:\Users\<name>, у т.ч. у сценарії з ExportError
 [BLOCK] SECURITY.md/README: точний перелік того, що -Sanitize маскує і НЕ маскує
@@ -727,7 +759,7 @@ checks = green
 
 ### Ризик merge «як є» сьогодні
 
-Stable-реліз, який (а) в advertised safe-режимі віддає доменні акаунти, тексти Security-журналу, внутрішній proxy і шлях профілю оператора, (б) на legacy-BIOS парку ставить CRITICAL здоровим машинам і повертає exit 4 у `-Strict`, (в) на серверах із двома шлюзами показує склеєні адреси замість маршрутизації, (г) публікується з release notes на 610 рядків.
+Stable-реліз, який (а) в advertised safe-режимі віддає доменні акаунти, тексти Security-журналу, внутрішній proxy і шлях профілю оператора, (б) при запуску без прав адміністратора зі шляхом із кінцевим `\` мовчки скидає `-Sanitize`, (в) на legacy-BIOS парку ставить CRITICAL здоровим машинам і повертає exit 4 у `-Strict`, (г) на серверах із двома шлюзами показує склеєні адреси замість маршрутизації, (д) публікується з release notes на 610 рядків.
 
 ---
 
@@ -820,6 +852,14 @@ Stable `main` — 0.5.0; `docs/ROADMAP.md` у тому самому дереві
 ```
 
 Обидва пункти закриті у v0.6.1 (`StartName` збирається і маскується; ім'я файлу маскується). Сам ROADMAP містить mutable-блок «Поточний статус», який застаріває з кожним merge.
+
+### `docs/SCHEMA.md`
+
+```text
+"GeneratedFiles — шляхи всіх фактично створених файлів (JSON/HTML/CSV/ZIP/PDF) — джерело для ZIP-пакування"
+```
+
+У кожному **успішному** прогоні `GeneratedFiles` у JSON — порожній масив: JSON пишеться першим, а його шлях додається вже після серіалізації. Поле заповнюється лише тоді, коли стався ExportError і JSON перезаписано (див. розділ 4). Тобто семантика поля залежить від того, чи була помилка. `Installed[]` описаний як «повний список без обрізання», хоча колектор відкидає все з `Update` у назві.
 
 ### `docs/SECURITY.md`
 
@@ -987,6 +1027,7 @@ ROADMAP тоді лише агрегує посилання.
 | **P1** | Routing-списки на multi-homed hosts (scalar-unwrap при акумуляції) + unit-тест | Неправильний результат аудиту |
 | **P1** | Провести `fix/v061-storage-ci-integrity` через PR у release | MBR WinRE false CRITICAL, committed sha512, footer |
 | **P1** | Self-hosted runner: guard `head.repo == repository` або hosted `windows-latest` для PR | Виконання коду fork-PR під адміністратором |
+| **P1** | Elevation relaunch: серіалізація параметрів без ручного рядка (файл/EncodedCommand) + E2E-тест relaunch-у | `-OutputPath D:\audit\` мовчки губить `-Sanitize` і пише сирий звіт |
 | **P1** | `SECURITY.md`: публічний репозиторій, disclosure, точний перелік «не маскується» | Документ обіцяє більше, ніж є |
 | **P2** | Sanitize leakage sentinel (негативний скан усіх форматів, у т.ч. з ExportError) | Той самий клас багу пʼять разів за цикл |
 | **P2** | Policy manifest для sanitizer + тест «кожен string-leaf має policy» | Deny-list завжди відстає |
@@ -997,14 +1038,16 @@ ROADMAP тоді лише агрегує посилання.
 | **P2** | Тести: спільна fixture для E2E, `-Tag`, видимі skip-и, тести для helper-ів (винести з `90-Main`) | 14 хв на job, тихі пропуски |
 | **P2** | Docs invariants у CI; актуалізувати ARCHITECTURE/README/ROADMAP; CHANGELOG за версіями | Drift уже є |
 | **P2** | Розділити `34-Security` і `51-Export-Html` по policy boundaries; helper-и HTML — один раз | Файли на 55–95 KB |
-| **P2** | Elevation: серіалізація параметрів файлом/EncodedCommand + AST-тест на серіалізатор | Третя копія поверхні параметрів |
+| **P2** | `Meta.Sanitized`/`Meta.SanitizeLevel` у моделі; `GeneratedFiles` — або завжди заповнений, або поза контрактом | Отримувач не бачить, чи звіт замаскований; семантика поля залежить від помилки |
 | **P2** | GeoIP opt-in замість opt-out (або `-SkipGeoIP` у `.bat`) | Зовнішній запит за замовчуванням |
+| **P2** | Deep/Forensic: fallback на базові free-space findings, якщо `Get-Volume` впав | Мовчазна втрата всіх storage-findings |
 | **P3** | Launcher.bat без BOM; `30-Collectors-OS.ps1` з BOM; `.gitignore` txt/md/pdf; `.editorconfig` ↔ `.gitattributes` | Гігієна |
 | **P3** | Детермінований build (без wall-clock timestamp) + `SourceCommit`/`Channel` у dist і JSON | Provenance |
 | **P3** | Pinned Pester/powershell-yaml, SHA-pinned actions | Supply chain |
 | **P3** | `patch/`, `review/v0.2.0-*`, `Publish-ToGitHub.ps1` → архів або видалення; merged branches | Спадок |
 | **P3** | Issues для боргу; disposition для кожного треду бота | Трекінг |
 | **P3** | Мертва секція `WindowsUpdate`; `Core7LatestKnown` один раз; reference data у release-checklist | Контракт |
+| **P3** | TXT/MD uptime (`3d 75.5h`), фільтр `*Update*` у Software, `Antivirus.Status` на Server, TLS `0xFFFFFFFF`, Edge без timeout | Дрібні дефекти виводу і findings |
 
 ---
 
