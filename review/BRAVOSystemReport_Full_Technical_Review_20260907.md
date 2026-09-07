@@ -717,8 +717,8 @@ checks = green
 ### Шлях до mergeable RC
 
 ```text
-1. PR #88: fix/v061-storage-ci-integrity → release/v0.6.1-stable
-2. PR #89: sanitize gaps + snapshot після маскування + sentinel + routing fix + docs → release
+1. PR A: fix/v061-storage-ci-integrity → release/v0.6.1-stable
+2. PR B: sanitize gaps + snapshot після маскування + sentinel + routing fix + docs → release
 3. CI зелений на новому SHA; disposition тредів у #85; оновити PR body
 4. merge #85 → main; tag v0.6.1 через release.yml (dry run спочатку)
 5. ТОГО Ж ДНЯ: merge main → developer (developer не має 9+ комітів release-гілки)
