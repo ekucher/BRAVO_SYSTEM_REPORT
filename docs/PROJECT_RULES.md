@@ -21,4 +21,5 @@
 - Основна гілка: `main`.
 - Зміни виконуються через patch-гілки.
 - Перед merge потрібно перевіряти PR, diff і checks.
-- GitHub Actions перевірка PowerShell тимчасово переведена в ручний режим до окремого налаштування runner/policy.
+- Pull request перевіряється автоматично на GitHub-hosted runner (`.github/workflows/pr-validation.yml`) — лише статичні перевірки.
+- Windows integration validation на self-hosted runner виконується тільки для trusted code: `push` у дозволені гілки, `workflow_dispatch` і release/tag flow. Деталі — у `docs/SECURITY.md`.

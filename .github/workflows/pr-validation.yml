@@ -1,0 +1,200 @@
+name: PR Validation
+
+# TRUST BOUNDARY
+# This workflow is the only one allowed to react to `pull_request`, because a
+# pull request may carry arbitrary code from an untrusted contributor.
+#
+# It therefore runs exclusively on ephemeral GitHub-hosted runners and performs
+# static checks only: it never builds or executes the pull request code, and it
+# never touches the persistent self-hosted Windows runner.
+#
+# Windows integration validation for trusted revisions lives in
+# .github/workflows/local-windows-validation.yml.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - bravo/integration/modular-build
+
+# Read-only: static validation needs nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  static-validation:
+    name: Static validation on GitHub-hosted runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Repository structure check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== REPOSITORY STRUCTURE CHECK ==="
+
+          for required in \
+            "Get-BravoSystemReport.ps1" \
+            "Build-BRAVO-SystemReport.ps1" \
+            "src/Get-BravoSystemReport.ps1" \
+            "src/BRAVO.build.json" \
+            "README.md" \
+            "CHANGELOG.md"
+          do
+            test -f "$required"
+            echo "[OK] $required"
+          done
+
+          echo "[SUCCESS] Repository structure is valid"
+
+      - name: Git diff whitespace check
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          echo "=== GIT DIFF CHECK ==="
+          echo "[INFO] Base: $BASE_SHA"
+
+          git diff --check "$BASE_SHA" HEAD
+
+          echo "[OK] Git diff check passed"
+
+      - name: PowerShell parser check for sources
+        shell: pwsh
+        run: |
+          Write-Host "=== POWERSHELL PARSER CHECK ==="
+
+          # Static parsing only: ParseFile never executes the pull request code.
+          $manifest = Get-Content -LiteralPath "src/BRAVO.build.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+
+          $scripts = @($manifest.files) + @(
+            "Get-BravoSystemReport.ps1",
+            "Build-BRAVO-SystemReport.ps1",
+            "src/Get-BravoSystemReport.ps1"
+          )
+
+          $failed = $false
+
+          foreach ($script in ($scripts | Select-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath $script)) {
+              Write-Host "[ERROR] Script from manifest not found: $script"
+              $failed = $true
+              continue
+            }
+
+            $tokens = $null
+            $parseErrors = $null
+
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $script).Path,
+              [ref]$tokens,
+              [ref]$parseErrors
+            )
+
+            if ($parseErrors.Count -gt 0) {
+              Write-Host "[ERROR] Parse errors in $script"
+              $parseErrors | Format-Table Message, Extent -AutoSize
+              $failed = $true
+              continue
+            }
+
+            Write-Host "[OK] $script"
+          }
+
+          if ($failed) {
+            throw "PowerShell parser check failed."
+          }
+
+          Write-Host "[SUCCESS] Parser clean"
+
+      - name: Public IPv4 literal scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== PUBLIC IPv4 LITERAL SCAN ==="
+
+          # -I skips binary files; generated reports are never scanned.
+          hits=$(git grep -InoE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' -- . ':(exclude)reports/**' | awk -F: '
+            {
+              ip = $NF
+              if (split(ip, o, ".") != 4) next
+              for (i = 1; i <= 4; i++) if (o[i] + 0 > 255) next
+              a = o[1] + 0; b = o[2] + 0; c = o[3] + 0
+              if (a == 0 || a == 10 || a == 127) next
+              if (a == 169 && b == 254) next
+              if (a == 172 && b >= 16 && b <= 31) next
+              if (a == 192 && b == 168) next
+              if (a == 100 && b >= 64 && b <= 127) next
+              if (a == 198 && (b == 18 || b == 19)) next
+              if (a == 203 && b == 0 && c == 113) next
+              print
+            }' || true)
+
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "[ERROR] Public IPv4 literal found in tracked files."
+            exit 1
+          fi
+
+          echo "[OK] Public IPv4 literal scan passed"
+
+      - name: Self-hosted runner trust guard
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== SELF-HOSTED RUNNER TRUST GUARD ==="
+
+          # Regression guard for the Issue #89 security invariant: no workflow
+          # may combine an untrusted pull request trigger with the persistent
+          # self-hosted runner. Comments are stripped so that documentation
+          # mentioning either keyword does not trip the guard.
+          violations=0
+
+          for workflow in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ -e "$workflow" ] || continue
+
+            body=$(grep -v '^[[:space:]]*#' "$workflow" || true)
+
+            uses_self_hosted=0
+            if printf '%s\n' "$body" | grep -qE '^[[:space:]]*runs-on:.*self-hosted'; then
+              uses_self_hosted=1
+            fi
+            if printf '%s\n' "$body" | grep -qE '^[[:space:]]*-[[:space:]]*self-hosted[[:space:]]*$'; then
+              uses_self_hosted=1
+            fi
+
+            triggered_by_pr=0
+            if printf '%s\n' "$body" | grep -qE '^[[:space:]]{1,4}pull_request(_target)?[[:space:]]*:'; then
+              triggered_by_pr=1
+            fi
+
+            if [ "$uses_self_hosted" -eq 1 ] && [ "$triggered_by_pr" -eq 1 ]; then
+              echo "[ERROR] $workflow exposes the self-hosted runner to pull requests"
+              violations=$((violations + 1))
+            else
+              echo "[OK] $workflow"
+            fi
+          done
+
+          if [ "$violations" -gt 0 ]; then
+            echo "[ERROR] Untrusted pull request code must never reach the self-hosted Windows runner."
+            exit 1
+          fi
+
+          echo "[OK] No workflow exposes the self-hosted runner to pull requests"

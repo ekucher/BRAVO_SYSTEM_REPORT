@@ -249,19 +249,44 @@ BAT-запускачі `Quick`, `Full`, `Deep`, `Forensic`:
 - повертають exit code основного PowerShell-скрипта;
 - не показують `Press any key to continue`, якщо передано `--nopause`.
 
-## GitHub Actions / Local Windows Validation
+## GitHub Actions / CI
 
-У репозиторії налаштовано workflow:
+CI розділено за trust boundary: код із pull request вважається недовіреним і ніколи
+не потрапляє на локальну Windows-машину. Детальніше — у `docs/SECURITY.md`.
+
+### Pull request checks (GitHub-hosted)
+
+```text
+.github/workflows/pr-validation.yml
+```
+
+Запускається на `pull_request` і виконується на ephemeral GitHub-hosted runner
+(`ubuntu-latest`). Код із PR тільки статично аналізується, але не збирається і не
+виконується. Перевірки:
+
+- перевірка структури репозиторію;
+- `git diff --check` по діапазону PR;
+- PowerShell parser check для `src\*.ps1` і кореневих скриптів;
+- перевірка, що у tracked files немає випадково закомічених публічних IPv4 literals;
+- guard, який не дає жодному workflow відкрити self-hosted runner для `pull_request`
+  або `pull_request_target`.
+
+### Windows integration validation (self-hosted, trusted)
 
 ```text
 .github/workflows/local-windows-validation.yml
 ```
 
-Workflow запускається на локальному Windows self-hosted runner:
+Виконується на локальному Windows self-hosted runner:
 
 ```text
 BRAVO-SYSTEM-REPORT-WIN
 ```
+
+Тригери — тільки trusted, тобто такі, що вимагають write-доступу до репозиторію:
+
+- `push` у `main` або `bravo/integration/modular-build`;
+- ручний `workflow_dispatch` на вибраній maintainer-ом ревізії.
 
 Перевірки:
 
@@ -272,15 +297,20 @@ BRAVO-SYSTEM-REPORT-WIN
 - JSON validation;
 - перевірка `Profile=Quick`;
 - перевірка `CollectionErrors=0`;
+- Full runtime test і валідація секції `Updates`;
 - перевірка, що у tracked files немає випадково закомічених публічних IPv4 literals.
 
-Окремо є ручний workflow:
+Тобто Windows integration validation спрацьовує вже після merge у `main` або за ручним
+запуском, а не на самому pull request.
+
+### Ручна перевірка структури
 
 ```text
 .github/workflows/powershell-static-check.yml
 ```
 
-Він виконує базову перевірку структури репозиторію.
+Запускається лише вручну (`workflow_dispatch`) і виконує базову перевірку структури
+репозиторію.
 
 ## Реліз
 

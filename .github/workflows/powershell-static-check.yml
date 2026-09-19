@@ -3,6 +3,10 @@
 on:
   workflow_dispatch:
 
+# Read-only: this workflow only inspects the repository structure.
+permissions:
+  contents: read
+
 jobs:
   repository-check:
     name: Ручна перевірка структури репозиторію
