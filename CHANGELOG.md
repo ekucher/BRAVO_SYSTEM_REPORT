@@ -3,6 +3,44 @@
 Продовження стабілізаційного циклу поверх `release/v0.6.1-stable` (PR #85). `ScriptVersion`
 лишається `0.6.1`; `SchemaVersion` без змін.
 
+### Phase 10 — exact-head remediation PR #102 (4×P1 + 2×P2 review-бота)
+
+- **P1: `Report.GeneratedFiles` витікав реальний абсолютний `OutputPath` навіть при `-Sanitize`**
+  (`src/50-Export-Json.ps1`) — санітизація виконується один раз ДО того, як exporter'и
+  дописують у цей масив реальні шляхи; серіалізований JSON (і його ZIP/email-копії) містив
+  реальну директорію попри замаскований `Report.OutputPath`. Виправлено: `Export-BravoJsonReport`
+  отримала `-Sanitize`, що тимчасово підміняє серіалізоване представлення масиву на самі
+  basename'и лише навколо виклику `ConvertTo-Json`, одразу відновлюючи реальні шляхи в `finally`
+  — операційне використання (ZIP-пакування, email attach через `Test-Path`) лишається
+  незмінним.
+- **P1: `Security.RemoteAccess.FirewallScope` (RDP firewall scope) не маскувався навіть у
+  `-SanitizeLevel Strict`** (`src/45-Sanitize.ps1`) — нова `ConvertTo-BravoSanitizedFirewallScope`
+  маскує лише адресоподібні токени в comma-роздільному рядку, зберігаючи семантичні ключові
+  слова Windows Firewall (`Any`/`LocalSubnet`/...) читабельними.
+- **P1: `Network.WinHttpProxy.RawOutput` (сирий `netsh winhttp show proxy`) не санітизувався
+  взагалі** (`src/45-Sanitize.ps1`) — повна редакція фіксованим токеном (та сама категорія
+  ризику й підхід, що й `WSUSServer`), завжди (Basic і Strict).
+- **P1: колізія імені файлу sanitized-звітів у флоті машин** (`src/90-Main.ps1`) — замаскований
+  `ComputerName` детермінований у межах кожного запуску (`New-BravoSanitizeMasker` завжди дає
+  `REDACTED-COMPUTERNAME-1`), тож флот, що пише sanitized-звіти в спільний `OutputPath` в межах
+  однієї секунди, генерував ідентичні basename і перезаписував артефакти одне одного. Нова
+  `New-BravoReportBaseFileName` додає короткий випадковий (НЕ hostname/hardware-похідний)
+  суфікс лише коли `-Sanitize` активний.
+- **P2: `Test-BravoDefenderRealTimeProtectionWarning` не розпізнавав реальні документовані
+  значення `Get-MpComputerStatus.AMRunningMode`** (`src/34-Collectors-Security.ps1`) — перевірка
+  очікувала `'Passive'`/`'SxS Passive'`, тоді як Microsoft документує `'Passive Mode'`/
+  `'SxS Passive Mode'`; false positive WARNING на машинах зі стороннім AV. Короткі форми
+  лишені як defensive fallback.
+- **P2: HTML-таблиця томів класифікувала кожен folder-mounted том (без літери диска) як
+  `RESERVED`, ігноруючи `PartitionType`** (`src/51-Export-Html.ps1`) — розходження з
+  `Get-BravoStorageRiskSummary`, який уже мав точнішу логіку; той самий низькоресурсний
+  data-том міг одночасно отримати CRITICAL-знахідку і показ "не ризик" у HTML. Логіку винесено
+  в спільну `Resolve-BravoStorageVolumeReservedClass` (`src/32-Collectors-Storage.ps1`), яку
+  тепер використовують обидва місця.
+- Регресійне покриття для всіх 6 пунктів: `tests/Sanitize.Tests.ps1`,
+  `tests/MainExportSyncAndArgEscaping.Tests.ps1`, `tests/SecurityPureFunctions.Tests.ps1`,
+  `tests/StorageThresholds.Tests.ps1`.
+
 ### P0 — CI security
 
 - **Self-hosted Windows runner ізольовано від `pull_request`**: `local-windows-validation.yml`

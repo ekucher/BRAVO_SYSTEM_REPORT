@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-25 15:12:08
+    GeneratedAt: 2026-09-25 17:08:47
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1541,6 +1541,51 @@ function Get-BravoStorageDeepAudit {
 
 
 # --- BRAVO v0.3.2 Storage Critical Findings ---
+# Чиста функція: єдине джерело істини "чи цей том без літери диска —
+# системно-зарезервований розділ (WinRE/EFI/MSR), чи звичайний data-том
+# (напр. folder-mounted volume)" (P2, exact-head review Phase 10). Раніше
+# Get-BravoStorageRiskSummary (нижче) і HTML-таблиця Storage Deep
+# (src/51-Export-Html.ps1) незалежно дублювали кожен свою версію цієї
+# класифікації — HTML спрощено вважав "немає DriveLetter -> RESERVED",
+# ігноруючи PartitionType, тож folder-mounted data-том з малим вільним
+# місцем міг одночасно отримати CRITICAL-знахідку у Findings і показ
+# "RESERVED" (не є ризиком) у детальній HTML-таблиці для того самого тому —
+# внутрішньо суперечливий звіт. Повертає:
+#   'KnownReserved'        — GPT/MBR System/Reserved/Recovery (Resolve-BravoPartitionType)
+#   'UncorrelatedLowSpace' — кореляція партиції не вдалась (Type ''/'Unknown'),
+#                            мало вільного місця -> ймовірно прихований системний
+#                            розділ, викликач може додати INFO-знахідку
+#   'NotReserved'          — звичайний data-том (з літерою диска, або без
+#                            неї, але Type відомий і не System/Reserved/Recovery,
+#                            або вільного місця достатньо для UncorrelatedLowSpace)
+function Resolve-BravoStorageVolumeReservedClass {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$DriveLetter,
+        [AllowNull()][AllowEmptyString()][string]$PartitionType,
+        [AllowNull()]$FreePercent,
+
+        [Parameter(Mandatory = $true)]
+        [double]$WarningThreshold
+    )
+
+    $hasDriveLetter = [bool]($DriveLetter -and [string]$DriveLetter -ne '')
+    if ($hasDriveLetter) { return 'NotReserved' }
+
+    $type = [string]$PartitionType
+    if ($type -in @('System', 'Reserved', 'Recovery')) { return 'KnownReserved' }
+
+    if ($type -eq '' -or $type -eq 'Unknown') {
+        $freePercentValue = $null
+        if ($null -ne $FreePercent -and [string]$FreePercent -ne '') {
+            try { $freePercentValue = [double]$FreePercent } catch { $freePercentValue = $null }
+        }
+        if ($null -ne $freePercentValue -and $freePercentValue -lt $WarningThreshold) { return 'UncorrelatedLowSpace' }
+    }
+
+    return 'NotReserved'
+}
+
 function Get-BravoStorageRiskSummary {
     param(
         [Parameter(Mandatory = $true)]
@@ -1645,8 +1690,12 @@ function Get-BravoStorageRiskSummary {
         # так само важливий, як і для звичайних томів. Тому Reserved
         # визначається за фактичним типом партиції (PartitionType,
         # кореляція через Get-Partition вище в Get-BravoStorageDeepAudit),
-        # а не лише за відсутністю DriveLetter.
-        if ((-not $driveLetter) -and ($partitionType -in @('System', 'Reserved', 'Recovery'))) {
+        # а не лише за відсутністю DriveLetter — канонічна класифікація,
+        # спільна з HTML-таблицею Storage Deep (Resolve-BravoStorageVolumeReservedClass
+        # вище, P2 exact-head review Phase 10).
+        $reservedClass = Resolve-BravoStorageVolumeReservedClass -DriveLetter $driveLetter -PartitionType $partitionType -FreePercent $freePercent -WarningThreshold $warningThreshold
+
+        if ($reservedClass -eq 'KnownReserved') {
             $risk.ReservedVolumes += $volumeRisk
             continue
         }
@@ -1663,7 +1712,7 @@ function Get-BravoStorageRiskSummary {
         # справжніх System/Reserved/Recovery). Здоровий некорельований том
         # (вільного місця достатньо) поводиться як раніше — звичайний аналіз
         # (потрапляє в Healthy нижче), без INFO-шуму.
-        if ((-not $driveLetter) -and ($partitionType -eq '' -or $partitionType -eq 'Unknown') -and ($freePercent -lt $warningThreshold)) {
+        if ($reservedClass -eq 'UncorrelatedLowSpace') {
             Add-AuditFinding `
                 -Severity 'INFO' `
                 -Category 'Storage.UnknownVolume' `
@@ -2301,6 +2350,18 @@ function ConvertFrom-BravoNetAccountsOutput {
 # вимкнений Real-Time Protection. Passive/SxS Passive — свідомий, штатний
 # стан Defender, коли активний сторонній антивірус, не сигнал проблеми.
 # Винесено окремо для Pester-покриття без запуску Get-BravoSecurityAudit.
+#
+# AMRunningMode реальні значення (P2, exact-head review Phase 10,
+# підтверджено learn.microsoft.com/defender-endpoint/microsoft-defender-passive-mode
+# і techcommunity.microsoft.com/discussions/microsoftdefenderatp/amrunningmode--active-or-passive/4277194):
+# 'Normal', 'Passive Mode', 'SxS Passive Mode', 'EDR Block Mode' — зі словом
+# "Mode". Коротші форми 'Passive'/'SxS Passive' (без "Mode") не є задокументованими
+# значеннями Get-MpComputerStatus.AMRunningMode; лишені тут як захисний
+# fallback (не шкодять, якщо ніколи не зустрінуться), АЛЕ основна перевірка —
+# повні задокументовані значення. Без цього фікса машина зі стороннім
+# антивірусом (Defender навмисно в passive mode, RealTimeProtectionEnabled=$false)
+# отримувала хибний WARNING і зниження Health Score — саме той false positive,
+# який ця функція мала запобігати.
 function Test-BravoDefenderRealTimeProtectionWarning {
     [CmdletBinding()]
     param(
@@ -2311,7 +2372,7 @@ function Test-BravoDefenderRealTimeProtectionWarning {
         [string]$AMRunningMode
     )
 
-    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive'))
+    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive', 'Passive Mode', 'SxS Passive Mode'))
 }
 
 # Чиста функція: парсить вивід `auditpol /get /category:* /r` (CSV) за
@@ -4507,6 +4568,45 @@ function New-BravoSanitizeMasker {
     }.GetNewClosure()
 }
 
+# Чиста функція: маскує лише адресоподібні токени у комма-роздільному
+# Security.RemoteAccess.FirewallScope (Get-NetFirewallAddressFilter.RemoteAddress
+# join, src/34-Collectors-Security.ps1) — значення тут суміш реальних
+# приватних IP/CIDR/діапазонів (напр. "10.21.0.0/24") і семантичних
+# ключових слів Windows Firewall ("Any", "LocalSubnet", "DefaultGateway"
+# тощо), тому суцільне маскування всього рядка одним маскером зробило б
+# "Any"/"LocalSubnet" нечитабельними без жодної privacy-користі (P1,
+# exact-head review Phase 10).
+function ConvertTo-BravoSanitizedFirewallScope {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Scope,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Masker
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Scope)) { return $Scope }
+
+    # Windows Firewall семантичні ключові слова для RemoteAddress
+    # (задокументовано в Get-NetFirewallAddressFilter/netsh advfirewall) —
+    # не адреси, не потребують і не повинні маскуватись.
+    $knownScopeKeywords = @(
+        'Any', 'LocalSubnet', 'DNS', 'DHCP', 'WINS', 'DefaultGateway',
+        'Intranet', 'RemoteIntranet', 'Internet', 'Ply2Renders'
+    )
+
+    $tokens = $Scope -split ',\s*'
+    $maskedTokens = foreach ($token in $tokens) {
+        if ($token -in $knownScopeKeywords) {
+            $token
+        } else {
+            & $Masker $token
+        }
+    }
+
+    return ($maskedTokens -join ', ')
+}
+
 function Invoke-BravoReportSanitization {
     [CmdletBinding()]
     param(
@@ -4755,6 +4855,17 @@ function Invoke-BravoReportSanitization {
                 if ($conn.RemoteAddress) { $conn.RemoteAddress = & $maskPrivateIP $conn.RemoteAddress }
             }
         }
+
+        # --- RDP firewall scope (Security.RemoteAccess.FirewallScope, P1
+        # exact-head review Phase 10) — та сама категорія PRIVATE-IP, що й
+        # решта мережевих адрес у цьому блоці: RemoteAddress фаєрвол-правила
+        # часто містить конкретні внутрішні підмережі/VPN-діапазони, лишені
+        # незамаскованими раніше. ConvertTo-BravoSanitizedFirewallScope
+        # маскує лише адресоподібні токени, зберігаючи семантичні ключові
+        # слова ("Any"/"LocalSubnet") читабельними.
+        if ($Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.FirewallScope) {
+            $Report.Security.RemoteAccess.FirewallScope = ConvertTo-BravoSanitizedFirewallScope -Scope $Report.Security.RemoteAccess.FirewallScope -Masker $maskPrivateIP
+        }
     }
 
     # --- SMB shares: шлях може містити username (напр. C:\Users\jdoe\Share) —
@@ -4779,6 +4890,22 @@ function Invoke-BravoReportSanitization {
     }
     if ($Report.Updates -and $Report.Updates.WindowsUpdate -and $Report.Updates.WindowsUpdate.WSUSServer) {
         $Report.Updates.WindowsUpdate.WSUSServer = & $maskWsus $Report.Updates.WindowsUpdate.WSUSServer
+    }
+
+    # --- Network.WinHttpProxy.RawOutput (P1, exact-head review Phase 10) —
+    # сирий вивід `netsh winhttp show proxy` (Full/Deep/Forensic) часто
+    # містить внутрішній proxy hostname, bypass-list домени й топологію —
+    # та сама категорія ризику, що й WSUSServer вище (внутрішній
+    # hostname/URL, ідентифікує організацію). Свідомо Option A (повна
+    # редакція фіксованим токеном, а не вибірковий regex-парсинг): сирий
+    # текст — діагностична зручність, не контрактне поле схеми, тож
+    # вибірковий парсер лише додав би крихкість без реальної користі.
+    # Завжди (Basic), не лише Strict — той самий рівень ризику, що й
+    # WSUSServer/EventLogs LastMessage вище. Уже розпарсений Status
+    # (enum-подібне значення 'Detected'/'Unavailable'/'NotAvailable') не є
+    # чутливим і лишається як є.
+    if ($Report.Network -and $Report.Network.WinHttpProxy -and $Report.Network.WinHttpProxy.RawOutput -and @($Report.Network.WinHttpProxy.RawOutput).Count -gt 0) {
+        $Report.Network.WinHttpProxy.RawOutput = @('REDACTED-WINHTTP-PROXY')
     }
 
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
@@ -4866,13 +4993,35 @@ function Export-BravoJsonReport {
 
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$BaseFileName
+        [string]$BaseFileName,
+
+        # Sanitize (P1, exact-head review Phase 10) — Invoke-BravoReportSanitization
+        # runs ONCE, before any exporter populates Report.GeneratedFiles, so
+        # the array always contains real absolute paths under the real
+        # $OutputDir even when the rest of the report (incl. Report.OutputPath
+        # itself) is masked. Those paths get serialized into every
+        # (re-)written JSON -- and its ZIP/email copies -- leaking the real
+        # output directory. Real paths are still needed operationally
+        # (Export-BravoZipReport/Send-BravoEmailReport read
+        # Report.GeneratedFiles to know what to attach), so only the
+        # SERIALIZED VIEW is changed here -- the live array is restored right
+        # after serialization.
+        [switch]$Sanitize
     )
 
     # JSON
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
-        $jsonContent = ConvertTo-Json $script:Report -Depth 12
+
+        $originalGeneratedFiles = $script:Report.GeneratedFiles
+        if ($Sanitize) {
+            $script:Report.GeneratedFiles = @($originalGeneratedFiles | ForEach-Object { Split-Path -Path $_ -Leaf })
+        }
+        try {
+            $jsonContent = ConvertTo-Json $script:Report -Depth 12
+        } finally {
+            if ($Sanitize) { $script:Report.GeneratedFiles = $originalGeneratedFiles }
+        }
         # Out-File -Encoding utf8 у Windows PowerShell 5.1 завжди додає BOM,
         # що ламає суворі JSON-парсери (RFC 8259 не допускає BOM) у зовнішніх
         # CI/monitoring-пайплайнах, які читають цей файл. Пишемо через
@@ -5332,14 +5481,17 @@ function Export-BravoHtmlReport {
                     $volume = $_
                     $freePercent = $null
                     if ($null -ne $volume.FreePercent -and [string]$volume.FreePercent -ne '') { $freePercent = [double]$volume.FreePercent }
-                    $hasDriveLetter = [bool]($volume.DriveLetter -and [string]$volume.DriveLetter -ne '')
-                    # Томи без літери диска (WinRE/EFI/MSR) — системно-
-                    # зарезервовані розділи, майже завжди заповнені образом
-                    # відновлення; той самий принцип виключення, що й у
-                    # Get-BravoStorageRiskSummary (src/32-Collectors-Storage.ps1)
-                    # — інакше ця таблиця незалежно рахує WARNING/CRITICAL для
-                    # штатного стану, розбігаючись із Findings-зведенням вище.
-                    $riskText = if (-not $hasDriveLetter) { 'RESERVED' } elseif ($null -eq $freePercent) { 'UNKNOWN' } elseif ($freePercent -lt $criticalThreshold) { 'CRITICAL' } elseif ($freePercent -lt $warningThreshold) { 'WARNING' } else { 'OK' }
+                    # Канонічна класифікація (Resolve-BravoStorageVolumeReservedClass,
+                    # src/32-Collectors-Storage.ps1) — та сама функція, що й
+                    # Get-BravoStorageRiskSummary (P2, exact-head review Phase 10).
+                    # Раніше ця таблиця незалежно вважала "немає DriveLetter ->
+                    # RESERVED", ігноруючи PartitionType — folder-mounted
+                    # data-том без літери диска й малим вільним місцем міг
+                    # одночасно отримати CRITICAL-знахідку в Findings і показ
+                    # "RESERVED" (не ризик) тут, для того самого тому.
+                    $reservedClass = Resolve-BravoStorageVolumeReservedClass -DriveLetter $volume.DriveLetter -PartitionType $volume.PartitionType -FreePercent $freePercent -WarningThreshold $warningThreshold
+                    $isReserved = $reservedClass -in @('KnownReserved', 'UncorrelatedLowSpace')
+                    $riskText = if ($isReserved) { 'RESERVED' } elseif ($null -eq $freePercent) { 'UNKNOWN' } elseif ($freePercent -lt $criticalThreshold) { 'CRITICAL' } elseif ($freePercent -lt $warningThreshold) { 'WARNING' } else { 'OK' }
                     $riskClass = Get-BravoStorageRiskClass $riskText
                     $reason = if ($riskText -eq 'RESERVED') { 'Системно-зарезервований том без літери диска (WinRE/EFI/MSR) — не є ризиком.' } elseif ($riskText -eq 'CRITICAL') { "Вільного місця менше $criticalThreshold%." } elseif ($riskText -eq 'WARNING') { "Вільного місця менше $warningThreshold%." } elseif ($riskText -eq 'UNKNOWN') { 'Не вдалося визначити free percent.' } else { 'Показники в межах порогів.' }
                     "<tr><td>$(ConvertTo-BravoHtmlText (Get-BravoStorageDisplayText $volume))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FileSystemLabel))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FileSystem))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.DriveType))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.HealthStatus))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.OperationalStatus))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.SizeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreePercent))%</td><td><span class=`"risk $riskClass`">$(ConvertTo-BravoHtmlText $riskText)</span></td><td>$(ConvertTo-BravoHtmlText $reason)</td></tr>"
@@ -6576,12 +6728,52 @@ if ($Sanitize) {
     }
 }
 
+# Чиста функція: обчислює базове ім'я файлу звіту. Винесена окремо (P1,
+# exact-head review Phase 10), щоб її можна було протестувати проти
+# реального production-коду через AST-екстракцію (той самий підхід, що й
+# ConvertTo-BravoQuotedProcessArgument, tests/MainExportSyncAndArgEscaping.Tests.ps1),
+# а не копіювати логіку в тест.
+#
 # Ім'я файлу теж має бути безпечним при -Sanitize: реальний $env:COMPUTERNAME
 # використовується лише коли sanitize вимкнено або провалився (у разі
 # провалу звіти взагалі не пишуться нижче, тому ім'я тут не потрапляє на
 # диск, але лишається консистентним з рештою пайплайна).
-$baseFileNameComputer = if ($Sanitize -and -not $script:SanitizeFailed) { $script:Report.ComputerName } else { $env:COMPUTERNAME }
-$baseFileName = "BravoSystemReport_${baseFileNameComputer}_$reportTimestamp"
+#
+# Замаскований ComputerName ДЕТЕРМІНОВАНИЙ у межах кожного окремого запуску
+# (New-BravoSanitizeMasker скидає Counter щоразу -> завжди
+# "REDACTED-COMPUTERNAME-1") — тому флот машин, що пишуть заплановані
+# sanitized-звіти в спільний OutputPath в межах однієї секунди, раніше
+# генерував ІДЕНТИЧНІ basename і перезаписував артефакти одне одного (P1).
+# Короткий випадковий суфікс (НЕ похідний від hostname/user/domain/MAC/
+# serial — саме це Sanitize й покликаний прибирати) робить sanitized-імена
+# унікальними, зберігаючи їх privacy-safe. Генерується РІВНО ОДИН РАЗ на
+# запуск (єдиний виклик цієї функції нижче) і використовується всіма
+# exporter'ами через спільний $baseFileName — JSON/HTML/CSV/ZIP/... в межах
+# одного запуску лишаються згрупованими під одним basename.
+function New-BravoReportBaseFileName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Timestamp,
+
+        [switch]$SanitizeActive,
+
+        [AllowEmptyString()]
+        [string]$RealComputerName = '',
+
+        [AllowEmptyString()]
+        [string]$SanitizedComputerName = ''
+    )
+
+    if ($SanitizeActive) {
+        $uniqueSuffix = [Guid]::NewGuid().ToString('N').Substring(0, 8)
+        return "BravoSystemReport_${SanitizedComputerName}_${Timestamp}_$uniqueSuffix"
+    }
+
+    return "BravoSystemReport_${RealComputerName}_${Timestamp}"
+}
+
+$baseFileName = New-BravoReportBaseFileName -Timestamp $reportTimestamp -SanitizeActive:($Sanitize -and -not $script:SanitizeFailed) -RealComputerName $env:COMPUTERNAME -SanitizedComputerName $script:Report.ComputerName
 
 Write-Host ''
 Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
@@ -6608,7 +6800,7 @@ if ($script:SanitizeFailed) {
         param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
         $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
         if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
-            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
         return [PSCustomObject]@{
@@ -6621,7 +6813,7 @@ if ($script:SanitizeFailed) {
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
     $exportErrorCount = @($script:Report.ExportErrors).Count
     $generatedFilesCount = @($script:Report.GeneratedFiles).Count
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
 
     # HTML
     Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
