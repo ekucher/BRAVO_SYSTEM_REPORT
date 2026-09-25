@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.5.0'
+    SchemaVersion = '0.6.20'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -56,15 +56,36 @@ return [ordered]@{
         Findings = @()
     }
     OS = [ordered]@{ Caption=''; Version=''; Build=''; Architecture=''; InstallDate=''; LastBootUpTime=''; UptimeDays=0; UptimeHours=0 }
-    PowerShell = [ordered]@{ Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString() }
-    DotNet = [ordered]@{ v4='Not Installed' }
+    PowerShell = [ordered]@{
+        Version=$PSVersionTable.PSVersion.ToString(); Edition=$PSVersionTable.PSEdition; ExecutionPolicy=(Get-ExecutionPolicy).ToString()
+        Core7Installed=$false; Core7Version=''; Core7LatestKnown='7.4'; Core7UpdateAvailable=$false
+    }
+    DotNet = [ordered]@{ v4='Not Installed'; ReleaseKey=0; LatestKnownVersion='4.8.1'; UpdateAvailable=$false }
+    WindowsUpdate = [ordered]@{
+        ServiceStatus = ''
+        InstalledHotFixCount = 0
+        InstalledHotFixes = @()
+        LastInstalledHotFix = ''
+        LastInstallDate = ''
+        DaysSinceLastInstall = -1
+        PendingRebootRequired = $false
+        PendingUpdates = @()
+        PendingCount = 0
+        PendingCritical = 0
+        PendingSecurity = 0
+        SearchStatus = 'NotChecked'
+        SearchError = ''
+    }
     BIOS = [ordered]@{ Version=''; SerialNumber=''; ReleaseDate='' }
     Virtualization = [ordered]@{ IsVirtual=$false; Hypervisor='' }
     Hardware = [ordered]@{
-        ComputerSystem = [ordered]@{ Manufacturer=''; Model=''; Domain=''; TotalPhysicalMemoryGB=0 }
+        ComputerSystem = [ordered]@{ Manufacturer=''; Model=''; Domain=''; TotalPhysicalMemoryGB=0; ChassisType=''; ChassisTypeCode=$null }
         CPU = [ordered]@{ Name=''; Cores=0; LogicalProcessors=0; MaxClockSpeedMHz=0; LoadPercent=0 }
         RAM = [ordered]@{ TotalGB=0; TotalVisibleMemoryGB=0; FreeGB=0; UsedGB=0; UsedPercent=0; Source=''; Modules=@() }
         Disks = [ordered]@{ FreePercent=0; TotalGB=0; FreeGB=0; Volumes=@(); PhysicalDisks=@() }
+        Motherboard = [ordered]@{ Manufacturer=''; Product=''; SerialNumber=''; Version='' }
+        GPU = @()
+        Monitors = @()
     }
     Network = [ordered]@{
         General = [ordered]@{ Hostname=''; Domain='' }
@@ -88,15 +109,115 @@ return [ordered]@{
             PublicIPv4CheckedAt=''
             PublicIPv4Status='NotChecked'
         }
-        Routing = [ordered]@{ DefaultGateway=''; DefaultGateways=@(); DNSServers=@(); DNSSuffixSearchOrder=@() }
+        Routing = [ordered]@{ DefaultGateway=''; DefaultGateways=@(); DNSServers=@(); DNSSuffixSearchOrder=@(); RoutingTable=@() }
         Adapters = @()
-        Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@() }
+        Connections = [ordered]@{ Established=0; Listening=0; ListeningPorts=@(); EstablishedConnections=@() }
+        ARP = @()
+        WinHttpProxy = [ordered]@{ RawOutput=@(); Status='NotChecked'; Error='' }
+        SmbShares = @()
     }
-    Security = [ordered]@{ UAC=[ordered]@{Enabled=$false}; RemoteAccess=[ordered]@{RDPEnabled=$false}; Antivirus=[ordered]@{Product=''}; Firewall=[ordered]@{} }
+    Security = [ordered]@{
+        UAC=[ordered]@{
+            Enabled=$false
+            ConsentPromptBehaviorAdminCode=$null
+            ConsentPromptBehaviorAdminText=''
+            ConsentPromptBehaviorUserCode=$null
+            ConsentPromptBehaviorUserText=''
+            PromptOnSecureDesktop=$null
+            FilterAdministratorToken=$null
+        }
+        RemoteAccess=[ordered]@{
+            RDPEnabled=$false
+            NLAEnabled=$null
+            Port=$null
+            FirewallScope=''
+            FirewallProfiles=''
+            AllowedUsers=@()
+        }
+        Antivirus=[ordered]@{Product=''}
+        Firewall=[ordered]@{}
+        SecureBoot = [ordered]@{
+            Supported = $null
+            Enabled = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        TPM = [ordered]@{
+            Present = $null
+            Ready = $null
+            Enabled = $null
+            Activated = $null
+            ManufacturerId = ''
+            ManufacturerVersion = ''
+            SpecVersion = ''
+            Status = 'NotChecked'
+            Error = ''
+        }
+        SMBv1 = [ordered]@{
+            Enabled = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        TLS = [ordered]@{
+            Protocols = @()
+        }
+        Defender = [ordered]@{
+            Available = $null
+            AMServiceEnabled = $null
+            AntivirusEnabled = $null
+            RealTimeProtectionEnabled = $null
+            BehaviorMonitorEnabled = $null
+            AntivirusSignatureVersion = ''
+            AntivirusSignatureLastUpdated = ''
+            AntivirusSignatureAgeDays = $null
+            AMEngineVersion = ''
+            AMProductVersion = ''
+            AMRunningMode = ''
+            Status = 'NotChecked'
+            Error = ''
+        }
+        WinRM = [ordered]@{
+            ServiceStatus = ''
+            Listeners = @()
+            Auth = [ordered]@{ Basic = $null; Kerberos = $null; Negotiate = $null; Certificate = $null; CredSSP = $null }
+            Status = 'NotChecked'
+            Error = ''
+        }
+        SMB = [ordered]@{
+            ServerSigningRequired = $null
+            ServerSigningEnabled = $null
+            ClientSigningRequired = $null
+            InsecureGuestLogonsEnabled = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        PasswordPolicy = [ordered]@{
+            MinPasswordLength = $null
+            MaxPasswordAgeDays = $null
+            MinPasswordAgeDays = $null
+            PasswordHistoryLength = $null
+            LockoutThreshold = $null
+            LockoutDurationMinutes = $null
+            LockoutObservationWindowMinutes = $null
+            Status = 'NotChecked'
+            Error = ''
+        }
+        AuditPolicy = [ordered]@{
+            Subcategories = @()
+            TotalCount = 0
+            Status = 'NotChecked'
+            Error = ''
+        }
+        Autoruns = @()
+        ScheduledTasks = @()
+    }
     Users = [ordered]@{ LocalAdmins=@() }
     Processes = [ordered]@{ Total=0; TopMemory=@() }
     Services = [ordered]@{ Total=0; Running=0; AutomaticStopped=@() }
-    EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0 }
+    EventLogs = [ordered]@{ Days=$EventLogDays; SystemErrors=0; SystemWarnings=0; SystemErrors24h=0; SystemWarnings24h=0; TopErrorSources=@(); LogSummaries=@(); HardwareDiagnostics=@() }
+    # Software.WindowsFeatures та USBDevices: заплановані, ще не реалізовані
+    # колектори (жоден src/*.ps1 їх наразі не заповнює) — завжди порожній
+    # масив у звіті, не помилка збору.
     Software = [ordered]@{ Installed=@(); WindowsFeatures=@() }
     Updates = [ordered]@{
         OS = [ordered]@{
@@ -143,6 +264,11 @@ return [ordered]@{
         Installed = [ordered]@{ Total=0; LastInstalledOn=''; DaysSinceLastUpdate=$null; InstalledLast30Days=0; Recent=@() }
     }
     USBDevices = @()
+    # CollectionErrors — помилки ЗБОРУ даних (WMI/CIM/реєстр недоступні тощо):
+    # властивість аудитованої машини, впливає на Health Score.
+    # ExportErrors — помилки ЗАПИСУ звітів (JSON/HTML/CSV/ZIP/Email): проблема
+    # самого інструмента, НЕ впливає на Health Score, але впливає на exit code.
     CollectionErrors = @()
+    ExportErrors = @()
 }
 }

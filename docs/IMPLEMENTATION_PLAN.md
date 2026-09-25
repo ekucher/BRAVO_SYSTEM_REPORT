@@ -41,17 +41,13 @@ dist/Get-BravoSystemReport.ps1
 dist/Get-BravoSystemReport.ps1.sha512
 ```
 
-### 2. Старий моноліт у `src/Get-BravoSystemReport.ps1`
+### 2. Старий моноліт у `src/Get-BravoSystemReport.ps1` — ВИРІШЕНО
 
-Після переходу на модульну архітектуру актуальним runtime є `dist/Get-BravoSystemReport.ps1`.
+Файл видалено. Актуальний runtime — виключно `dist/Get-BravoSystemReport.ps1`, зібраний з `src/*.ps1` через `Build-BRAVO-SystemReport.ps1`; `powershell-static-check.yml` більше не перевіряє наявність старого моноліту.
 
-`src/Get-BravoSystemReport.ps1` потрібно прибрати з основного flow або перенести у legacy, щоб не було двох конкуруючих “основних” скриптів.
+### 3. Health Score не враховує export errors — ВИРІШЕНО
 
-### 3. Health Score не враховує export errors
-
-Health Score зараз логічно має рахувати не тільки collection findings/errors, а й помилки export-етапів.
-
-Потрібно або перераховувати score після export, або додати окремий `ExportHealth`.
+`Update-BravoHealthScore` (`src/40-Health.ps1`) викликається вдруге в `src/90-Main.ps1` після export-етапів (JSON/HTML/CSV); JSON і HTML перегенеровуються з фінальною оцінкою, але лише якщо export-етапи додали нові `CollectionErrors` (щоб не дублювати дорогий HTML-рендер без потреби).
 
 ### 4. Немає безпечного режиму передачі звітів
 
@@ -79,12 +75,12 @@ Health Score зараз логічно має рахувати не тільки
 
 ### Задачі
 
-- [ ] Оновити `tools/New-ReleasePackage.ps1`.
-- [ ] Додати у package include list:
-  - [ ] `dist/Get-BravoSystemReport.ps1`;
-  - [ ] `dist/Get-BravoSystemReport.ps1.sha512`.
-- [ ] Перевірити, що package не включає сформовані звіти з `reports/`.
-- [ ] Перевірити, що package не включає sensitive artifacts.
+- [x] Оновити `tools/New-ReleasePackage.ps1` — раніше скрипт взагалі не запускався (посилався на видалений `src/Get-BravoSystemReport.ps1`).
+- [x] Додати у package include list:
+  - [x] `dist/Get-BravoSystemReport.ps1`;
+  - [x] `dist/Get-BravoSystemReport.ps1.sha512`.
+- [x] Перевірити, що package не включає сформовані звіти з `reports/` (`$IncludeFiles` — явний allowlist, `reports/` там немає).
+- [x] Перевірити, що package не включає sensitive artifacts (той самий allowlist-принцип).
 - [ ] Додати локальний тест release package:
   - [ ] build runtime;
   - [ ] create release ZIP;
@@ -112,20 +108,16 @@ Health Score зараз логічно має рахувати не тільки
 
 ### Задачі
 
-- [ ] Перевірити, чи використовується `src/Get-BravoSystemReport.ps1`.
-- [ ] Якщо не використовується:
-  - [ ] перенести у `legacy/Get-BravoSystemReport-v0.3.4.ps1`;
-  - [ ] або видалити після review.
-- [ ] Прибрати `src/Get-BravoSystemReport.ps1` з release package.
-- [ ] Оновити README/examples.
-- [ ] Оновити CHANGELOG.
+- [x] Перевірити, чи використовується `src/Get-BravoSystemReport.ps1` — не редагувався з переходу на модульну архітектуру, реального використання не було.
+- [x] Видалено після review (`git rm`), `legacy/`-перенесення визнано зайвим — уся історія доступна в git log.
+- [x] Оновити README (дерево структури, борги, плани розвитку).
+- [x] Оновити CHANGELOG.
 
 ### Acceptance criteria
 
-- У документації є один основний runtime flow:
-  - root wrapper → `dist/Get-BravoSystemReport.ps1`.
-- У release package немає старого моноліту як основного runtime.
-- Немає розбіжності між README, CHANGELOG, ROADMAP і фактичним запуском.
+- [x] У документації є один основний runtime flow: root wrapper → `dist/Get-BravoSystemReport.ps1`.
+- [x] У release package немає старого моноліту.
+- [x] Немає розбіжності між README, CHANGELOG, ROADMAP і фактичним запуском.
 
 ## Етап 3. Runtime Quality
 

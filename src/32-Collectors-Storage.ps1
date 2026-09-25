@@ -1,7 +1,94 @@
 ﻿# MODULE: 32-Collectors-Storage.ps1
 # Збір інформації про диски, Storage Deep Audit та storage-ризики.
 
-# --- BRAVO v0.3.0 Storage Deep Audit Skeleton ---
+# --- P1: централізовані storage thresholds ---
+# Єдине джерело порогів вільного місця для basic (Get-BravoStorageAudit)
+# і deep (Get-BravoStorageRiskSummary) audit — щоб обидва шляхи узгоджено
+# оцінювали один і той самий том і не породжували суперечливих findings.
+function Get-BravoStorageThresholds {
+    [CmdletBinding()]
+    param()
+
+    return [ordered]@{
+        CriticalFreePercent      = 5
+        WarningFreePercent       = 10
+        SystemWarningFreePercent = 15
+    }
+}
+
+# Чиста функція без побічних ефектів: за відсотком вільного місця повертає
+# рівень ризику тому. CD-ROM/оптичні носії завжди 'Healthy' (read-only,
+# "вільне місце" не є показником ризику — примонтований ISO завжди 0%).
+function Get-BravoStorageFreeSpaceSeverity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [Nullable[double]]$FreePercent,
+        [bool]$IsSystemDrive = $false,
+        [string]$DriveType = ''
+    )
+
+    if ($null -eq $FreePercent) { return 'Unknown' }
+    if ($DriveType -eq 'CD-ROM') { return 'Healthy' }
+
+    $thresholds = Get-BravoStorageThresholds
+
+    if ($FreePercent -lt $thresholds.CriticalFreePercent) { return 'Critical' }
+    if ($FreePercent -lt $thresholds.WarningFreePercent) { return 'Warning' }
+    if ($IsSystemDrive -and $FreePercent -lt $thresholds.SystemWarningFreePercent) { return 'SystemWarning' }
+
+    return 'Healthy'
+}
+
+# Чиста функція: канонічна нормалізація типу партиції (v0.6.1 acceptance-
+# review fix). Get-Partition.Type мапить GPT GUID у зрозумілі рядки
+# ('System'/'Reserved'/'Recovery'), але для MBR-дисків (legacy BIOS) WinRE-
+# розділ (MbrType 0x27) НЕ мапиться у 'Recovery' — .Type дає 'IFS'/'Unknown',
+# і такий том раніше помилково потрапляв у звичайний аналіз вільного місця
+# (систематичний false CRITICAL на MBR-парку: WinRE штатно заповнений 90%+).
+# Прецедентність визначена рівно один раз тут:
+#   1) GPT GUID (авторитетне джерело: EFI System / MSR / Recovery);
+#   2) MBR type 0x27 (39) → Recovery;
+#   3) IsSystem → System (явна системна партиція не стає data-томом);
+#   4) наявний Type як є ('Basic'/'IFS'/... — дані, НЕ Reserved);
+#   5) інакше 'Unknown'.
+function Resolve-BravoPartitionType {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Type = '',
+        [AllowNull()][AllowEmptyString()][string]$GptType = '',
+        [AllowNull()]$MbrType = $null,
+        [AllowNull()]$IsSystem = $null
+    )
+
+    $gptGuid = ([string]$GptType).Trim().Trim('{}').ToLowerInvariant()
+    switch ($gptGuid) {
+        'c12a7328-f81f-11d2-ba4b-00a0c93ec93b' { return 'System' }
+        'e3c9e316-0b5c-4db8-817d-f92df00215ae' { return 'Reserved' }
+        'de94bba4-06d1-4d40-a16a-bfd50179d6ac' { return 'Recovery' }
+    }
+
+    $mbrText = ([string]$MbrType).Trim()
+    if ($mbrText) {
+        $mbrValue = -1
+        if ($mbrText -match '^0x[0-9a-fA-F]+$') {
+            try { $mbrValue = [Convert]::ToInt32($mbrText.Substring(2), 16) } catch { $mbrValue = -1 }
+        } else {
+            $parsed = 0
+            if ([int]::TryParse($mbrText, [ref]$parsed)) { $mbrValue = $parsed }
+        }
+        if ($mbrValue -eq 39) { return 'Recovery' }
+    }
+
+    if ($IsSystem -eq $true) { return 'System' }
+
+    $typeText = ([string]$Type).Trim()
+    if ($typeText) { return $typeText }
+
+    return 'Unknown'
+}
+
 function Convert-BravoBytesToGB {
     param([Parameter(Mandatory = $false)]$Bytes)
 
@@ -17,6 +104,15 @@ function Convert-BravoBytesToGB {
 }
 
 function Get-BravoStorageDeepAudit {
+    # Заповнюються нижче в цій функції: CollectedAt, LogicalDisks, Volumes,
+    # Disks, Partitions, PageFiles, BitLocker, ShadowCopies, StoragePools,
+    # ReliabilityCounters, SmartPredictFailures (обидва — SMART/NVMe health,
+    # можуть лишатись порожніми, якщо апаратура/драйвер не підтримує).
+    #
+    # НЕ реалізовано (завжди порожній масив @() — не заплановано окремо,
+    # PhysicalDisks тут дублювало б $script:Report.Hardware.Disks.PhysicalDisks
+    # — це різні поля з однаковою назвою в різних секціях моделі):
+    # PhysicalDisks, StorageSubsystems.
     $storage = [ordered]@{
         CollectedAt  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         LogicalDisks = @()
@@ -59,11 +155,72 @@ function Get-BravoStorageDeepAudit {
     if (Get-Command Get-Volume -ErrorAction SilentlyContinue) {
         try {
             $volumes = Get-Volume -ErrorAction Stop
+            $getPartitionAvailable = [bool](Get-Command Get-Partition -ErrorAction SilentlyContinue)
+
+            # Один список усіх партицій для fallback-кореляції нижче (v0.6.1
+            # acceptance-review fix): primary-шлях Get-Partition -Volume може
+            # штатно не спрацювати для окремого тому — тоді шукаємо партицію
+            # за стабільними ідентифікаторами (volume GUID path в AccessPaths,
+            # літера диска), НЕ за збігом розміру.
+            $allPartitionsForCorrelation = @()
+            if ($getPartitionAvailable) {
+                try { $allPartitionsForCorrelation = @(Get-Partition -ErrorAction Stop) } catch { $allPartitionsForCorrelation = @() }
+            }
             foreach ($volume in $volumes) {
                 $freePercent = if ($volume.Size -gt 0) {
                     [Math]::Round(($volume.SizeRemaining / $volume.Size) * 100, 2)
                 } else {
                     $null
+                }
+
+                # Кореляція з партицією (Release Blocker Fixes v0.6.1) —
+                # best-effort: том без літери диска НЕ завжди справжній
+                # зарезервований розділ (EFI/MSR/WinRE) — це може бути й
+                # звичайний NTFS/ReFS том, змонтований у порожню папку
+                # (folder-mounted volume, напр. C:\Data\PostgreSQL). Без
+                # цієї кореляції такі томи раніше помилково потрапляли до
+                # ReservedVolumes у Get-BravoStorageRiskSummary й випадали
+                # з аналізу вільного місця. Порожній рядок (кореляція не
+                # вдалась/недоступна) — свідомо НЕ трактується як Reserved.
+                $partitionType = ''
+                if ($getPartitionAvailable) {
+                    $correlatedPartition = $null
+                    try {
+                        $correlatedPartition = Get-Partition -Volume $volume -ErrorAction Stop | Select-Object -First 1
+                    } catch {
+                        # Кореляція може штатно не спрацювати (напр. том без
+                        # видимої партиції в поточному контексті) — не помилка
+                        # збору, нижче є fallback за стабільними ідентифікаторами.
+                    }
+
+                    # Fallback-кореляція: volume GUID path (\\?\Volume{...}\)
+                    # присутній у AccessPaths відповідної партиції; для томів
+                    # з літерою — збіг DriveLetter. Свідомо БЕЗ heuristic-збігу
+                    # за самим лише розміром.
+                    if (-not $correlatedPartition -and $allPartitionsForCorrelation.Count -gt 0) {
+                        $volumeGuidPath = [string]$volume.Path
+                        if ($volumeGuidPath) {
+                            $correlatedPartition = $allPartitionsForCorrelation |
+                                Where-Object { $_.AccessPaths -and (@($_.AccessPaths) -contains $volumeGuidPath) } |
+                                Select-Object -First 1
+                        }
+                        if (-not $correlatedPartition -and $volume.DriveLetter) {
+                            $correlatedPartition = $allPartitionsForCorrelation |
+                                Where-Object { [string]$_.DriveLetter -eq [string]$volume.DriveLetter } |
+                                Select-Object -First 1
+                        }
+                    }
+
+                    if ($correlatedPartition) {
+                        # Канонічна нормалізація (GPT GUID / MBR 0x27 / IsSystem
+                        # / Type) — єдина точка класифікації, див.
+                        # Resolve-BravoPartitionType вище.
+                        $partitionType = Resolve-BravoPartitionType `
+                            -Type $correlatedPartition.Type `
+                            -GptType $correlatedPartition.GptType `
+                            -MbrType $correlatedPartition.MbrType `
+                            -IsSystem $correlatedPartition.IsSystem
+                    }
                 }
 
                 $storage.Volumes += [PSCustomObject]@{
@@ -76,6 +233,7 @@ function Get-BravoStorageDeepAudit {
                     SizeGB            = Convert-BravoBytesToGB $volume.Size
                     FreeGB            = Convert-BravoBytesToGB $volume.SizeRemaining
                     FreePercent       = $freePercent
+                    PartitionType     = $partitionType
                 }
 
                 if ($volume.HealthStatus -and [string]$volume.HealthStatus -notin @('Healthy','Unknown')) {
@@ -146,6 +304,48 @@ function Get-BravoStorageDeepAudit {
         }
     }
 
+    if (Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue) {
+        try {
+            $bitlockerVolumes = Get-BitLockerVolume -ErrorAction Stop
+            foreach ($volume in $bitlockerVolumes) {
+                $storage.BitLocker += [PSCustomObject]@{
+                    MountPoint           = $volume.MountPoint
+                    VolumeType           = [string]$volume.VolumeType
+                    CapacityGB           = if ($null -ne $volume.CapacityGB) { [Math]::Round($volume.CapacityGB, 2) } else { $null }
+                    VolumeStatus         = [string]$volume.VolumeStatus
+                    EncryptionPercentage = $volume.EncryptionPercentage
+                    EncryptionMethod     = [string]$volume.EncryptionMethod
+                    ProtectionStatus     = [string]$volume.ProtectionStatus
+                    LockStatus           = [string]$volume.LockStatus
+                    AutoUnlockEnabled    = $volume.AutoUnlockEnabled
+                }
+
+                # Незашифрований системний том — окрема, свідомо вужча знахідка:
+                # відсутність BitLocker на data-томах занадто поширена на
+                # звичайних робочих станціях, щоб бути WARNING на кожному
+                # прогоні (той самий принцип, що й з WinRE/EFI-розділами
+                # раніше в цій сесії); системний том — інша вага ризику.
+                if ($volume.VolumeType -eq 'OperatingSystem' -and [string]$volume.ProtectionStatus -eq 'Off') {
+                    # INFO, не WARNING: відсутність BitLocker на системному
+                    # томі — поширений і часто свідомий вибір (dev-машини,
+                    # десктопи без фізичного ризику крадіжки, альтернативне
+                    # шифрування) — не впливає на Health Score/Status, лише
+                    # фіксується в звіті як факт стану (той самий принцип, що
+                    # й Secure Boot/TPM: "не є помилкою", лише публікація стану).
+                    Add-AuditFinding -Severity 'INFO' -Category 'Storage.BitLocker' -Message "Системний том $($volume.MountPoint) не захищений BitLocker (ProtectionStatus=Off)." -Recommendation 'Розгляньте увімкнення BitLocker для системного тому, особливо на портативних пристроях.'
+                }
+            }
+        } catch {
+            # Get-BitLockerVolume вимагає прав адміністратора й може падати з
+            # access denied на непідвищеній сесії — не помилка збору per se,
+            # оскільки решта Deep Audit продовжує працювати; фіксуємо окремо.
+            Add-AuditError -Section 'StorageDeep.BitLocker' -Message $_.Exception.Message
+        }
+    }
+    # BitLocker-модуль не встановлено (напр. Windows Home edition, деякі
+    # Server Core збірки без feature BitLocker) — $storage.BitLocker
+    # лишається порожнім масивом, це штатний стан машини, не помилка.
+
     try {
         $pageFiles = Get-AuditObject -ClassName 'Win32_PageFileUsage'
         foreach ($pageFile in $pageFiles) {
@@ -167,6 +367,150 @@ function Get-BravoStorageDeepAudit {
         Add-AuditError -Section 'StorageDeep.PageFiles' -Message $_.Exception.Message
     }
 
+    try {
+        # Win32_ShadowCopy — точки відновлення VSS (System Restore/File
+        # History/backup-софт їх створюють). Порожній масив — штатний стан
+        # (VSS вимкнено, немає точок відновлення), не помилка збору.
+        $shadowCopies = Get-AuditObject -ClassName 'Win32_ShadowCopy'
+        foreach ($shadowCopy in $shadowCopies) {
+            $storage.ShadowCopies += [PSCustomObject]@{
+                ID                = $shadowCopy.ID
+                VolumeName        = $shadowCopy.VolumeName
+                InstallDate       = if ($shadowCopy.InstallDate) {
+                    $shadowCopyDate = Convert-AuditDateTime -Value $shadowCopy.InstallDate -UseCim:$script:UseCim
+                    if ($shadowCopyDate) { $shadowCopyDate.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+                } else {
+                    ''
+                }
+                ClientAccessible = $shadowCopy.ClientAccessible
+                Persistent       = $shadowCopy.Persistent
+            }
+        }
+    } catch {
+        # Win32_ShadowCopy-провайдер може бути недоступний (служба VSS
+        # вимкнена/недоступна) — фіксуємо як помилку збору, оскільки клас
+        # штатно присутній на всіх підтримуваних Windows.
+        Add-AuditError -Section 'StorageDeep.ShadowCopies' -Message $_.Exception.Message
+    }
+
+    if (Get-Command Get-StoragePool -ErrorAction SilentlyContinue) {
+        try {
+            # IsPrimordial=$true — це прихований "сирий" пул, що представляє
+            # фізичні диски системи саму по собі, не реальний Storage Spaces
+            # пул, створений користувачем; виключаємо як шум без цінності
+            # (той самий принцип, що й Unreachable/Incomplete у ARP-кеші).
+            $storagePools = Get-StoragePool -ErrorAction Stop | Where-Object { -not $_.IsPrimordial }
+            foreach ($pool in $storagePools) {
+                $storage.StoragePools += [PSCustomObject]@{
+                    FriendlyName      = $pool.FriendlyName
+                    HealthStatus      = [string]$pool.HealthStatus
+                    OperationalStatus = [string]$pool.OperationalStatus
+                    SizeGB            = Convert-BravoBytesToGB $pool.Size
+                    AllocatedGB       = Convert-BravoBytesToGB $pool.AllocatedSize
+                    IsReadOnly        = $pool.IsReadOnly
+                }
+
+                if ([string]$pool.HealthStatus -notin @('Healthy', '')) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage.StoragePools' -Message "Storage Pool '$($pool.FriendlyName)' має статус HealthStatus=$($pool.HealthStatus)." -Recommendation 'Перевірте стан пулу та фізичних дисків, що входять до нього (Get-PhysicalDisk).'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'StorageDeep.StoragePools' -Message $_.Exception.Message
+        }
+    }
+    # Get-StoragePool відсутній (модуль Storage не встановлено, напр. деякі
+    # Server Core/старіші Windows) або Storage Spaces не використовується —
+    # $storage.StoragePools лишається порожнім масивом, штатний стан.
+
+    if (Get-Command Get-PhysicalDisk -ErrorAction SilentlyContinue) {
+        try {
+            $physicalDisksForReliability = Get-PhysicalDisk -ErrorAction Stop
+            foreach ($physicalDisk in $physicalDisksForReliability) {
+                try {
+                    # Get-StorageReliabilityCounter може падати для окремого
+                    # диска (напр. USB/віртуальний диск без SMART-контролера) —
+                    # обробляємо кожен диск незалежно, один збій не має гасити
+                    # решту.
+                    $counter = $physicalDisk | Get-StorageReliabilityCounter -ErrorAction Stop
+                    if (-not $counter) { continue }
+
+                    $storage.ReliabilityCounters += [PSCustomObject]@{
+                        DeviceId                = $physicalDisk.DeviceId
+                        FriendlyName             = $physicalDisk.FriendlyName
+                        MediaType                = [string]$physicalDisk.MediaType
+                        TemperatureCelsius       = $counter.Temperature
+                        TemperatureMaxCelsius    = $counter.TemperatureMax
+                        WearPercent              = $counter.Wear
+                        ReadErrorsTotal          = $counter.ReadErrorsTotal
+                        ReadErrorsUncorrected    = $counter.ReadErrorsUncorrected
+                        WriteErrorsTotal         = $counter.WriteErrorsTotal
+                        WriteErrorsUncorrected   = $counter.WriteErrorsUncorrected
+                        PowerOnHours             = $counter.PowerOnHours
+                    }
+
+                    # Некориговані помилки читання/запису — однозначний сигнал
+                    # апаратної проблеми диска (на відміну від Total, які
+                    # включають штатно-скориговані помилки і завжди >0 на
+                    # робочому диску). Wear >= 90% — SSD/NVMe близько до
+                    # кінця ресурсу за специфікацією виробника.
+                    if (($counter.ReadErrorsUncorrected -gt 0) -or ($counter.WriteErrorsUncorrected -gt 0)) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Storage.Reliability' -Message "Диск '$($physicalDisk.FriendlyName)' має некориговані помилки читання/запису (SMART reliability counters)." -Recommendation 'Перевірте стан диска (chkdsk, виробничий diagnostic tool) і за потреби замініть.'
+                    }
+                    if ($null -ne $counter.Wear -and [double]$counter.Wear -ge 90) {
+                        Add-AuditFinding -Severity 'WARNING' -Category 'Storage.Reliability' -Message "Диск '$($physicalDisk.FriendlyName)' має Wear=$($counter.Wear)% — близько до кінця ресурсу SSD/NVMe." -Recommendation 'Заплануйте заміну диска та перевірте резервні копії.'
+                    }
+                } catch {
+                    # Відсутність reliability counters для ОКРЕМОГО диска —
+                    # штатний стан (USB/віртуальний/деякі RAID-контрольовані
+                    # диски без SMART-passthrough), не помилка збору: інші
+                    # диски в цьому ж циклі продовжують оброблятись незалежно
+                    # (Release Blocker Fixes v0.6.1 — раніше суперечило
+                    # власному коментарю вище, який уже описував це як
+                    # benign, але код все одно викликав Add-AuditError).
+                }
+            }
+        } catch {
+            # Get-PhysicalDisk сам по собі впав — це вже помилка збору
+            # (не per-disk сценарій), на відміну від catch вище.
+            Add-AuditError -Section 'StorageDeep.ReliabilityCounters' -Message $_.Exception.Message
+        }
+    }
+    # Get-PhysicalDisk/Get-StorageReliabilityCounter відсутні (модуль Storage
+    # не встановлено) — $storage.ReliabilityCounters лишається порожнім
+    # масивом, штатний стан.
+
+    try {
+        # MSStorageDriver_FailurePredictStatus (namespace root\wmi) — легасі
+        # SMART predictive-failure API, доступний лише для деяких контролерів
+        # (переважно старі ATA/SATA, часто НЕ покриває NVMe чи RAID-контролери
+        # з власним драйвером) і вимагає прав адміністратора. Відсутність
+        # класу/інстансів — штатний стан для більшості сучасних машин, не
+        # помилка збору.
+        if ($script:UseCim) {
+            $failurePredicts = Get-CimInstance -Namespace 'root\wmi' -ClassName 'MSStorageDriver_FailurePredictStatus' -ErrorAction Stop
+        } else {
+            $failurePredicts = Get-WmiObject -Namespace 'root\wmi' -Class 'MSStorageDriver_FailurePredictStatus' -ErrorAction Stop
+        }
+
+        foreach ($predict in $failurePredicts) {
+            $storage.SmartPredictFailures += [PSCustomObject]@{
+                InstanceName   = $predict.InstanceName
+                PredictFailure = $predict.PredictFailure
+                Reason         = $predict.Reason
+            }
+
+            if ($predict.PredictFailure) {
+                Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage.SMART' -Message "SMART передбачає можливий збій диска '$($predict.InstanceName)' (PredictFailure=True)." -Recommendation 'Негайно створіть резервну копію даних і заплануйте заміну диска.'
+            }
+        }
+    } catch {
+        # Клас відсутній у namespace (WMI-провайдер SMART не встановлено/не
+        # підтримується контролером) — це не помилка збору, а обмеження
+        # апаратної/драйверної підтримки; не фіксуємо Add-AuditError, аби не
+        # створювати CollectionErrors на переважній більшості сучасних машин
+        # (NVMe/RAID), де цей клас штатно відсутній.
+    }
+
     return [PSCustomObject]$storage
 }
 
@@ -178,9 +522,10 @@ function Get-BravoStorageRiskSummary {
         $StorageDeep
     )
 
-    $criticalThreshold = 5
-    $warningThreshold = 10
-    $systemWarningThreshold = 15
+    $thresholds = Get-BravoStorageThresholds
+    $criticalThreshold = $thresholds.CriticalFreePercent
+    $warningThreshold = $thresholds.WarningFreePercent
+    $systemWarningThreshold = $thresholds.SystemWarningFreePercent
     $systemDrive = ($env:SystemDrive -replace ':','').ToUpperInvariant()
 
     $risk = [ordered]@{
@@ -192,11 +537,13 @@ function Get-BravoStorageRiskSummary {
         WarningVolumes             = @()
         SystemVolumeWarnings       = @()
         HealthyVolumes             = @()
+        ReservedVolumes            = @()
         Summary                    = [ordered]@{
             CriticalCount           = 0
             WarningCount            = 0
             SystemWarningCount      = 0
             HealthyCount            = 0
+            ReservedCount           = 0
         }
     }
 
@@ -231,18 +578,73 @@ function Get-BravoStorageRiskSummary {
         $freeGB = $volume.FreeGB
         $sizeGB = $volume.SizeGB
 
+        $partitionType = [string]$volume.PartitionType
+
         $volumeRisk = [PSCustomObject]@{
-            DriveLetter  = $driveLetter
-            Name         = $displayName
-            Label        = $label
-            FileSystem   = $volume.FileSystem
-            HealthStatus = $volume.HealthStatus
-            SizeGB       = $sizeGB
-            FreeGB       = $freeGB
-            FreePercent  = $freePercent
+            DriveLetter   = $driveLetter
+            Name          = $displayName
+            Label         = $label
+            FileSystem    = $volume.FileSystem
+            HealthStatus  = $volume.HealthStatus
+            SizeGB        = $sizeGB
+            FreeGB        = $freeGB
+            FreePercent   = $freePercent
+            PartitionType = $partitionType
         }
 
         if ($null -eq $freePercent) {
+            continue
+        }
+
+        # CD-ROM/оптичні носії — read-only, "вільне місце" не є показником ризику
+        # (наприклад ISO-образ примонтований як том завжди показує 0% вільно).
+        if ([string]$volume.DriveType -eq 'CD-ROM') {
+            $risk.HealthyVolumes += $volumeRisk
+            continue
+        }
+
+        # Томи без літери диска (WinRE/EFI System Partition/MSR) — системно-
+        # зарезервовані розділи фіксованого розміру, недоступні користувачу
+        # через Провідник чи звичайне очищення файлів. WinRE Partition (типово
+        # ~0.5-1 GB) майже завжди заповнений на 90%+ образом відновлення — це
+        # штатний стан Windows, а не ризик, що потребує дій. Виводити їх у
+        # Critical/Warning findings і знижувати Health Score на КОЖНІЙ Windows-
+        # машині було б систематичним false positive. Дані про них лишаються
+        # видимими в таблиці Storage Deep (без Add-AuditFinding).
+        #
+        # Відсутність літери диска сама по собі НЕ є доказом, що том —
+        # системно-зарезервований розділ (Release Blocker Fixes v0.6.1):
+        # звичайний NTFS/ReFS том, змонтований у порожню папку
+        # (folder-mounted volume, напр. C:\Data\PostgreSQL), теж не має
+        # літери диска, але це реальні дані, для яких аналіз вільного місця
+        # так само важливий, як і для звичайних томів. Тому Reserved
+        # визначається за фактичним типом партиції (PartitionType,
+        # кореляція через Get-Partition вище в Get-BravoStorageDeepAudit),
+        # а не лише за відсутністю DriveLetter.
+        if ((-not $driveLetter) -and ($partitionType -in @('System', 'Reserved', 'Recovery'))) {
+            $risk.ReservedVolumes += $volumeRisk
+            continue
+        }
+
+        # Некорельований том без літери (PartitionType ''/'Unknown' — кореляція
+        # з партицією не вдалась навіть через fallback) з малим вільним місцем
+        # (v0.6.1 acceptance-review fix): це з високою ймовірністю прихований
+        # системний розділ (напр. MBR WinRE на машині, де кореляція зірвалась),
+        # а не data-том. НЕ породжуємо неправдивий CRITICAL/WARNING (не
+        # знижуємо Health Score без доказу, що це реальні дані), але й НЕ
+        # ховаємо мовчки: INFO-знахідка просить оператора перевірити вручну,
+        # а сам том іде в ReservedVolumes (семантика "виключений з capacity-
+        # аналізу"; його PartitionType ''/'Unknown' у записі відрізняє його від
+        # справжніх System/Reserved/Recovery). Здоровий некорельований том
+        # (вільного місця достатньо) поводиться як раніше — звичайний аналіз
+        # (потрапляє в Healthy нижче), без INFO-шуму.
+        if ((-not $driveLetter) -and ($partitionType -eq '' -or $partitionType -eq 'Unknown') -and ($freePercent -lt $warningThreshold)) {
+            Add-AuditFinding `
+                -Severity 'INFO' `
+                -Category 'Storage.UnknownVolume' `
+                -Message ("Том без літери диска {0}: тип партиції не визначено, вільно {1}% ({2} GB з {3} GB). Ймовірно прихований системний розділ; перевірте вручну, чи це не data-том." -f $displayName, $freePercent, $freeGB, $sizeGB) `
+                -Recommendation 'Якщо це звичайний data-том (folder-mounted), звільніть місце; якщо системний/recovery розділ — це штатний стан.'
+            $risk.ReservedVolumes += $volumeRisk
             continue
         }
 
@@ -289,6 +691,7 @@ function Get-BravoStorageRiskSummary {
     $risk.Summary.WarningCount = @($risk.WarningVolumes).Count
     $risk.Summary.SystemWarningCount = @($risk.SystemVolumeWarnings).Count
     $risk.Summary.HealthyCount = @($risk.HealthyVolumes).Count
+    $risk.Summary.ReservedCount = @($risk.ReservedVolumes).Count
 
     return [PSCustomObject]$risk
 }
@@ -302,6 +705,16 @@ function Get-BravoStorageAudit {
         $logicalDiskInfo = Get-AuditObject -ClassName 'Win32_LogicalDisk' -Filter 'DriveType=3'
         $totalSpace = 0
         $totalFree = 0
+
+        # Deep/Forensic профілі нижче в цій же функції запускають
+        # Get-BravoStorageRiskSummary, який оцінює ті самі томи з тими самими
+        # централізованими порогами (Get-BravoStorageThresholds), але глибше
+        # (включно з томами без літери диска й системним порогом). Щоб не
+        # породжувати для одного тому два findings різної суворості —
+        # basic-прохід у Deep/Forensic суто збирає TotalGB/FreeGB, а рішення
+        # про findings делегує risk summary.
+        $emitBasicFindings = ($Profile -notin @('Deep','Forensic'))
+        $thresholds = Get-BravoStorageThresholds
 
         foreach ($logicalDisk in $logicalDiskInfo) {
             $totalSpace += [double]$logicalDisk.Size
@@ -317,10 +730,12 @@ function Get-BravoStorageAudit {
             }
             $script:Report.Hardware.Disks.Volumes += $volume
 
-            if ($volume.FreePercent -lt 10) {
-                Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 10% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
-            } elseif ($volume.FreePercent -lt 20) {
-                Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 20% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
+            if ($emitBasicFindings) {
+                if ($volume.FreePercent -lt $thresholds.CriticalFreePercent) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.CriticalFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
+                } elseif ($volume.FreePercent -lt $thresholds.WarningFreePercent) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.WarningFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
+                }
             }
         }
 
