@@ -1,4 +1,63 @@
-﻿## v0.6.1 — 2026-09-03
+﻿## Unreleased — v0.6.1 Stabilization continuation (гілка `integration/v0.6.1-secure`)
+
+Продовження стабілізаційного циклу поверх `release/v0.6.1-stable` (PR #85). `ScriptVersion`
+лишається `0.6.1`; `SchemaVersion` без змін.
+
+### P0 — CI security
+
+- **Self-hosted Windows runner ізольовано від `pull_request`**: `local-windows-validation.yml`
+  реагує лише на `push`/`workflow_dispatch` (публічний репозиторій — недовірений PR-код раніше
+  міг виконатись на persistent self-hosted машині). Новий `pr-validation.yml` виконує статичний
+  аналіз PR-коду виключно на ephemeral GitHub-hosted `ubuntu-latest`, з окремим "Self-hosted
+  runner trust guard" кроком, що не дає жодному workflow поєднати `pull_request`/
+  `pull_request_target` із `self-hosted` runner-ом.
+
+### P0 — регресія (виявлена й виправлена цим циклом)
+
+- **`Security.AuditPolicy` завжди падав на реальній Windows-машині**: `ConvertFrom-BravoAuditPolicyCsv`
+  (`src/34-Collectors-Security.ps1`) мала обов'язковий `[string[]]$Lines` без
+  `[AllowEmptyString()]` — реальний вивід `auditpol /get /category:* /r` завжди містить
+  порожній рядок одразу після заголовка CSV, і PowerShell відхиляв такий масив на біндингу
+  параметра (`ParameterArgumentValidationErrorEmptyStringNotAllowed`), незалежно від
+  `[AllowEmptyCollection()]`/`[AllowNull()]`. Наслідок: `CollectionErrors=1` і exit code `1`
+  на КОЖНОМУ Full/Deep/Forensic прогоні; `Security.AuditPolicy.Status` лишався недокументованим
+  дефолтом `NotChecked`. Виявлено live full Pester-прогоном на реальній машині (не CI-моком).
+  Виправлено (`[AllowEmptyString()]` + catch-блок тепер встановлює `Status='Unavailable'`).
+
+### P1 — reconciliation PR #85 (25 тредів review-бота)
+
+- Усі 25 тредів review-бота PR #85 dispositioned (виправлено, спростовано або задокументовано
+  чому конкретна зміна ризикованіша за статус-кво) — приватність/цілісність Sanitize gaps,
+  export/exit-code contract, collector-correctness (auditpol/TPM/Secure Boot локалізація),
+  argument-injection у elevation relaunch, dead-code (storage thresholds, HTML Updates tab).
+
+### P1/P2 — тести й CI
+
+- Новий `tests/HealthScoreFormula.Tests.ps1` (18 тестів) — формула Health Score, мінімум `0`,
+  status precedence `CRITICAL > WARNING > OK`.
+- Новий `tests/WindowsLifecycle.Tests.ps1` (32 тести) — table-driven покриття
+  `Get-BravoOsSupportInfo`/`Get-BravoWindowsLifecycleTable`; `Get-BravoOsSupportInfo` отримала
+  injectable `-ReferenceDate` (backward-compatible), тести більше не залежать від живого
+  `Get-Date`.
+- `.github/workflows/release.yml`: новий "Unpack-and-run smoke test" крок — розпаковує
+  зібраний release ZIP у `$env:RUNNER_TEMP` (поза `$env:GITHUB_WORKSPACE`) і реально запускає
+  `BRAVO-SystemReport-Quick.bat --nopause` з розпакованого дерева, перевіряє exit code та
+  згенеровані JSON/HTML.
+- Повний Pester-набір розширено до 27 файлів / 316 тестів, live-підтверджено на реальній
+  Windows-машині (не лише CI).
+
+### Документація
+
+- `README.md`/`docs/ARCHITECTURE.md`/`docs/SECURITY.md`/`docs/ROADMAP.md`/
+  `docs/IMPLEMENTATION_PLAN.md` звірені з фактичним станом коду: exit code `5`
+  (`-Sanitize` fail-closed) додано в README-таблицю; `ARCHITECTURE.md` більше не стверджує
+  "`-Sanitize` заплановане, не реалізоване"; `SECURITY.md` більше не рекомендує приватний
+  репозиторій (репозиторій фактично публічний, і решта того самого документа вже описує
+  публічно-репозиторійну threat model); `IMPLEMENTATION_PLAN.md` — 86 незачекнутих чекбоксів
+  звірено індивідуально проти живого коду (93 зачекнуто з конкретними посиланнями на
+  файл/функцію/тест, 7 залишено чесно невизначеними).
+
+## v0.6.1 — 2026-09-03
 
 ### Release Blocker Fixes
 
