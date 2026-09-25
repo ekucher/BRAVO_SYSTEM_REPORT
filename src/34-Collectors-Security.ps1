@@ -148,7 +148,10 @@ function ConvertFrom-BravoNetAccountsOutput {
 # повні задокументовані значення. Без цього фікса машина зі стороннім
 # антивірусом (Defender навмисно в passive mode, RealTimeProtectionEnabled=$false)
 # отримувала хибний WARNING і зниження Health Score — саме той false positive,
-# який ця функція мала запобігати.
+# який ця функція мала запобігати. 'EDR Block Mode' — та сама категорія
+# штатного стану: Defender AV пасивний, а блокує Defender for Endpoint EDR
+# (виявлено фреш-ревʼю Phase 10 — початковий фікс задокументував це значення
+# в коментарі, але забув додати його в allowlist нижче).
 function Test-BravoDefenderRealTimeProtectionWarning {
     [CmdletBinding()]
     param(
@@ -159,7 +162,7 @@ function Test-BravoDefenderRealTimeProtectionWarning {
         [string]$AMRunningMode
     )
 
-    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive', 'Passive Mode', 'SxS Passive Mode'))
+    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive', 'Passive Mode', 'SxS Passive Mode', 'EDR Block Mode'))
 }
 
 # Чиста функція: парсить вивід `auditpol /get /category:* /r` (CSV) за

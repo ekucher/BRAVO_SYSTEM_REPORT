@@ -65,6 +65,12 @@ Describe 'Test-BravoDefenderRealTimeProtectionWarning' {
         Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $false -AMRunningMode 'SxS Passive Mode' | Should -Be $false
     }
 
+    It 'RealTimeProtectionEnabled=$false, AMRunningMode="EDR Block Mode" (реальне документоване значення, знайдено фреш-ревʼю Phase 10 — allowlist спочатку пропустив це значення) — WARNING НЕ потрібен' {
+        # Defender AV у пасивному режимі, блокує Defender for Endpoint EDR —
+        # штатний, свідомий стан, не сигнал проблеми.
+        Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $false -AMRunningMode 'EDR Block Mode' | Should -Be $false
+    }
+
     It 'RealTimeProtectionEnabled=$true — WARNING не потрібен незалежно від AMRunningMode' {
         Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $true -AMRunningMode 'Normal' | Should -Be $false
     }
