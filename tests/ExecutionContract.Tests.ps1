@@ -259,6 +259,44 @@ Describe 'P1 — CI validation для -SanitizeLevel Strict (ROADMAP v0.4.3)' -S
     }
 }
 
+Describe 'P2 delta review 2026-09-25 — HTML Updates tab читає реальний Report.Updates.WindowsUpdate, не порожнє legacy Report.WindowsUpdate' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
+    # -Offline вимикає Windows Update search (мережевий виклик), але
+    # ServiceStatus/ServiceStartType/AutoUpdateOption опитуються локально
+    # (Get-Service wuauserv, реєстр) незалежно від -Offline/профілю
+    # (src/39-Collectors-Updates.ps1 :: Get-BravoWindowsUpdateAgentInfo) —
+    # тому Report.Updates.WindowsUpdate.ServiceStatus завжди непорожній
+    # на будь-якій Windows-машині й придатний для детермінованого тесту.
+    BeforeAll {
+        $script:UpdatesHtmlDir = New-BravoTestReportsDir -Name 'updates-html-mapping'
+        & $script:WrapperPath -Profile Full -Offline -NoZip -SkipElevation -NoPause -NoOpenFolder -OutputPath $script:UpdatesHtmlDir 2>&1 | Out-Null
+        $script:UpdatesHtmlExitCode = $LASTEXITCODE
+        $jsonFile = Get-ChildItem -LiteralPath $script:UpdatesHtmlDir -Filter '*.json' -Recurse | Select-Object -First 1
+        $htmlFile = Get-ChildItem -LiteralPath $script:UpdatesHtmlDir -Filter '*.html' -Recurse | Select-Object -First 1
+        $script:UpdatesHtmlReport = Get-Content -LiteralPath $jsonFile.FullName -Raw | ConvertFrom-Json
+        $script:UpdatesHtmlRaw = Get-Content -LiteralPath $htmlFile.FullName -Raw
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:UpdatesHtmlDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'завершується exit code 0 та Report.Updates.WindowsUpdate.ServiceStatus заповнений (wuauserv завжди опитується)' {
+        $script:UpdatesHtmlExitCode | Should -Be 0
+        $script:UpdatesHtmlReport.Updates.WindowsUpdate.ServiceStatus | Should -Not -BeNullOrEmpty
+    }
+
+    It 'картка "Windows Update" у HTML містить реальний Report.Updates.WindowsUpdate.ServiceStatus (PR#85 thread: HTML раніше міг читати невживане Report.WindowsUpdate і завжди показувати порожньо)' {
+        # Регресія: якби HTML знов почав читати верхньорівневий
+        # $script:Report.WindowsUpdate (застаріле поле моделі зі
+        # src/20-ReportModel.ps1, яке жоден колектор не заповнює —
+        # реальні дані пише лише Report.Updates.WindowsUpdate), картка
+        # "Windows Update" завжди показувала б порожнє значення, навіть
+        # коли служба wuauserv реально опитана й JSON містить статус.
+        $expectedStatus = [System.Net.WebUtility]::HtmlEncode([string]$script:UpdatesHtmlReport.Updates.WindowsUpdate.ServiceStatus)
+        $script:UpdatesHtmlRaw | Should -Match ([regex]::Escape($expectedStatus))
+    }
+}
+
 Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inventory / Network Adapters / SMBv1 / TLS / Defender / RDP / WinRM / SMB signing / Password+Audit policy / Routing+ARP+Proxy / ShadowCopies+StoragePools / SMART / EventLogSummary / HardwareDiagnostics / Monitors / ConnectionsProcessName+SmbShares / UacFullPolicy / Autoruns / ScheduledTasks' -Skip:(-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) {
     # -Profile Deep (не Full): BitLocker збирається лише в Get-BravoStorageDeepAudit,
     # яка запускається лише для Deep/Forensic — той самий прогін заразом покриває
