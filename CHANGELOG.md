@@ -41,6 +41,24 @@
   `tests/MainExportSyncAndArgEscaping.Tests.ps1`, `tests/SecurityPureFunctions.Tests.ps1`,
   `tests/StorageThresholds.Tests.ps1`.
 
+#### Фреш-ревʼю FINAL_HEAD `d6acfe6` (незалежна перевірка вище перерахованих фіксів) — 3 додаткові дефекти
+
+- **`Test-BravoDefenderRealTimeProtectionWarning` allowlist пропускав `'EDR Block Mode'`**
+  (`src/34-Collectors-Security.ps1`) — цей стан був задокументований у коментарі попереднього
+  фіксу, але забутий в самому allowlist; той самий false positive, який фікс мав усунути,
+  відтворювався саме на цьому значенні. Додано `'EDR Block Mode'` до allowlist.
+- **`-Sanitize` на `Export-BravoJsonReport` був fail-open call-site опцією** — залежав від того,
+  щоб КОЖЕН виклик окремо передавав `-Sanitize:$Sanitize`; майбутній call site, що забув би
+  прапорець, мовчки серіалізував би реальний `OutputPath`. Замінено на `$script:SanitizeActive`
+  (обчислюється рівно один раз у `src/90-Main.ps1`), що прибирає саму можливість такої помилки.
+- **`FirewallScope`-маскування (P1 вище) було ненавмисно вкладене в умову `$Report.Network`**
+  (`src/45-Sanitize.ps1`) — Security-поле, чиє маскування залежало від наявності іншої секції
+  звіту. Винесено у власну умову на `$Report.Security`.
+- Супутні дрібні privacy-фікси: `Network.WinHttpProxy.Error` редагується поряд з `.RawOutput`;
+  виправлено помилковий токен `'RemoteIntranet'` -> `'RmtIntranet'` + додано відсутні
+  `LocalSubnet6`/`PlayToDevice`/`PlayToRenderers` у `ConvertTo-BravoSanitizedFirewallScope`;
+  посилено unanchored `Should -Match 'Any'` в тесті на перевірку розпарсеного токена.
+
 ### P0 — CI security
 
 - **Self-hosted Windows runner ізольовано від `pull_request`**: `local-windows-validation.yml`

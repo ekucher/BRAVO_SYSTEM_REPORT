@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-25 17:08:47
+    GeneratedAt: 2026-09-25 17:42:27
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -2361,7 +2361,10 @@ function ConvertFrom-BravoNetAccountsOutput {
 # повні задокументовані значення. Без цього фікса машина зі стороннім
 # антивірусом (Defender навмисно в passive mode, RealTimeProtectionEnabled=$false)
 # отримувала хибний WARNING і зниження Health Score — саме той false positive,
-# який ця функція мала запобігати.
+# який ця функція мала запобігати. 'EDR Block Mode' — та сама категорія
+# штатного стану: Defender AV пасивний, а блокує Defender for Endpoint EDR
+# (виявлено фреш-ревʼю Phase 10 — початковий фікс задокументував це значення
+# в коментарі, але забув додати його в allowlist нижче).
 function Test-BravoDefenderRealTimeProtectionWarning {
     [CmdletBinding()]
     param(
@@ -2372,7 +2375,7 @@ function Test-BravoDefenderRealTimeProtectionWarning {
         [string]$AMRunningMode
     )
 
-    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive', 'Passive Mode', 'SxS Passive Mode'))
+    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive', 'Passive Mode', 'SxS Passive Mode', 'EDR Block Mode'))
 }
 
 # Чиста функція: парсить вивід `auditpol /get /category:* /r` (CSV) за
@@ -4589,10 +4592,13 @@ function ConvertTo-BravoSanitizedFirewallScope {
 
     # Windows Firewall семантичні ключові слова для RemoteAddress
     # (задокументовано в Get-NetFirewallAddressFilter/netsh advfirewall) —
-    # не адреси, не потребують і не повинні маскуватись.
+    # не адреси, не потребують і не повинні маскуватись. 'RmtIntranet' —
+    # правильне написання токена (не 'RemoteIntranet', виправлено
+    # фреш-ревʼю Phase 10); PlayToDevice/PlayToRenderers/LocalSubnet6 додані
+    # як додаткові задокументовані токени.
     $knownScopeKeywords = @(
-        'Any', 'LocalSubnet', 'DNS', 'DHCP', 'WINS', 'DefaultGateway',
-        'Intranet', 'RemoteIntranet', 'Internet', 'Ply2Renders'
+        'Any', 'LocalSubnet', 'LocalSubnet6', 'DNS', 'DHCP', 'WINS', 'DefaultGateway',
+        'Intranet', 'RmtIntranet', 'Internet', 'Ply2Renders', 'PlayToDevice', 'PlayToRenderers'
     )
 
     $tokens = $Scope -split ',\s*'
@@ -4855,17 +4861,20 @@ function Invoke-BravoReportSanitization {
                 if ($conn.RemoteAddress) { $conn.RemoteAddress = & $maskPrivateIP $conn.RemoteAddress }
             }
         }
+    }
 
-        # --- RDP firewall scope (Security.RemoteAccess.FirewallScope, P1
-        # exact-head review Phase 10) — та сама категорія PRIVATE-IP, що й
-        # решта мережевих адрес у цьому блоці: RemoteAddress фаєрвол-правила
-        # часто містить конкретні внутрішні підмережі/VPN-діапазони, лишені
-        # незамаскованими раніше. ConvertTo-BravoSanitizedFirewallScope
-        # маскує лише адресоподібні токени, зберігаючи семантичні ключові
-        # слова ("Any"/"LocalSubnet") читабельними.
-        if ($Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.FirewallScope) {
-            $Report.Security.RemoteAccess.FirewallScope = ConvertTo-BravoSanitizedFirewallScope -Scope $Report.Security.RemoteAccess.FirewallScope -Masker $maskPrivateIP
-        }
+    # --- RDP firewall scope (Security.RemoteAccess.FirewallScope, P1
+    # exact-head review Phase 10) — та сама категорія PRIVATE-IP, що й решта
+    # мережевих адрес вище: RemoteAddress фаєрвол-правила часто містить
+    # конкретні внутрішні підмережі/VPN-діапазони, лишені незамаскованими
+    # раніше. ConvertTo-BravoSanitizedFirewallScope маскує лише адресоподібні
+    # токени, зберігаючи семантичні ключові слова ("Any"/"LocalSubnet")
+    # читабельними. Власний блок-умова окремо від "$Level -eq 'Strict' -and
+    # $Report.Network" вище (fresh-review Phase 10): це Security-поле, і його
+    # маскування не повинно залежати від наявності секції Network у звіті —
+    # раніше воно ненавмисно було вкладене в перевірку $Report.Network.
+    if ($Level -eq 'Strict' -and $Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.FirewallScope) {
+        $Report.Security.RemoteAccess.FirewallScope = ConvertTo-BravoSanitizedFirewallScope -Scope $Report.Security.RemoteAccess.FirewallScope -Masker $maskPrivateIP
     }
 
     # --- SMB shares: шлях може містити username (напр. C:\Users\jdoe\Share) —
@@ -4906,6 +4915,13 @@ function Invoke-BravoReportSanitization {
     # чутливим і лишається як є.
     if ($Report.Network -and $Report.Network.WinHttpProxy -and $Report.Network.WinHttpProxy.RawOutput -and @($Report.Network.WinHttpProxy.RawOutput).Count -gt 0) {
         $Report.Network.WinHttpProxy.RawOutput = @('REDACTED-WINHTTP-PROXY')
+    }
+    # Той самий ризик-підклас, що й RawOutput вище (fresh-review Phase 10):
+    # Error — це $_.Exception.Message від невдалого виклику netsh, теоретично
+    # міг би містити фрагмент команди/шляху; редагується так само на всякий
+    # випадок, хоча типовий текст помилки netsh малоймовірно несе топологію.
+    if ($Report.Network -and $Report.Network.WinHttpProxy -and $Report.Network.WinHttpProxy.Error) {
+        $Report.Network.WinHttpProxy.Error = 'REDACTED-WINHTTP-PROXY'
     }
 
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
@@ -4993,9 +5009,15 @@ function Export-BravoJsonReport {
 
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$BaseFileName,
+        [string]$BaseFileName
+    )
 
-        # Sanitize (P1, exact-head review Phase 10) — Invoke-BravoReportSanitization
+    # JSON
+    try {
+        $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
+
+        # Sanitize (P1, exact-head review Phase 10; fail-open call-site gap
+        # closed by fresh-review Phase 10) — Invoke-BravoReportSanitization
         # runs ONCE, before any exporter populates Report.GeneratedFiles, so
         # the array always contains real absolute paths under the real
         # $OutputDir even when the rest of the report (incl. Report.OutputPath
@@ -5005,22 +5027,20 @@ function Export-BravoJsonReport {
         # (Export-BravoZipReport/Send-BravoEmailReport read
         # Report.GeneratedFiles to know what to attach), so only the
         # SERIALIZED VIEW is changed here -- the live array is restored right
-        # after serialization.
-        [switch]$Sanitize
-    )
-
-    # JSON
-    try {
-        $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
-
+        # after serialization. Reads $script:SanitizeActive (set once in
+        # 90-Main.ps1) rather than a per-call -Sanitize switch parameter --
+        # a call site could previously forget to pass -Sanitize:$Sanitize and
+        # silently leak the real path into a report the operator believes is
+        # sanitized; deriving from run-wide state removes that possibility.
+        $sanitizeActive = [bool]$script:SanitizeActive
         $originalGeneratedFiles = $script:Report.GeneratedFiles
-        if ($Sanitize) {
+        if ($sanitizeActive) {
             $script:Report.GeneratedFiles = @($originalGeneratedFiles | ForEach-Object { Split-Path -Path $_ -Leaf })
         }
         try {
             $jsonContent = ConvertTo-Json $script:Report -Depth 12
         } finally {
-            if ($Sanitize) { $script:Report.GeneratedFiles = $originalGeneratedFiles }
+            if ($sanitizeActive) { $script:Report.GeneratedFiles = $originalGeneratedFiles }
         }
         # Out-File -Encoding utf8 у Windows PowerShell 5.1 завжди додає BOM,
         # що ламає суворі JSON-парсери (RFC 8259 не допускає BOM) у зовнішніх
@@ -6773,7 +6793,16 @@ function New-BravoReportBaseFileName {
     return "BravoSystemReport_${RealComputerName}_${Timestamp}"
 }
 
-$baseFileName = New-BravoReportBaseFileName -Timestamp $reportTimestamp -SanitizeActive:($Sanitize -and -not $script:SanitizeFailed) -RealComputerName $env:COMPUTERNAME -SanitizedComputerName $script:Report.ComputerName
+# $script:SanitizeActive (замість передачі -Sanitize:$Sanitize окремо на
+# кожен виклик Export-BravoJsonReport, fresh-review Phase 10) — обчислюється
+# РІВНО ОДИН РАЗ тут і читається Export-BravoJsonReport напряму зі
+# script-скоупу. Раніше кожен call site мусив сам пам'ятати передати
+# -Sanitize:$Sanitize; будь-який майбутній виклик, що забув би прапорець,
+# мовчки серіалізував би реальний OutputPath у звіт, який оператор вважає
+# санітизованим (fail-open для privacy-критичної функції). Похідне
+# script-значення прибирає саму можливість такої помилки виклику.
+$script:SanitizeActive = ($Sanitize -and -not $script:SanitizeFailed)
+$baseFileName = New-BravoReportBaseFileName -Timestamp $reportTimestamp -SanitizeActive:$script:SanitizeActive -RealComputerName $env:COMPUTERNAME -SanitizedComputerName $script:Report.ComputerName
 
 Write-Host ''
 Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
@@ -6800,7 +6829,7 @@ if ($script:SanitizeFailed) {
         param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
         $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
         if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
-            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
+            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
         return [PSCustomObject]@{
@@ -6813,7 +6842,7 @@ if ($script:SanitizeFailed) {
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
     $exportErrorCount = @($script:Report.ExportErrors).Count
     $generatedFilesCount = @($script:Report.GeneratedFiles).Count
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
     # HTML
     Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
