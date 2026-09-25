@@ -193,6 +193,58 @@ jobs:
 
           Write-Host "[OK] Package verified: SHA512 matches, runtime parses, version $($env:PACKAGE_VERSION)"
 
+      - name: Unpack-and-run smoke test (Issue #100)
+        run: |
+          Write-Host "=== UNPACK-AND-RUN SMOKE TEST ==="
+
+          # Навмисно поза $env:GITHUB_WORKSPACE (у $env:RUNNER_TEMP) — щоб
+          # довести, що пакет самодостатній і НЕ підхоплює src/, dist/ чи
+          # інші файли з оригінального checkout поза package (ключова вимога
+          # Issue #100), а не лише те, що ZIP структурно коректний
+          # ("Verify package content" вище перевіряє структуру/SHA/версію,
+          # але не факт, що runtime реально запускається з розпакованого
+          # package).
+          $smokeDir = Join-Path $env:RUNNER_TEMP "bravo-package-smoke"
+
+          if (Test-Path -LiteralPath $smokeDir) {
+            Remove-Item -LiteralPath $smokeDir -Recurse -Force
+          }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($env:PACKAGE_ZIP, $smokeDir)
+
+          Push-Location $smokeDir
+          try {
+            & ".\BRAVO-SystemReport-Quick.bat" --nopause
+            $exitCode = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
+
+          if ($exitCode -ne 0) {
+            throw "BRAVO-SystemReport-Quick.bat --nopause з розпакованого package завершився з exit code $exitCode (очікувалось 0)."
+          }
+
+          $reportsDir = Join-Path $smokeDir "reports"
+          $jsonFile = Get-ChildItem -LiteralPath $reportsDir -Filter '*.json' -ErrorAction SilentlyContinue | Select-Object -First 1
+          $htmlFile = Get-ChildItem -LiteralPath $reportsDir -Filter '*.html' -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if (-not $jsonFile) { throw "JSON-звіт не знайдено в $reportsDir після unpack-and-run smoke test." }
+          if (-not $htmlFile) { throw "HTML-звіт не знайдено в $reportsDir після unpack-and-run smoke test (non-JSONOnly run)." }
+
+          $report = Get-Content -LiteralPath $jsonFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+
+          if ($report.ScriptVersion -ne $env:PACKAGE_VERSION) {
+            throw "Згенерований JSON ScriptVersion=$($report.ScriptVersion) не збігається з package version $($env:PACKAGE_VERSION)."
+          }
+          if (-not $report.SchemaVersion) { throw "Згенерований JSON не містить SchemaVersion." }
+          if ($report.CollectionErrors.Count -gt 0) { throw "Unpack-and-run smoke test: несподівані CollectionErrors ($($report.CollectionErrors.Count))." }
+          if ($report.ExportErrors.Count -gt 0) { throw "Unpack-and-run smoke test: несподівані ExportErrors ($($report.ExportErrors.Count))." }
+
+          Remove-Item -LiteralPath $smokeDir -Recurse -Force
+
+          Write-Host "[OK] Unpack-and-run smoke test пройшов: exit code 0, JSON/HTML валідні, ScriptVersion=$($report.ScriptVersion)"
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
