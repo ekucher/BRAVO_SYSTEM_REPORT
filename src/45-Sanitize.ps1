@@ -409,7 +409,7 @@ function Invoke-BravoReportSanitization {
     # фіксованим токеном, завжди (Basic), той самий підхід.
     # CollectionErrors повністю наповнюється ДО цього одноразового проходу
     # (усі колектори виконуються до Update-BravoHealthScore/Sanitize) — тут
-    # покриваються всі записи. ExportErrors можуть з'являтись і ПІСЛЕ цього
+    # покриваються всі записи. ExportErrors можуть з'являтись і ПІСЛЯ цього
     # проходу (export-фаза йде після санітизації) — ці пізніші записи
     # редагуються при додаванні в Add-ExportError (src/90-Main.ps1), що
     # читає той самий $script:SanitizeActive; цей блок тут покриває лише

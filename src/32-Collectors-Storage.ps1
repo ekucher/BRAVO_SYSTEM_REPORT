@@ -406,9 +406,9 @@ function Get-BravoStorageDeepAudit {
                     HealthStatus      = [string]$pool.HealthStatus
                     # OperationalStatus — масив (напр. у деградованого пулу
                     # може бути кілька одночасних статусів); -join, як і для
-                    # Volumes/PhysicalDisks вище, а не [string]-каст, що дав
-                    # би "System.Object[]" замість реальних значень (P2,
-                    # fresh-review Phase 10).
+                    # Volumes/PhysicalDisks вище, для детермінованого
+                    # роздільника незалежно від $OFS, а не [string]-каст
+                    # (P2, fresh-review Phase 10).
                     OperationalStatus = ($pool.OperationalStatus -join ', ')
                     SizeGB            = Convert-BravoBytesToGB $pool.Size
                     AllocatedGB       = Convert-BravoBytesToGB $pool.AllocatedSize

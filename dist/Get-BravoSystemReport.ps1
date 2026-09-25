@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-25 18:32:43
+    GeneratedAt: 2026-09-25 18:47:02
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1431,9 +1431,9 @@ function Get-BravoStorageDeepAudit {
                     HealthStatus      = [string]$pool.HealthStatus
                     # OperationalStatus — масив (напр. у деградованого пулу
                     # може бути кілька одночасних статусів); -join, як і для
-                    # Volumes/PhysicalDisks вище, а не [string]-каст, що дав
-                    # би "System.Object[]" замість реальних значень (P2,
-                    # fresh-review Phase 10).
+                    # Volumes/PhysicalDisks вище, для детермінованого
+                    # роздільника незалежно від $OFS, а не [string]-каст
+                    # (P2, fresh-review Phase 10).
                     OperationalStatus = ($pool.OperationalStatus -join ', ')
                     SizeGB            = Convert-BravoBytesToGB $pool.Size
                     AllocatedGB       = Convert-BravoBytesToGB $pool.AllocatedSize
@@ -4942,7 +4942,7 @@ function Invoke-BravoReportSanitization {
     # фіксованим токеном, завжди (Basic), той самий підхід.
     # CollectionErrors повністю наповнюється ДО цього одноразового проходу
     # (усі колектори виконуються до Update-BravoHealthScore/Sanitize) — тут
-    # покриваються всі записи. ExportErrors можуть з'являтись і ПІСЛЕ цього
+    # покриваються всі записи. ExportErrors можуть з'являтись і ПІСЛЯ цього
     # проходу (export-фаза йде після санітизації) — ці пізніші записи
     # редагуються при додаванні в Add-ExportError (src/90-Main.ps1), що
     # читає той самий $script:SanitizeActive; цей блок тут покриває лише
