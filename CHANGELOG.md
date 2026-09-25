@@ -59,6 +59,19 @@
   `LocalSubnet6`/`PlayToDevice`/`PlayToRenderers` у `ConvertTo-BravoSanitizedFirewallScope`;
   посилено unanchored `Should -Match 'Any'` в тесті на перевірку розпарсеного токена.
 
+#### Друга хвиля фреш-ревʼю FINAL_HEAD `ebb3f51` (незалежна перевірка вище перерахованих 3 фіксів) — 2 додаткові дефекти
+
+- **Новий тест на "`$script:SanitizeActive` не встановлено взагалі" був vacuous** — перевіряв
+  лише `Should -Not -Throw`/`Test-Path`, не читав сам JSON; mutation testing підтвердив, що тест
+  лишався зеленим навіть коли фікс нейтралізовано. Додано явну перевірку реального шляху в
+  серіалізації.
+- **`Network.WinHttpProxy.Error` і `.RawOutput` редагувались в ІДЕНТИЧНИЙ токен** — санітизований
+  JSON ставав неоднозначним: неможливо відрізнити "netsh відпрацював, вивід відредаговано" від
+  "netsh провалився, помилку відредаговано" — діагностично корисна відмінність навіть у
+  sanitized-звіті. `.Error` тепер отримує окремий токен `REDACTED-WINHTTP-PROXY-ERROR`.
+- Супутнє: перевірка `'Any'` у наскрізному sentinel-тесті тепер читає розпарсений токен із
+  серіалізованого `$json` (не in-memory `$report`) — Describe перевіряє саме серіалізований вивід.
+
 ### P0 — CI security
 
 - **Self-hosted Windows runner ізольовано від `pull_request`**: `local-windows-validation.yml`
