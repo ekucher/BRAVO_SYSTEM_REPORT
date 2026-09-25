@@ -20,3 +20,28 @@ Describe 'Get-BravoHardwareThresholds' {
         }
     }
 }
+
+Describe 'CPU/RAM findings recommendations reference an existing report field (PR#85 P2)' {
+    BeforeAll {
+        $script:HardwareSource = Get-Content (Join-Path $PSScriptRoot '..\src\31-Collectors-Hardware.ps1') -Raw
+        $script:ReportModelSource = Get-Content (Join-Path $PSScriptRoot '..\src\20-ReportModel.ps1') -Raw
+    }
+
+    It 'ніколи не посилається на неіснуюче поле Processes.TopCPU' {
+        $script:HardwareSource | Should -Not -Match 'TopCPU'
+    }
+
+    It 'CRITICAL/WARNING рекомендації для CPU і RAM посилаються на Processes.TopMemory' {
+        $recommendationLines = $script:HardwareSource -split "`r?`n" | Where-Object {
+            $_ -match "Add-AuditFinding.*-Category 'Hardware\.(CPU|RAM)'"
+        }
+        $recommendationLines.Count | Should -Be 4
+        foreach ($line in $recommendationLines) {
+            $line | Should -Match 'TopMemory'
+        }
+    }
+
+    It 'Processes.TopMemory дійсно існує в моделі звіту (20-ReportModel.ps1)' {
+        $script:ReportModelSource | Should -Match 'Processes\s*=\s*\[ordered\]@\{[^}]*TopMemory'
+    }
+}
