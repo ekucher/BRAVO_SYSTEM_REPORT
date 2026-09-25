@@ -42,7 +42,14 @@ function Get-BravoOsSupportInfo {
     param(
         [string]$Caption,
         [string]$Build,
-        [string]$EditionId = ''
+        [string]$EditionId = '',
+
+        # Injectable reference date (Issue #94) — тести класифікації
+        # Supported/EndingSoon/EndOfSupport не повинні залежати від
+        # неконтрольованого поточного Get-Date. Дефолт зберігає поточну
+        # runtime-поведінку без змін для єдиного реального call site
+        # (src/90-Main.ps1 -> Get-BravoUpdatesAudit).
+        [datetime]$ReferenceDate = (Get-Date)
     )
 
     $result = [ordered]@{
@@ -99,7 +106,7 @@ function Get-BravoOsSupportInfo {
     $endDate = $null
     try { $endDate = [datetime]::ParseExact($endDateText, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) } catch { return $result }
 
-    $daysLeft = [int][Math]::Floor(($endDate - (Get-Date).Date).TotalDays)
+    $daysLeft = [int][Math]::Floor(($endDate - $ReferenceDate.Date).TotalDays)
     $result.SupportEndDate = $endDateText
     $result.DaysToEndOfSupport = $daysLeft
     $result.SupportStatus = if ($daysLeft -lt 0) { 'EndOfSupport' } elseif ($daysLeft -le 180) { 'EndingSoon' } else { 'Supported' }
