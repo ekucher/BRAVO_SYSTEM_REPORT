@@ -435,12 +435,52 @@ if ($Sanitize) {
     }
 }
 
+# Чиста функція: обчислює базове ім'я файлу звіту. Винесена окремо (P1,
+# exact-head review Phase 10), щоб її можна було протестувати проти
+# реального production-коду через AST-екстракцію (той самий підхід, що й
+# ConvertTo-BravoQuotedProcessArgument, tests/MainExportSyncAndArgEscaping.Tests.ps1),
+# а не копіювати логіку в тест.
+#
 # Ім'я файлу теж має бути безпечним при -Sanitize: реальний $env:COMPUTERNAME
 # використовується лише коли sanitize вимкнено або провалився (у разі
 # провалу звіти взагалі не пишуться нижче, тому ім'я тут не потрапляє на
 # диск, але лишається консистентним з рештою пайплайна).
-$baseFileNameComputer = if ($Sanitize -and -not $script:SanitizeFailed) { $script:Report.ComputerName } else { $env:COMPUTERNAME }
-$baseFileName = "BravoSystemReport_${baseFileNameComputer}_$reportTimestamp"
+#
+# Замаскований ComputerName ДЕТЕРМІНОВАНИЙ у межах кожного окремого запуску
+# (New-BravoSanitizeMasker скидає Counter щоразу -> завжди
+# "REDACTED-COMPUTERNAME-1") — тому флот машин, що пишуть заплановані
+# sanitized-звіти в спільний OutputPath в межах однієї секунди, раніше
+# генерував ІДЕНТИЧНІ basename і перезаписував артефакти одне одного (P1).
+# Короткий випадковий суфікс (НЕ похідний від hostname/user/domain/MAC/
+# serial — саме це Sanitize й покликаний прибирати) робить sanitized-імена
+# унікальними, зберігаючи їх privacy-safe. Генерується РІВНО ОДИН РАЗ на
+# запуск (єдиний виклик цієї функції нижче) і використовується всіма
+# exporter'ами через спільний $baseFileName — JSON/HTML/CSV/ZIP/... в межах
+# одного запуску лишаються згрупованими під одним basename.
+function New-BravoReportBaseFileName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Timestamp,
+
+        [switch]$SanitizeActive,
+
+        [AllowEmptyString()]
+        [string]$RealComputerName = '',
+
+        [AllowEmptyString()]
+        [string]$SanitizedComputerName = ''
+    )
+
+    if ($SanitizeActive) {
+        $uniqueSuffix = [Guid]::NewGuid().ToString('N').Substring(0, 8)
+        return "BravoSystemReport_${SanitizedComputerName}_${Timestamp}_$uniqueSuffix"
+    }
+
+    return "BravoSystemReport_${RealComputerName}_${Timestamp}"
+}
+
+$baseFileName = New-BravoReportBaseFileName -Timestamp $reportTimestamp -SanitizeActive:($Sanitize -and -not $script:SanitizeFailed) -RealComputerName $env:COMPUTERNAME -SanitizedComputerName $script:Report.ComputerName
 
 Write-Host ''
 Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
@@ -467,7 +507,7 @@ if ($script:SanitizeFailed) {
         param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
         $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
         if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
-            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
         return [PSCustomObject]@{
@@ -480,7 +520,7 @@ if ($script:SanitizeFailed) {
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
     $exportErrorCount = @($script:Report.ExportErrors).Count
     $generatedFilesCount = @($script:Report.GeneratedFiles).Count
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
 
     # HTML
     Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
