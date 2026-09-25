@@ -161,9 +161,17 @@ function Test-BravoDefenderRealTimeProtectionWarning {
 function ConvertFrom-BravoAuditPolicyCsv {
     [CmdletBinding()]
     param(
+        # `auditpol /r` завжди друкує порожній рядок одразу після заголовка
+        # (реальний вивід на живій Windows-машині, не лише теоретично) —
+        # без [AllowEmptyString()] обов'язковий [string[]] параметр кидає
+        # ParameterArgumentValidationErrorEmptyStringNotAllowed на КОЖНОМУ
+        # виклику ($Lines — непорожній масив, але містить порожній елемент;
+        # [AllowEmptyCollection()]/[AllowNull()] перевіряють лише сам масив
+        # в цілому, не окремі елементи).
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
         [AllowNull()]
+        [AllowEmptyString()]
         [string[]]$Lines
     )
 
@@ -702,6 +710,7 @@ function Get-BravoSecurityAudit {
                     }
                 } catch {
                     Add-AuditError -Section 'Security.AuditPolicy' -Message $_.Exception.Message
+                    $script:Report.Security.AuditPolicy.Status = 'Unavailable'
                 }
             } else {
                 $script:Report.Security.AuditPolicy.Status = 'NotAvailable'
