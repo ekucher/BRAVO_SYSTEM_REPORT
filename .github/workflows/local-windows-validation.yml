@@ -1,26 +1,75 @@
 ﻿name: Local Windows Validation
 
+# TRUST BOUNDARY
+# This workflow runs on the persistent self-hosted Windows runner
+# (labels: self-hosted, Windows, X64, bravo-system-report) and it executes
+# repository code (build script + generated runtime). The runner has a
+# persistent filesystem, runner credentials and local network access, so it is
+# a TRUSTED execution environment.
+#
+# Therefore it must only ever be triggered by events whose code provenance is
+# trusted, i.e. events that require write access to this repository:
+#   - push to a protected/maintained branch;
+#   - workflow_dispatch on a revision chosen by a maintainer.
+#
+# NEVER add `pull_request` or `pull_request_target` here: a pull request can
+# carry arbitrary code from an untrusted contributor. Untrusted pull requests
+# are validated by .github/workflows/pr-validation.yml on a GitHub-hosted
+# ephemeral runner instead.
+
 on:
-  pull_request:
+  push:
     branches:
       - main
       - bravo/integration/modular-build
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: local-windows-validation-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate-local-windows:
     name: Validate modular build on local Windows runner
     runs-on: [self-hosted, Windows, X64, bravo-system-report]
+    timeout-minutes: 60
+
+    # Hard gate: the job is never dispatched to the self-hosted runner for any
+    # event other than the trusted ones above, even if a trigger is added by
+    # mistake later on.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     defaults:
       run:
         shell: powershell
 
     steps:
+      # Runs before checkout on purpose: no untrusted code is fetched onto the
+      # persistent runner until provenance has been asserted.
+      - name: Trust gate
+        run: |
+          Write-Host "=== TRUST GATE ==="
+          Write-Host "[INFO] Event: $env:GITHUB_EVENT_NAME"
+          Write-Host "[INFO] Ref: $env:GITHUB_REF"
+          Write-Host "[INFO] Repository: $env:GITHUB_REPOSITORY"
+
+          $trustedEvents = @("push", "workflow_dispatch")
+
+          if ($trustedEvents -notcontains $env:GITHUB_EVENT_NAME) {
+            throw "Untrusted event '$($env:GITHUB_EVENT_NAME)' must not run on the self-hosted runner."
+          }
+
+          Write-Host "[OK] Trusted event, provenance requires repository write access"
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Do not leave the job token in .git/config on the persistent runner.
+          persist-credentials: false
 
       - name: Show runner context
         run: |
