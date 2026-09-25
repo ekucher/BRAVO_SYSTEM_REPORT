@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-25 18:47:02
+    GeneratedAt: 2026-09-25 22:54:26
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -4734,6 +4734,35 @@ function Invoke-BravoReportSanitization {
         if ($storageDeep -and $storageDeep.Disks) {
             foreach ($deepDisk in @($storageDeep.Disks)) {
                 if ($deepDisk.SerialNumber) { $deepDisk.SerialNumber = & $maskSerial $deepDisk.SerialNumber }
+            }
+        }
+
+        # SmartPredictFailures[].InstanceName (MSStorageDriver_FailurePredictStatus,
+        # root\wmi legacy SMART API, Get-BravoStorageDeepAudit) — PNP device
+        # instance path (напр. "IDE\DiskWDC_WD10EZEX...\4&2413cfbc&0&0.0.0"),
+        # та сама категорія SERIAL, що й BIOS/RAM/Disks/Monitors/Motherboard
+        # вище (Issue #105, Phase 10.1): унікальний ідентифікатор фізичного
+        # пристрою, часто вбудовує vendor/product/серійноподібний рядок
+        # контролера чи диска. Той самий raw-рядок інтерполюється у вільний
+        # текст Health.Findings[].Message (Storage.SMART finding,
+        # src/32-Collectors-Storage.ps1) — маскується тим самим маскером
+        # (консистентний токен) і там, інакше серійний ідентифікатор просто
+        # дублюється в іншому полі того самого звіту.
+        if ($storageDeep -and $storageDeep.SmartPredictFailures) {
+            foreach ($predictEntry in @($storageDeep.SmartPredictFailures)) {
+                if (-not $predictEntry.InstanceName) { continue }
+
+                $rawInstanceName = $predictEntry.InstanceName
+                $maskedInstanceName = & $maskSerial $rawInstanceName
+                $predictEntry.InstanceName = $maskedInstanceName
+
+                if ($Report.Health -and $Report.Health.Findings) {
+                    foreach ($findingEntry in @($Report.Health.Findings)) {
+                        if ($findingEntry.Message -and $findingEntry.Message.Contains($rawInstanceName)) {
+                            $findingEntry.Message = $findingEntry.Message.Replace($rawInstanceName, $maskedInstanceName)
+                        }
+                    }
+                }
             }
         }
     }

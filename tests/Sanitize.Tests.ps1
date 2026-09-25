@@ -16,11 +16,20 @@ BeforeAll {
                 RAM = [ordered]@{ Modules = @([PSCustomObject]@{ SerialNumber = 'SN-RAM-1' }) }
                 Disks = [ordered]@{
                     PhysicalDisks = @([PSCustomObject]@{ SerialNumber = 'SN-DISK-1' })
-                    Deep = [PSCustomObject]@{ Disks = @([PSCustomObject]@{ SerialNumber = 'SN-DEEPDISK-1' }) }
+                    Deep = [PSCustomObject]@{
+                        Disks = @([PSCustomObject]@{ SerialNumber = 'SN-DEEPDISK-1' })
+                        SmartPredictFailures = @([PSCustomObject]@{ InstanceName = 'IDE\DiskWDC_WD10EZEX-SECRET-SERIAL-98765\4&2413cfbc&0&0.0.0'; PredictFailure = $true; Reason = 0 })
+                    }
                 }
                 Monitors = @([PSCustomObject]@{ SerialNumber = 'SN-MONITOR-1'; Model = 'XG27ACS' })
             }
             BIOS = [ordered]@{ SerialNumber = 'SN-BIOS-1' }
+            Health = [ordered]@{
+                Findings = @(
+                    [PSCustomObject]@{ Severity = 'CRITICAL'; Category = 'Storage.SMART'; Message = "SMART передбачає можливий збій диска 'IDE\DiskWDC_WD10EZEX-SECRET-SERIAL-98765\4&2413cfbc&0&0.0.0' (PredictFailure=True)."; Recommendation = 'Негайно створіть резервну копію даних і заплануйте заміну диска.' }
+                    [PSCustomObject]@{ Severity = 'WARNING'; Category = 'Hardware.CPU'; Message = 'Завантаження CPU підвищене: 85%.'; Recommendation = 'Спостерігайте за динамікою навантаження CPU.' }
+                )
+            }
             Services = [ordered]@{
                 AutomaticStopped = @(
                     [PSCustomObject]@{ Name = 'SvcA'; DisplayName = 'Service A'; StartName = 'CORP\svc-account' }
@@ -266,6 +275,29 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Network.IP.PublicIPv4City | Should -Be 'Kyiv'
         $script:report.Network.IP.PublicIPv4Timezone | Should -Be 'Europe/Kyiv'
     }
+
+    It 'маскує Hardware.Disks.Deep.SmartPredictFailures[].InstanceName і той самий raw-рядок у Health.Findings[].Message (Issue #105, Phase 10.1) навіть у Basic' {
+        $instanceName = $script:report.Hardware.Disks.Deep.SmartPredictFailures[0].InstanceName
+        $instanceName | Should -Match '^REDACTED-SERIAL-'
+
+        $smartFinding = $script:report.Health.Findings[0]
+        $smartFinding.Category | Should -Be 'Storage.SMART'
+        $smartFinding.Message | Should -Not -Match 'SECRET-SERIAL-98765'
+        $smartFinding.Message | Should -Match ([regex]::Escape($instanceName))
+
+        # Той самий маскер (консистентний токен) — не два різних REDACTED-SERIAL-N
+        # для одного й того самого raw-значення в двох різних полях звіту.
+        $smartFinding.Message | Should -Match ([regex]::Escape($script:report.Hardware.Disks.Deep.SmartPredictFailures[0].InstanceName))
+    }
+
+    It 'не змінює Severity/Category/кількість Health.Findings при маскуванні SMART-повідомлення' {
+        $script:report.Health.Findings.Count | Should -Be 2
+        $script:report.Health.Findings[0].Severity | Should -Be 'CRITICAL'
+        $script:report.Health.Findings[0].Category | Should -Be 'Storage.SMART'
+        $script:report.Health.Findings[1].Severity | Should -Be 'WARNING'
+        $script:report.Health.Findings[1].Category | Should -Be 'Hardware.CPU'
+        $script:report.Health.Findings[1].Message | Should -Be 'Завантаження CPU підвищене: 85%.'
+    }
 }
 
 Describe 'Invoke-BravoReportSanitization -Level Strict' {
@@ -390,6 +422,8 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $report.Network.WinHttpProxy.RawOutput = @('Proxy Server(s) :  WINHTTP_PROXY_SENTINEL.corp.local:8080')
         $report.CollectionErrors[0].Message = "Access to the path 'C:\Users\COLLECTIONERROR_SENTINEL\Reports' is denied."
         $report.ExportErrors[0].Message = "Could not find a part of the path 'C:\Users\EXPORTERROR_SENTINEL\report.zip'."
+        $report.Hardware.Disks.Deep.SmartPredictFailures[0].InstanceName = 'IDE\DiskWDC_SMART_INSTANCE_SENTINEL\4&2413cfbc&0&0.0.0'
+        $report.Health.Findings[0].Message = "SMART передбачає можливий збій диска 'IDE\DiskWDC_SMART_INSTANCE_SENTINEL\4&2413cfbc&0&0.0.0' (PredictFailure=True)."
 
         Invoke-BravoReportSanitization -Report $report -Level 'Strict' | Out-Null
         $json = $report | ConvertTo-Json -Depth 10
@@ -424,5 +458,13 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $parsedFirewallScope = (($json | ConvertFrom-Json).Security.RemoteAccess.FirewallScope) -split ',\s*'
         $parsedFirewallScope[1] | Should -Be 'Any'
         $json | Should -Not -Match 'WINHTTP_PROXY_SENTINEL'
+        $json | Should -Not -Match 'SMART_INSTANCE_SENTINEL'
+
+        # Health.Findings semantics (Severity/Category/кількість) не деградували
+        # внаслідок маскування Message (Issue #105, Phase 10.1).
+        $parsedFindings = ($json | ConvertFrom-Json).Health.Findings
+        $parsedFindings.Count | Should -Be 2
+        $parsedFindings[0].Severity | Should -Be 'CRITICAL'
+        $parsedFindings[0].Category | Should -Be 'Storage.SMART'
     }
 }
