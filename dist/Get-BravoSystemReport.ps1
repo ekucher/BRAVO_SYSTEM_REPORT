@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-25 18:16:08
+    GeneratedAt: 2026-09-25 18:32:43
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1429,7 +1429,12 @@ function Get-BravoStorageDeepAudit {
                 $storage.StoragePools += [PSCustomObject]@{
                     FriendlyName      = $pool.FriendlyName
                     HealthStatus      = [string]$pool.HealthStatus
-                    OperationalStatus = [string]$pool.OperationalStatus
+                    # OperationalStatus — масив (напр. у деградованого пулу
+                    # може бути кілька одночасних статусів); -join, як і для
+                    # Volumes/PhysicalDisks вище, а не [string]-каст, що дав
+                    # би "System.Object[]" замість реальних значень (P2,
+                    # fresh-review Phase 10).
+                    OperationalStatus = ($pool.OperationalStatus -join ', ')
                     SizeGB            = Convert-BravoBytesToGB $pool.Size
                     AllocatedGB       = Convert-BravoBytesToGB $pool.AllocatedSize
                     IsReadOnly        = $pool.IsReadOnly
@@ -4929,6 +4934,31 @@ function Invoke-BravoReportSanitization {
         $Report.Network.WinHttpProxy.Error = 'REDACTED-WINHTTP-PROXY-ERROR'
     }
 
+    # --- CollectionErrors/ExportErrors: $_.Exception.Message з довільного
+    # виключення (P1, fresh-review Phase 10) — доступ-заборонено, помилки
+    # шляхів тощо часто містять реальний шлях/hostname/обліковий запис
+    # (напр. "Access to the path 'C:\Users\jdoe\...' is denied"). Той самий
+    # ризик-клас, що й EventLogs LastMessage нижче — повна редакція
+    # фіксованим токеном, завжди (Basic), той самий підхід.
+    # CollectionErrors повністю наповнюється ДО цього одноразового проходу
+    # (усі колектори виконуються до Update-BravoHealthScore/Sanitize) — тут
+    # покриваються всі записи. ExportErrors можуть з'являтись і ПІСЛЕ цього
+    # проходу (export-фаза йде після санітизації) — ці пізніші записи
+    # редагуються при додаванні в Add-ExportError (src/90-Main.ps1), що
+    # читає той самий $script:SanitizeActive; цей блок тут покриває лише
+    # записи, наявні НА МОМЕНТ виклику санітизації (напр. помилку
+    # резолюції OutputPath, що трапляється до export-фази).
+    if ($Report.CollectionErrors) {
+        foreach ($errorEntry in @($Report.CollectionErrors)) {
+            if ($errorEntry.Message) { $errorEntry.Message = 'REDACTED-ERROR-MESSAGE' }
+        }
+    }
+    if ($Report.ExportErrors) {
+        foreach ($errorEntry in @($Report.ExportErrors)) {
+            if ($errorEntry.Message) { $errorEntry.Message = 'REDACTED-ERROR-MESSAGE' }
+        }
+    }
+
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
     # (TopErrorSources, per-log LogSummaries.TopProviders, HardwareDiagnostics)
     # — повний необроблений текст події (Security-лог часто містить
@@ -6417,6 +6447,19 @@ function Add-ExportError {
     )
 
     if (-not $script:Report) { return }
+
+    # P1, fresh-review Phase 10 (нова знахідка після 3 хвиль ревʼю
+    # попередніх фіксів): Invoke-BravoReportSanitization виконується ОДИН
+    # РАЗ, до фази export'у — але ExportErrors можуть додаватись ПІСЛЯ
+    # цього проходу (HTML/CSV/ZIP/Email-помилки виникають саме під час
+    # export-фази). $_.Exception.Message у цих помилках може містити
+    # реальний шлях/hostname/обліковий запис (напр. access-denied на
+    # C:\Users\jdoe\...). Редагуємо тут, у джерелі, замість покладатись
+    # лише на одноразовий прохід Invoke-BravoReportSanitization (який
+    # покриває решту вже наявних ExportErrors на момент свого виклику,
+    # див. src/45-Sanitize.ps1) — так покриваються й записи, додані вже
+    # ПІСЛЯ санітизації.
+    if ($script:SanitizeActive) { $Message = 'REDACTED-ERROR-MESSAGE' }
 
     $script:Report.ExportErrors += [PSCustomObject]@{
         Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')

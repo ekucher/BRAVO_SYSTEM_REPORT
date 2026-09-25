@@ -72,6 +72,32 @@
 - Супутнє: перевірка `'Any'` у наскрізному sentinel-тесті тепер читає розпарсений токен із
   серіалізованого `$json` (не in-memory `$report`) — Describe перевіряє саме серіалізований вивід.
 
+#### Третя хвиля фреш-ревʼю FINAL_HEAD `3595766` — 1 залишковий vacuous assertion
+
+- Сусідній тест `$script:SanitizeActive=$false` мав ту саму хворобу vacuousness (перевіряв лише
+  підрядок `'REAL-PC'`, який присутній і в sanitized basename) — виправлено анкорованою
+  перевіркою повного реального шляху.
+
+#### Нові знахідки exact-head review-бота на FINAL_HEAD `e83c7b1` (після резолюції первинних 6) — 4 знахідки
+
+- **P1: `CollectionErrors[].Message`/`ExportErrors[].Message` ($_.Exception.Message) не
+  санітизувались взагалі** (`src/45-Sanitize.ps1`, `src/90-Main.ps1`) — access-denied та подібні
+  винятки часто містять реальний шлях/hostname/обліковий запис (напр. `Access to the path
+  'C:\Users\jdoe\...' is denied`). Повна редакція фіксованим токеном
+  `REDACTED-ERROR-MESSAGE` — одноразовий прохід `Invoke-BravoReportSanitization` покриває всі
+  записи, наявні на момент виклику (`CollectionErrors` завжди повністю наповнений до цього
+  моменту); `Add-ExportError` додатково редагує на льоту через `$script:SanitizeActive`, бо
+  `ExportErrors` продовжує наповнюватись і ПІСЛЯ одноразового проходу (export-фаза).
+- **P2: `StoragePools[].OperationalStatus` серіалізувався як `[string]`-каст масиву** (`System.
+  Object[]` замість реальних статусів у деградованого пулу з кількома одночасними станами)
+  (`src/32-Collectors-Storage.ps1`) — виправлено на `-join ', '`, як уже робилось для
+  Volumes/PhysicalDisks.
+- P2 (не виправлено в цьому циклі, pre-existing поза Phase 10 scope, задокументовано окремими
+  Issues): `.NET Framework 4.8.1` support matrix для Windows 10 builds 19042-19044
+  (Issue [#103](https://github.com/ekucher/BRAVO_SYSTEM_REPORT/issues/103)); contract-change
+  guard у `powershell-static-check.yml` не покриває поля, додані динамічно в колекторах
+  (Issue [#104](https://github.com/ekucher/BRAVO_SYSTEM_REPORT/issues/104)).
+
 ### P0 — CI security
 
 - **Self-hosted Windows runner ізольовано від `pull_request`**: `local-windows-validation.yml`
