@@ -147,6 +147,61 @@ function Get-AuditObject {
 
 
 
+function ConvertTo-BravoQuotedProcessArgument {
+    # Win32 CommandLineToArgvW quoting (той самий алгоритм застосовують і
+    # powershell.exe/cmd.exe при розборі власного командного рядка): просте
+    # обгортання в подвійні лапки НЕ безпечне — вбудована лапка в значенні
+    # (напр. -EmailTo 'a"@evil.com') замикає рядок аргументу передчасно й
+    # дозволяє injection довільних додаткових CLI-параметрів у елевований
+    # relaunch; а бекслеш(і) прямо перед закриваючою лапкою мають бути
+    # подвоєні, інакше вони екранують саму закриваючу лапку (класичний
+    # Windows-баг парсингу командного рядка), і аргумент знову "виривається"
+    # назовні. Застосовується до значень -OutputPath/-EmailTo/-EmailFrom/
+    # -SmtpServer перед побудовою ArgumentList нижче.
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) { $Value = '' }
+
+    $needsQuoting = ($Value.Length -eq 0) -or ($Value -match '[\s"]')
+    if (-not $needsQuoting) { return $Value }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+
+    $backslashCount = 0
+    for ($i = 0; $i -lt $Value.Length; $i++) {
+        $ch = $Value[$i]
+        if ($ch -eq '\') {
+            $backslashCount++
+            continue
+        }
+
+        if ($ch -eq '"') {
+            [void]$sb.Append('\', ($backslashCount * 2 + 1))
+            [void]$sb.Append('"')
+            $backslashCount = 0
+            continue
+        }
+
+        if ($backslashCount -gt 0) {
+            [void]$sb.Append('\', $backslashCount)
+            $backslashCount = 0
+        }
+        [void]$sb.Append($ch)
+    }
+
+    if ($backslashCount -gt 0) {
+        [void]$sb.Append('\', ($backslashCount * 2))
+    }
+
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
 function Resolve-AuditOutputPath {
     param(
         [string]$RequestedPath,
@@ -215,7 +270,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         $arguments = @('-SkipElevation')
         $arguments += "-Profile $Profile"
         $arguments += "-EventLogDays $EventLogDays"
-        if ($OutputPath) { $arguments += "-OutputPath `"$OutputPath`"" }
+        if ($OutputPath) { $arguments += "-OutputPath $(ConvertTo-BravoQuotedProcessArgument -Value $OutputPath)" }
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
         if ($TXT) { $arguments += '-TXT' }
@@ -243,9 +298,9 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         $arguments += "-SanitizeLevel $SanitizeLevel"
         if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
         $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
-        if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
-        if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
-        if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
+        if ($EmailTo) { $arguments += "-EmailTo $(ConvertTo-BravoQuotedProcessArgument -Value $EmailTo)" }
+        if ($EmailFrom) { $arguments += "-EmailFrom $(ConvertTo-BravoQuotedProcessArgument -Value $EmailFrom)" }
+        if ($SmtpServer) { $arguments += "-SmtpServer $(ConvertTo-BravoQuotedProcessArgument -Value $SmtpServer)" }
         if ($ExportPdf) { $arguments += '-ExportPdf' }
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -396,25 +451,35 @@ if ($script:SanitizeFailed) {
     Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
     # Локальний helper — синхронізує JSON на диску з поточним станом
-    # ExportErrors, якщо він змінився з моменту попереднього запису. JSON
-    # пишеться ПЕРШИМ (щоб потрапити до ZIP), але наступні export-етапи
-    # (HTML/PDF/TXT/MD/CSV/ZIP/Email) можуть додати власні ExportErrors —
-    # тому виклик повторюється в кількох контрольних точках нижче (після
-    # CSV/до ZIP, після ZIP/до Email, після Email), а не лише один раз
-    # наприкінці — щоб і ZIP-вкладення, і Email-вкладення відображали
-    # актуальний на момент пакування/відправки стан ExportErrors.
+    # ExportErrors/GeneratedFiles, якщо будь-який з них змінився з моменту
+    # попереднього запису. JSON пишеться ПЕРШИМ (щоб потрапити до ZIP), але
+    # наступні export-етапи (HTML/PDF/TXT/MD/CSV/ZIP/Email) можуть додати
+    # власні ExportErrors І власний шлях у GeneratedFiles — тому виклик
+    # повторюється в кількох контрольних точках нижче (після CSV/до ZIP,
+    # після ZIP/до Email, після Email), а не лише один раз наприкінці — щоб
+    # і ZIP-вкладення, і Email-вкладення відображали актуальний на момент
+    # пакування/відправки стан ExportErrors/GeneratedFiles. Раніше тригер
+    # перевіряв лише ExportErrors.Count — GeneratedFiles.Count (додається
+    # HTML/PDF/TXT/MD/CSV ПІСЛЯ першого JSON-запису) ніколи не спричиняв
+    # перезапис, тому на диску JSON завжди мав порожній/неповний
+    # GeneratedFiles.
     function Sync-BravoJsonIfExportErrorsChanged {
-        param([int]$PriorCount)
-        if (@($script:Report.ExportErrors).Count -gt $PriorCount) {
+        param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
+        $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
+        if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
             Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
-        return @($script:Report.ExportErrors).Count
+        return [PSCustomObject]@{
+            ExportErrorCount    = @($script:Report.ExportErrors).Count
+            GeneratedFilesCount = @($script:Report.GeneratedFiles).Count
+        }
     }
 
     # JSON — Health Score вже фінальний (рахувався до початку export-етапів),
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
     $exportErrorCount = @($script:Report.ExportErrors).Count
+    $generatedFilesCount = @($script:Report.GeneratedFiles).Count
     Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
     # HTML
@@ -443,9 +508,12 @@ if ($script:SanitizeFailed) {
 
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
-    # JSON у ZIP має відображати ExportErrors від HTML/PDF/TXT/MD/CSV, а не
-    # лише від початкового запису — синхронізуємо перед пакуванням.
-    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+    # JSON у ZIP має відображати ExportErrors/GeneratedFiles від
+    # HTML/PDF/TXT/MD/CSV, а не лише від початкового запису — синхронізуємо
+    # перед пакуванням.
+    $syncResult = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount -PriorGeneratedFilesCount $generatedFilesCount
+    $exportErrorCount = $syncResult.ExportErrorCount
+    $generatedFilesCount = $syncResult.GeneratedFilesCount
 
     # ZIP
     Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
@@ -453,7 +521,9 @@ if ($script:SanitizeFailed) {
 
     # Якщо сам ZIP додав ExportError — JSON на диску (не копія всередині вже
     # запакованого ZIP) все одно має бути авторитетним перед відправкою Email.
-    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+    $syncResult = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount -PriorGeneratedFilesCount $generatedFilesCount
+    $exportErrorCount = $syncResult.ExportErrorCount
+    $generatedFilesCount = $syncResult.GeneratedFilesCount
 
     # Email — останній export-етап. Тіло листа й вкладення відображають стан на
     # момент відправки (Health Score вже фінальний; JSON-вкладення може не
@@ -463,7 +533,9 @@ if ($script:SanitizeFailed) {
 
     # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
     # (не вкладення вже відправленого листа) відображає це.
-    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+    $syncResult = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount -PriorGeneratedFilesCount $generatedFilesCount
+    $exportErrorCount = $syncResult.ExportErrorCount
+    $generatedFilesCount = $syncResult.GeneratedFilesCount
 }
 
 # Фінал
