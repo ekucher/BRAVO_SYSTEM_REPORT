@@ -516,6 +516,51 @@ function Get-BravoStorageDeepAudit {
 
 
 # --- BRAVO v0.3.2 Storage Critical Findings ---
+# Чиста функція: єдине джерело істини "чи цей том без літери диска —
+# системно-зарезервований розділ (WinRE/EFI/MSR), чи звичайний data-том
+# (напр. folder-mounted volume)" (P2, exact-head review Phase 10). Раніше
+# Get-BravoStorageRiskSummary (нижче) і HTML-таблиця Storage Deep
+# (src/51-Export-Html.ps1) незалежно дублювали кожен свою версію цієї
+# класифікації — HTML спрощено вважав "немає DriveLetter -> RESERVED",
+# ігноруючи PartitionType, тож folder-mounted data-том з малим вільним
+# місцем міг одночасно отримати CRITICAL-знахідку у Findings і показ
+# "RESERVED" (не є ризиком) у детальній HTML-таблиці для того самого тому —
+# внутрішньо суперечливий звіт. Повертає:
+#   'KnownReserved'        — GPT/MBR System/Reserved/Recovery (Resolve-BravoPartitionType)
+#   'UncorrelatedLowSpace' — кореляція партиції не вдалась (Type ''/'Unknown'),
+#                            мало вільного місця -> ймовірно прихований системний
+#                            розділ, викликач може додати INFO-знахідку
+#   'NotReserved'          — звичайний data-том (з літерою диска, або без
+#                            неї, але Type відомий і не System/Reserved/Recovery,
+#                            або вільного місця достатньо для UncorrelatedLowSpace)
+function Resolve-BravoStorageVolumeReservedClass {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$DriveLetter,
+        [AllowNull()][AllowEmptyString()][string]$PartitionType,
+        [AllowNull()]$FreePercent,
+
+        [Parameter(Mandatory = $true)]
+        [double]$WarningThreshold
+    )
+
+    $hasDriveLetter = [bool]($DriveLetter -and [string]$DriveLetter -ne '')
+    if ($hasDriveLetter) { return 'NotReserved' }
+
+    $type = [string]$PartitionType
+    if ($type -in @('System', 'Reserved', 'Recovery')) { return 'KnownReserved' }
+
+    if ($type -eq '' -or $type -eq 'Unknown') {
+        $freePercentValue = $null
+        if ($null -ne $FreePercent -and [string]$FreePercent -ne '') {
+            try { $freePercentValue = [double]$FreePercent } catch { $freePercentValue = $null }
+        }
+        if ($null -ne $freePercentValue -and $freePercentValue -lt $WarningThreshold) { return 'UncorrelatedLowSpace' }
+    }
+
+    return 'NotReserved'
+}
+
 function Get-BravoStorageRiskSummary {
     param(
         [Parameter(Mandatory = $true)]
@@ -620,8 +665,12 @@ function Get-BravoStorageRiskSummary {
         # так само важливий, як і для звичайних томів. Тому Reserved
         # визначається за фактичним типом партиції (PartitionType,
         # кореляція через Get-Partition вище в Get-BravoStorageDeepAudit),
-        # а не лише за відсутністю DriveLetter.
-        if ((-not $driveLetter) -and ($partitionType -in @('System', 'Reserved', 'Recovery'))) {
+        # а не лише за відсутністю DriveLetter — канонічна класифікація,
+        # спільна з HTML-таблицею Storage Deep (Resolve-BravoStorageVolumeReservedClass
+        # вище, P2 exact-head review Phase 10).
+        $reservedClass = Resolve-BravoStorageVolumeReservedClass -DriveLetter $driveLetter -PartitionType $partitionType -FreePercent $freePercent -WarningThreshold $warningThreshold
+
+        if ($reservedClass -eq 'KnownReserved') {
             $risk.ReservedVolumes += $volumeRisk
             continue
         }
@@ -638,7 +687,7 @@ function Get-BravoStorageRiskSummary {
         # справжніх System/Reserved/Recovery). Здоровий некорельований том
         # (вільного місця достатньо) поводиться як раніше — звичайний аналіз
         # (потрапляє в Healthy нижче), без INFO-шуму.
-        if ((-not $driveLetter) -and ($partitionType -eq '' -or $partitionType -eq 'Unknown') -and ($freePercent -lt $warningThreshold)) {
+        if ($reservedClass -eq 'UncorrelatedLowSpace') {
             Add-AuditFinding `
                 -Severity 'INFO' `
                 -Category 'Storage.UnknownVolume' `

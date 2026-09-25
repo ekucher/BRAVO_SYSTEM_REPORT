@@ -137,6 +137,18 @@ function ConvertFrom-BravoNetAccountsOutput {
 # вимкнений Real-Time Protection. Passive/SxS Passive — свідомий, штатний
 # стан Defender, коли активний сторонній антивірус, не сигнал проблеми.
 # Винесено окремо для Pester-покриття без запуску Get-BravoSecurityAudit.
+#
+# AMRunningMode реальні значення (P2, exact-head review Phase 10,
+# підтверджено learn.microsoft.com/defender-endpoint/microsoft-defender-passive-mode
+# і techcommunity.microsoft.com/discussions/microsoftdefenderatp/amrunningmode--active-or-passive/4277194):
+# 'Normal', 'Passive Mode', 'SxS Passive Mode', 'EDR Block Mode' — зі словом
+# "Mode". Коротші форми 'Passive'/'SxS Passive' (без "Mode") не є задокументованими
+# значеннями Get-MpComputerStatus.AMRunningMode; лишені тут як захисний
+# fallback (не шкодять, якщо ніколи не зустрінуться), АЛЕ основна перевірка —
+# повні задокументовані значення. Без цього фікса машина зі стороннім
+# антивірусом (Defender навмисно в passive mode, RealTimeProtectionEnabled=$false)
+# отримувала хибний WARNING і зниження Health Score — саме той false positive,
+# який ця функція мала запобігати.
 function Test-BravoDefenderRealTimeProtectionWarning {
     [CmdletBinding()]
     param(
@@ -147,7 +159,7 @@ function Test-BravoDefenderRealTimeProtectionWarning {
         [string]$AMRunningMode
     )
 
-    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive'))
+    return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive', 'Passive Mode', 'SxS Passive Mode'))
 }
 
 # Чиста функція: парсить вивід `auditpol /get /category:* /r` (CSV) за

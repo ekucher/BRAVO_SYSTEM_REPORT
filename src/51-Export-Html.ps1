@@ -407,14 +407,17 @@ function Export-BravoHtmlReport {
                     $volume = $_
                     $freePercent = $null
                     if ($null -ne $volume.FreePercent -and [string]$volume.FreePercent -ne '') { $freePercent = [double]$volume.FreePercent }
-                    $hasDriveLetter = [bool]($volume.DriveLetter -and [string]$volume.DriveLetter -ne '')
-                    # Томи без літери диска (WinRE/EFI/MSR) — системно-
-                    # зарезервовані розділи, майже завжди заповнені образом
-                    # відновлення; той самий принцип виключення, що й у
-                    # Get-BravoStorageRiskSummary (src/32-Collectors-Storage.ps1)
-                    # — інакше ця таблиця незалежно рахує WARNING/CRITICAL для
-                    # штатного стану, розбігаючись із Findings-зведенням вище.
-                    $riskText = if (-not $hasDriveLetter) { 'RESERVED' } elseif ($null -eq $freePercent) { 'UNKNOWN' } elseif ($freePercent -lt $criticalThreshold) { 'CRITICAL' } elseif ($freePercent -lt $warningThreshold) { 'WARNING' } else { 'OK' }
+                    # Канонічна класифікація (Resolve-BravoStorageVolumeReservedClass,
+                    # src/32-Collectors-Storage.ps1) — та сама функція, що й
+                    # Get-BravoStorageRiskSummary (P2, exact-head review Phase 10).
+                    # Раніше ця таблиця незалежно вважала "немає DriveLetter ->
+                    # RESERVED", ігноруючи PartitionType — folder-mounted
+                    # data-том без літери диска й малим вільним місцем міг
+                    # одночасно отримати CRITICAL-знахідку в Findings і показ
+                    # "RESERVED" (не ризик) тут, для того самого тому.
+                    $reservedClass = Resolve-BravoStorageVolumeReservedClass -DriveLetter $volume.DriveLetter -PartitionType $volume.PartitionType -FreePercent $freePercent -WarningThreshold $warningThreshold
+                    $isReserved = $reservedClass -in @('KnownReserved', 'UncorrelatedLowSpace')
+                    $riskText = if ($isReserved) { 'RESERVED' } elseif ($null -eq $freePercent) { 'UNKNOWN' } elseif ($freePercent -lt $criticalThreshold) { 'CRITICAL' } elseif ($freePercent -lt $warningThreshold) { 'WARNING' } else { 'OK' }
                     $riskClass = Get-BravoStorageRiskClass $riskText
                     $reason = if ($riskText -eq 'RESERVED') { 'Системно-зарезервований том без літери диска (WinRE/EFI/MSR) — не є ризиком.' } elseif ($riskText -eq 'CRITICAL') { "Вільного місця менше $criticalThreshold%." } elseif ($riskText -eq 'WARNING') { "Вільного місця менше $warningThreshold%." } elseif ($riskText -eq 'UNKNOWN') { 'Не вдалося визначити free percent.' } else { 'Показники в межах порогів.' }
                     "<tr><td>$(ConvertTo-BravoHtmlText (Get-BravoStorageDisplayText $volume))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FileSystemLabel))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FileSystem))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.DriveType))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.HealthStatus))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.OperationalStatus))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.SizeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreeGB))</td><td>$(ConvertTo-BravoHtmlText (Get-BravoStoragePropertyText $volume.FreePercent))%</td><td><span class=`"risk $riskClass`">$(ConvertTo-BravoHtmlText $riskText)</span></td><td>$(ConvertTo-BravoHtmlText $reason)</td></tr>"
