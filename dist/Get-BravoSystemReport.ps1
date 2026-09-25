@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-03 21:00:08
+    GeneratedAt: 2026-09-25 14:20:21
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1673,7 +1673,14 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
-        if ($freePercent -lt $criticalThreshold) {
+        # Канонічна класифікація (Get-BravoStorageFreeSpaceSeverity) — та сама
+        # функція, що й у basic-прохід (Get-BravoStorageAudit), щоб обидва
+        # шляхи узгоджено оцінювали один і той самий поріг. IsSystemDrive
+        # передається лише тут (SystemWarning належить deep risk summary).
+        $isSystemDriveVolume = ($driveLetter -eq $systemDrive)
+        $severity = Get-BravoStorageFreeSpaceSeverity -FreePercent $freePercent -IsSystemDrive $isSystemDriveVolume -DriveType ([string]$volume.DriveType)
+
+        if ($severity -eq 'Critical') {
             $risk.CriticalVolumes += $volumeRisk
 
             Add-AuditFinding `
@@ -1685,7 +1692,7 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
-        if ($freePercent -lt $warningThreshold) {
+        if ($severity -eq 'Warning') {
             $risk.WarningVolumes += $volumeRisk
 
             Add-AuditFinding `
@@ -1697,7 +1704,7 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
-        if ($driveLetter -eq $systemDrive -and $freePercent -lt $systemWarningThreshold) {
+        if ($severity -eq 'SystemWarning') {
             $risk.SystemVolumeWarnings += $volumeRisk
 
             Add-AuditFinding `
@@ -1756,9 +1763,15 @@ function Get-BravoStorageAudit {
             $script:Report.Hardware.Disks.Volumes += $volume
 
             if ($emitBasicFindings) {
-                if ($volume.FreePercent -lt $thresholds.CriticalFreePercent) {
+                # Канонічна класифікація (Get-BravoStorageFreeSpaceSeverity) —
+                # та сама, що й у Get-BravoStorageRiskSummary. IsSystemDrive
+                # свідомо не передається: basic-прохід і раніше не мав
+                # системно-специфічного порогу тут (SystemWarning належить
+                # лише deep risk summary).
+                $basicSeverity = Get-BravoStorageFreeSpaceSeverity -FreePercent $volume.FreePercent
+                if ($basicSeverity -eq 'Critical') {
                     Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.CriticalFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
-                } elseif ($volume.FreePercent -lt $thresholds.WarningFreePercent) {
+                } elseif ($basicSeverity -eq 'Warning') {
                     Add-AuditFinding -Severity 'WARNING' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.WarningFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
                 }
             }
@@ -2301,6 +2314,32 @@ function Test-BravoDefenderRealTimeProtectionWarning {
     return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive'))
 }
 
+# Чиста функція: парсить вивід `auditpol /get /category:* /r` (CSV) за
+# ПОЗИЦІЄЮ колонки, а не за назвою заголовка. `auditpol.exe` локалізує сам
+# рядок заголовка CSV (не лише значення) на не-EN збірках Windows — читання
+# за англ. назвами колонок ('Policy Target'/'Subcategory GUID'/'Inclusion
+# Setting') тоді мовчки повертає $null для кожного рядка. Порядок колонок —
+# фіксований, документований Microsoft для будь-якої локалі: Machine Name,
+# Policy Target, Subcategory, Subcategory GUID, Inclusion Setting, Exclusion
+# Setting. Той самий принцип, що й ConvertFrom-BravoNetAccountsOutput вище.
+function ConvertFrom-BravoAuditPolicyCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [string[]]$Lines
+    )
+
+    if (-not $Lines -or $Lines.Count -lt 2) { return @() }
+
+    $fixedHeader = @('MachineName', 'PolicyTarget', 'Subcategory', 'SubcategoryGuid', 'InclusionSetting', 'ExclusionSetting')
+    $dataLines = @($Lines | Select-Object -Skip 1)
+    if ($dataLines.Count -eq 0) { return @() }
+
+    return @($dataLines | ConvertFrom-Csv -Header $fixedHeader)
+}
+
 # Чиста-за-даними обгортка над Confirm-SecureBootUEFI (Release Blocker
 # Fixes v0.6.1) — винесена окремо, щоб розрізняти access-denied (сесія без
 # elevation — не доказ апаратної відсутності Secure Boot) від справжнього
@@ -2340,6 +2379,33 @@ function Get-BravoSecureBootStatus {
             Error     = $_.Exception.Message
         }
     }
+}
+
+# Чиста функція: розрізняє access-denied на захищеному CIM namespace
+# root\cimv2\Security\MicrosoftTpm від "класу/namespace немає" (реального
+# NotPresent). Get-CimInstance на access-denied типово кидає
+# Microsoft.Management.Infrastructure.CimException з
+# CategoryInfo.Category='PermissionDenied' (не System.UnauthorizedAccessException,
+# як Confirm-SecureBootUEFI), тож перевіряємо і тип винятку (на випадок, якщо
+# провайдер все ж кине UnauthorizedAccessException), і CategoryInfo, і текст
+# повідомлення — жоден із трьох сигналів локально не гарантований поодинці.
+function Test-BravoTpmAccessDeniedError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        $ErrorRecord
+    )
+
+    if (-not $ErrorRecord) { return $false }
+
+    if ($ErrorRecord.Exception -is [System.UnauthorizedAccessException]) { return $true }
+
+    if ($ErrorRecord.CategoryInfo -and $ErrorRecord.CategoryInfo.Category -eq 'PermissionDenied') { return $true }
+
+    if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Message -match 'Access is denied') { return $true }
+
+    return $false
 }
 
 function Get-BravoSecurityAudit {
@@ -2463,12 +2529,27 @@ function Get-BravoSecurityAudit {
                     $script:Report.Security.TPM.Status = 'NotPresent'
                 }
             } catch {
-                # Клас Win32_Tpm/namespace відсутній — типово означає відсутність
-                # фізичного/firmware TPM (старе обладнання, VM без vTPM), не
-                # помилка збору (та сама логіка, що й для Secure Boot вище).
-                $script:Report.Security.TPM.Present = $false
-                $script:Report.Security.TPM.Status = 'NotPresent'
-                $script:Report.Security.TPM.Error = $_.Exception.Message
+                # Access denied на root\cimv2\Security\MicrosoftTpm (захищений
+                # namespace, вимагає elevated-сесії) — НЕ доказ відсутності
+                # фізичного TPM, лише брак прав у поточному контексті
+                # виконання (той самий принцип, що й Secure Boot вище).
+                # Get-CimInstance на access-denied зазвичай кидає
+                # Microsoft.Management.Infrastructure.CimException (не
+                # System.UnauthorizedAccessException, як Confirm-SecureBootUEFI),
+                # тож розрізняємо за CategoryInfo/повідомленням, а не лише за
+                # типом винятку.
+                if (Test-BravoTpmAccessDeniedError -ErrorRecord $_) {
+                    $script:Report.Security.TPM.Present = $null
+                    $script:Report.Security.TPM.Status = 'Unavailable'
+                    $script:Report.Security.TPM.Error = $_.Exception.Message
+                } else {
+                    # Клас Win32_Tpm/namespace відсутній — типово означає
+                    # відсутність фізичного/firmware TPM (старе обладнання,
+                    # VM без vTPM), не помилка збору.
+                    $script:Report.Security.TPM.Present = $false
+                    $script:Report.Security.TPM.Status = 'NotPresent'
+                    $script:Report.Security.TPM.Error = $_.Exception.Message
+                }
             }
 
             # --- SMBv1 ---
@@ -2767,14 +2848,14 @@ function Get-BravoSecurityAudit {
                     $auditPolicyCsv = & auditpol /get /category:* /r 2>&1
 
                     if ($LASTEXITCODE -eq 0) {
-                        $auditPolicyEntries = $auditPolicyCsv | ConvertFrom-Csv -ErrorAction Stop
+                        $auditPolicyEntries = ConvertFrom-BravoAuditPolicyCsv -Lines $auditPolicyCsv
 
                         foreach ($entry in $auditPolicyEntries) {
                             $script:Report.Security.AuditPolicy.Subcategories += [PSCustomObject]@{
-                                Category          = $entry.'Policy Target'
+                                Category          = $entry.PolicyTarget
                                 Subcategory       = $entry.Subcategory
-                                SubcategoryGuid   = $entry.'Subcategory GUID'
-                                InclusionSetting  = $entry.'Inclusion Setting'
+                                SubcategoryGuid   = $entry.SubcategoryGuid
+                                InclusionSetting  = $entry.InclusionSetting
                             }
                         }
 
@@ -2865,7 +2946,13 @@ function Get-BravoSecurityAudit {
             # позначаємо прапорцем IsMicrosoftDefault=true — той самий
             # принцип "дані видимі, findings обережні", що вже застосований
             # для ARP/Storage ReservedVolumes.
-            if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+            # Явний внутрішній гейт Deep/Forensic (окремо від зовнішнього
+            # Full/Deep/Forensic на початку цього блоку) — раніше коментар
+            # вище твердив "гейтовано окремо Deep/Forensic", але коду, що це
+            # реально перевіряє, не було: plain Full теж запускав
+            # Get-ScheduledTask, суперечачи задокументованому в HTML контракту
+            # профілю Full.
+            if ($Profile -in @('Deep','Forensic') -and (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
                 try {
                     $scheduledTasks = Get-ScheduledTask -ErrorAction Stop
                     foreach ($task in $scheduledTasks) {
@@ -4424,6 +4511,7 @@ function Invoke-BravoReportSanitization {
     $maskAdmin    = New-BravoSanitizeMasker -Prefix 'ADMIN'
     $maskPath     = New-BravoSanitizeMasker -Prefix 'PATH'
     $maskPrivateIP = New-BravoSanitizeMasker -Prefix 'PRIVATE-IP'
+    $maskWsus     = New-BravoSanitizeMasker -Prefix 'WSUS'
 
     # --- Computer name ---
     if ($Report.ComputerName) { $Report.ComputerName = & $maskComputer $Report.ComputerName }
@@ -4659,6 +4747,51 @@ function Invoke-BravoReportSanitization {
     if ($Report.Network -and $Report.Network.SmbShares) {
         foreach ($share in @($Report.Network.SmbShares)) {
             if ($share.Path) { $share.Path = & $maskPath $share.Path }
+        }
+    }
+
+    # --- Updates: встановлені оновлення (InstalledBy) і WSUS-сервер
+    # (delta review v0.6.1) — та сама категорія ADMIN, що й LocalAdmins/
+    # AllowedUsers/ScheduledTasks.Author: Get-HotFix.InstalledBy зазвичай
+    # DOMAIN\user. WSUSServer — внутрішній hostname/URL, ідентифікує
+    # організацію так само, як DNS suffix, тому маскується завжди (Basic),
+    # окремим маскером (не той самий Counter, що й DNSSUFFIX).
+    if ($Report.Updates -and $Report.Updates.Installed -and $Report.Updates.Installed.Recent) {
+        foreach ($hotfix in @($Report.Updates.Installed.Recent)) {
+            if ($hotfix.InstalledBy) { $hotfix.InstalledBy = & $maskAdmin $hotfix.InstalledBy }
+        }
+    }
+    if ($Report.Updates -and $Report.Updates.WindowsUpdate -and $Report.Updates.WindowsUpdate.WSUSServer) {
+        $Report.Updates.WindowsUpdate.WSUSServer = & $maskWsus $Report.Updates.WindowsUpdate.WSUSServer
+    }
+
+    # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
+    # (TopErrorSources, per-log LogSummaries.TopProviders, HardwareDiagnostics)
+    # — повний необроблений текст події (Security-лог часто містить
+    # account/domain/workstation/IP). Повна редакція фіксованим токеном
+    # (не per-value масив, як інші поля) — вибірковий парсинг вільного
+    # тексту небезпечний і непотрібний, самого факту "яка подія найчастіша"
+    # достатньо без розкриття вмісту повідомлення. Завжди (Basic), не лише
+    # Strict — той самий рівень ризику, що й DNS suffix/шляхи вище.
+    if ($Report.EventLogs) {
+        if ($Report.EventLogs.TopErrorSources) {
+            foreach ($source in @($Report.EventLogs.TopErrorSources)) {
+                if ($source.LastMessage) { $source.LastMessage = 'REDACTED-EVENTLOG-MESSAGE' }
+            }
+        }
+        if ($Report.EventLogs.LogSummaries) {
+            foreach ($logSummary in @($Report.EventLogs.LogSummaries)) {
+                if ($logSummary.TopProviders) {
+                    foreach ($provider in @($logSummary.TopProviders)) {
+                        if ($provider.LastMessage) { $provider.LastMessage = 'REDACTED-EVENTLOG-MESSAGE' }
+                    }
+                }
+            }
+        }
+        if ($Report.EventLogs.HardwareDiagnostics) {
+            foreach ($diag in @($Report.EventLogs.HardwareDiagnostics)) {
+                if ($diag.LastMessage) { $diag.LastMessage = 'REDACTED-EVENTLOG-MESSAGE' }
+            }
         }
     }
 
@@ -6139,6 +6272,61 @@ function Get-AuditObject {
 
 
 
+function ConvertTo-BravoQuotedProcessArgument {
+    # Win32 CommandLineToArgvW quoting (той самий алгоритм застосовують і
+    # powershell.exe/cmd.exe при розборі власного командного рядка): просте
+    # обгортання в подвійні лапки НЕ безпечне — вбудована лапка в значенні
+    # (напр. -EmailTo 'a"@evil.com') замикає рядок аргументу передчасно й
+    # дозволяє injection довільних додаткових CLI-параметрів у елевований
+    # relaunch; а бекслеш(і) прямо перед закриваючою лапкою мають бути
+    # подвоєні, інакше вони екранують саму закриваючу лапку (класичний
+    # Windows-баг парсингу командного рядка), і аргумент знову "виривається"
+    # назовні. Застосовується до значень -OutputPath/-EmailTo/-EmailFrom/
+    # -SmtpServer перед побудовою ArgumentList нижче.
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) { $Value = '' }
+
+    $needsQuoting = ($Value.Length -eq 0) -or ($Value -match '[\s"]')
+    if (-not $needsQuoting) { return $Value }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+
+    $backslashCount = 0
+    for ($i = 0; $i -lt $Value.Length; $i++) {
+        $ch = $Value[$i]
+        if ($ch -eq '\') {
+            $backslashCount++
+            continue
+        }
+
+        if ($ch -eq '"') {
+            [void]$sb.Append('\', ($backslashCount * 2 + 1))
+            [void]$sb.Append('"')
+            $backslashCount = 0
+            continue
+        }
+
+        if ($backslashCount -gt 0) {
+            [void]$sb.Append('\', $backslashCount)
+            $backslashCount = 0
+        }
+        [void]$sb.Append($ch)
+    }
+
+    if ($backslashCount -gt 0) {
+        [void]$sb.Append('\', ($backslashCount * 2))
+    }
+
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
 function Resolve-AuditOutputPath {
     param(
         [string]$RequestedPath,
@@ -6207,7 +6395,7 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         $arguments = @('-SkipElevation')
         $arguments += "-Profile $Profile"
         $arguments += "-EventLogDays $EventLogDays"
-        if ($OutputPath) { $arguments += "-OutputPath `"$OutputPath`"" }
+        if ($OutputPath) { $arguments += "-OutputPath $(ConvertTo-BravoQuotedProcessArgument -Value $OutputPath)" }
         if ($JSONOnly) { $arguments += '-JSONOnly' }
         if ($CSV) { $arguments += '-CSV' }
         if ($TXT) { $arguments += '-TXT' }
@@ -6235,9 +6423,9 @@ if (-not $isAdmin -and -not $NoElevate -and -not $SkipElevation) {
         $arguments += "-SanitizeLevel $SanitizeLevel"
         if ($SkipUpdateSearch) { $arguments += '-SkipUpdateSearch' }
         $arguments += "-UpdateSearchTimeoutSec $UpdateSearchTimeoutSec"
-        if ($EmailTo) { $arguments += "-EmailTo `"$EmailTo`"" }
-        if ($EmailFrom) { $arguments += "-EmailFrom `"$EmailFrom`"" }
-        if ($SmtpServer) { $arguments += "-SmtpServer `"$SmtpServer`"" }
+        if ($EmailTo) { $arguments += "-EmailTo $(ConvertTo-BravoQuotedProcessArgument -Value $EmailTo)" }
+        if ($EmailFrom) { $arguments += "-EmailFrom $(ConvertTo-BravoQuotedProcessArgument -Value $EmailFrom)" }
+        if ($SmtpServer) { $arguments += "-SmtpServer $(ConvertTo-BravoQuotedProcessArgument -Value $SmtpServer)" }
         if ($ExportPdf) { $arguments += '-ExportPdf' }
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -6388,25 +6576,35 @@ if ($script:SanitizeFailed) {
     Write-Host "$IconFolder Збереження: $outputDir" -ForegroundColor Cyan
 
     # Локальний helper — синхронізує JSON на диску з поточним станом
-    # ExportErrors, якщо він змінився з моменту попереднього запису. JSON
-    # пишеться ПЕРШИМ (щоб потрапити до ZIP), але наступні export-етапи
-    # (HTML/PDF/TXT/MD/CSV/ZIP/Email) можуть додати власні ExportErrors —
-    # тому виклик повторюється в кількох контрольних точках нижче (після
-    # CSV/до ZIP, після ZIP/до Email, після Email), а не лише один раз
-    # наприкінці — щоб і ZIP-вкладення, і Email-вкладення відображали
-    # актуальний на момент пакування/відправки стан ExportErrors.
+    # ExportErrors/GeneratedFiles, якщо будь-який з них змінився з моменту
+    # попереднього запису. JSON пишеться ПЕРШИМ (щоб потрапити до ZIP), але
+    # наступні export-етапи (HTML/PDF/TXT/MD/CSV/ZIP/Email) можуть додати
+    # власні ExportErrors І власний шлях у GeneratedFiles — тому виклик
+    # повторюється в кількох контрольних точках нижче (після CSV/до ZIP,
+    # після ZIP/до Email, після Email), а не лише один раз наприкінці — щоб
+    # і ZIP-вкладення, і Email-вкладення відображали актуальний на момент
+    # пакування/відправки стан ExportErrors/GeneratedFiles. Раніше тригер
+    # перевіряв лише ExportErrors.Count — GeneratedFiles.Count (додається
+    # HTML/PDF/TXT/MD/CSV ПІСЛЯ першого JSON-запису) ніколи не спричиняв
+    # перезапис, тому на диску JSON завжди мав порожній/неповний
+    # GeneratedFiles.
     function Sync-BravoJsonIfExportErrorsChanged {
-        param([int]$PriorCount)
-        if (@($script:Report.ExportErrors).Count -gt $PriorCount) {
+        param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
+        $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
+        if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
             Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
-        return @($script:Report.ExportErrors).Count
+        return [PSCustomObject]@{
+            ExportErrorCount    = @($script:Report.ExportErrors).Count
+            GeneratedFilesCount = @($script:Report.GeneratedFiles).Count
+        }
     }
 
     # JSON — Health Score вже фінальний (рахувався до початку export-етапів),
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
     $exportErrorCount = @($script:Report.ExportErrors).Count
+    $generatedFilesCount = @($script:Report.GeneratedFiles).Count
     Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
     # HTML
@@ -6435,9 +6633,12 @@ if ($script:SanitizeFailed) {
 
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
-    # JSON у ZIP має відображати ExportErrors від HTML/PDF/TXT/MD/CSV, а не
-    # лише від початкового запису — синхронізуємо перед пакуванням.
-    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+    # JSON у ZIP має відображати ExportErrors/GeneratedFiles від
+    # HTML/PDF/TXT/MD/CSV, а не лише від початкового запису — синхронізуємо
+    # перед пакуванням.
+    $syncResult = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount -PriorGeneratedFilesCount $generatedFilesCount
+    $exportErrorCount = $syncResult.ExportErrorCount
+    $generatedFilesCount = $syncResult.GeneratedFilesCount
 
     # ZIP
     Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
@@ -6445,7 +6646,9 @@ if ($script:SanitizeFailed) {
 
     # Якщо сам ZIP додав ExportError — JSON на диску (не копія всередині вже
     # запакованого ZIP) все одно має бути авторитетним перед відправкою Email.
-    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+    $syncResult = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount -PriorGeneratedFilesCount $generatedFilesCount
+    $exportErrorCount = $syncResult.ExportErrorCount
+    $generatedFilesCount = $syncResult.GeneratedFilesCount
 
     # Email — останній export-етап. Тіло листа й вкладення відображають стан на
     # момент відправки (Health Score вже фінальний; JSON-вкладення може не
@@ -6455,7 +6658,9 @@ if ($script:SanitizeFailed) {
 
     # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
     # (не вкладення вже відправленого листа) відображає це.
-    $exportErrorCount = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount
+    $syncResult = Sync-BravoJsonIfExportErrorsChanged -PriorCount $exportErrorCount -PriorGeneratedFilesCount $generatedFilesCount
+    $exportErrorCount = $syncResult.ExportErrorCount
+    $generatedFilesCount = $syncResult.GeneratedFilesCount
 }
 
 # Фінал
