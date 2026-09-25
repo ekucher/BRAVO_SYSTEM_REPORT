@@ -23,7 +23,16 @@
 
 ## Рекомендований режим GitHub
 
-Для цього проекту рекомендовано приватний репозиторій.
+Репозиторій публічний (`ekucher/BRAVO_SYSTEM_REPORT`). Threat model нижче свідомо
+розрахована саме на цей режим — pull request може прийти від будь-кого, включно з
+fork без попередньої довіри, тому CI trust boundary (self-hosted runner ізольований
+від `pull_request`/`pull_request_target`, PR-код лише статично аналізується на
+ephemeral GitHub-hosted runner) і обов'язкове налаштування
+**Require approval for all external contributors** нижче — не опціональні
+рекомендації, а необхідна умова безпечної роботи саме публічного репозиторію.
+Якщо репозиторій колись стане приватним, більшість цих обмежень (crypto-hardened
+trust boundary) можна буде послабити, але сама можливість fork PR з довільним
+кодом зникне лише разом із приватністю.
 
 ## CI trust model
 

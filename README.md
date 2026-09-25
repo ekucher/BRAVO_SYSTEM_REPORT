@@ -40,6 +40,7 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 - **v0.4.1** — Windows Update collector, privacy-гейтинг публічного IP (`-SkipPublicIP`), подвійний перерахунок Health Score після export-етапів, перевірка можливості оновлення .NET Framework/PowerShell, Catalog-посилання для pending updates;
 - **v0.5.0** — аналіз ОС і оновлень Windows: колектор `Updates`, таблиця життєвого циклу всіх випусків Windows, вкладка Updates у HTML-звіті;
 - **v0.5.1** — Stabilization P0: єдиний execution contract між root wrapper і `dist` (усунено дублювання дефолтів параметрів), розділення `CollectionErrors`/`ExportErrors`, детермінований exit code contract (0/1/2/3), спрощений export-pipeline (Health Score рахується один раз).
+- **v0.6.1** — `-Strict` (exit code `4` на CRITICAL Health.Status), `-Sanitize`/`-SanitizeLevel Basic|Strict` (fail-closed маскування, exit code `5`), `-Offline`/`-SkipPublicIP` (гарантовано без зовнішніх HTTP-запитів), CI trust boundary hardening (self-hosted Windows runner реагує лише на `push`/`workflow_dispatch`, PR-код перевіряється виключно на ephemeral GitHub-hosted runner), unpack-and-run release smoke test, розширений Pester-набір (27 файлів / 316 тестів).
 
 ## Швидкий запуск
 
@@ -249,8 +250,11 @@ risk-unknown
 | `2` | Фатальна неопрацьована помилка виконання (баг/runtime-збій) |
 | `3` | Обов'язковий вихідний файл (JSON) не згенеровано |
 | `4` | Лише з `-Strict`: аудит завершено без `CollectionErrors`/`ExportErrors`, але `Health.Status` аудитованої машини = `CRITICAL` |
+| `5` | Лише з `-Sanitize`: маскування перервалося помилкою посередині — fail-closed, жоден звіт НЕ записано на диск, щоб частково замаскований звіт ніколи не потрапив користувачу |
 
 За замовчуванням `Health.Status` (`OK`/`WARNING`/`CRITICAL`) **не впливає** на exit code — це властивість аудитованої машини (наскільки вона здорова), а не ознака збою самого інструмента BRAVO SYSTEM REPORT. Параметр `-Strict` вмикає цю поведінку явно (exit code `4`) — для CI-гейтів, яким потрібен ненульовий exit code саме на "машина в критичному стані", а не лише на "інструмент не зміг щось зібрати/записати". `CollectionErrors` (помилки WMI/CIM/реєстру) і `ExportErrors` (помилки запису JSON/HTML/CSV/ZIP/email) розділені в JSON-звіті — перші впливають на `Health.Score`, другі — ні, обидва впливають на exit code незалежно від `-Strict`.
+
+Код `5` перевіряється ПЕРШИМ у ланцюжку обчислення (навіть раніше за `3`) — якщо `-Sanitize` не зміг домаскувати дані, причина відсутності JSON принципово інша (свідома відмова писати частково замаскований звіт), ніж у коді `3` (звичайний export-баг).
 
 При автоматичному підвищенні прав (UAC) батьківський процес чекає завершення елевованого дочірнього процесу й повертає його реальний exit code.
 
@@ -351,8 +355,8 @@ Get-SmbShare/Edge/реєстр тощо) — і далі виключно `local
 ```powershell
 git checkout main
 git pull
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.6.1
+git push origin v0.6.1
 ```
 
 Що робить workflow:
@@ -360,9 +364,14 @@ git push origin v0.5.0
 1. звіряє версію в `src\90-Main.ps1`, `CHANGELOG.md` і в самому тезі — розбіжність зупиняє реліз;
 2. збирає `dist` через `Build-BRAVO-SystemReport.ps1` і робить контрольний прогін профілю `Quick`;
 3. пакує реліз через `tools\New-ReleasePackage.ps1`;
-4. розпаковує готовий ZIP і перевіряє його: наявність runtime і `MANIFEST.txt`, збіг SHA512, parser check
-   і версію запакованого скрипта;
-5. створює GitHub Release із нотатками із секції відповідної версії `CHANGELOG.md` і вкладає
+4. розпаковує готовий ZIP у тимчасову директорію проекту і перевіряє його структурно: наявність
+   runtime і `MANIFEST.txt`, збіг SHA512, parser check і версію запакованого скрипта;
+5. **unpack-and-run smoke test**: розпаковує той самий ZIP окремо, поза робочою директорією
+   checkout (у `$env:RUNNER_TEMP`), реально запускає `BRAVO-SystemReport-Quick.bat --nopause`
+   із розпакованого дерева і перевіряє exit code `0`, наявність і валідність згенерованих
+   JSON/HTML — доводить, що пакет самодостатній і не залежить від `src`/`dist` оригінального
+   checkout поза самим package;
+6. створює GitHub Release із нотатками із секції відповідної версії `CHANGELOG.md` і вкладає
    `BRAVO_SYSTEM_REPORT_v<version>.zip` та `.zip.sha256`.
 
 Ручний запуск (`workflow_dispatch`) виконує все те саме, але **без публікації релізу** — пакет
@@ -390,6 +399,7 @@ BRAVO_SYSTEM_REPORT
 ├── .github/workflows/
 │   ├── local-windows-validation.yml
 │   ├── powershell-static-check.yml
+│   ├── pr-validation.yml
 │   └── release.yml
 ├── dist/
 │   ├── Get-BravoSystemReport.ps1
