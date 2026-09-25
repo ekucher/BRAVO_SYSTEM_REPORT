@@ -57,8 +57,9 @@ execution на локальній Windows-машині. Відсутність G
 Тому `.github/workflows/local-windows-validation.yml`:
 
 - **не має** тригерів `pull_request` і `pull_request_target`;
-- запускається лише на `push` у `main` / `bravo/integration/modular-build` та на
-  `workflow_dispatch` — тобто на подіях, які вимагають write-доступу до репозиторію;
+- запускається лише на `push` у `main` / `developer` / `bravo/integration/modular-build` /
+  `release/**` та на `workflow_dispatch` — тобто на подіях, які вимагають write-доступу до
+  репозиторію;
 - має job-level gate `if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'`,
   тож job взагалі не потрапляє в чергу runner-а для іншої події;
 - перед checkout виконує крок `Trust gate`, який ще раз перевіряє provenance події,
@@ -74,7 +75,9 @@ execution на локальній Windows-машині. Відсутність G
 | Подія | Windows validation |
 |---|---|
 | `push` у `main` | так |
+| `push` у `developer` | так |
 | `push` у `bravo/integration/modular-build` | так |
+| `push` у `release/**` | так |
 | `workflow_dispatch` | так, на ревізії, яку обрав maintainer |
 | `push` тега `v*` | так, через `release.yml` |
 | будь-який `pull_request` | ні |
