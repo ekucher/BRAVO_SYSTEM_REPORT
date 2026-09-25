@@ -353,3 +353,54 @@ Describe 'Resolve-BravoPartitionType (канонічна класифікаці�
         Resolve-BravoPartitionType | Should -Be 'Unknown'
     }
 }
+
+Describe 'Get-BravoStorageAudit basic-path делегує канонічній Get-BravoStorageFreeSpaceSeverity' {
+    # Регресія на duplicated policy (delta review 2026-09-25): до фіксу
+    # basic-прохід у Get-BravoStorageAudit самостійно переобчислював
+    # Critical/Warning замість виклику канонічної Get-BravoStorageFreeSpaceSeverity
+    # — цей тест ловить повернення до дублювання (0 викликів канонічної функції).
+    BeforeEach {
+        function Get-AuditObject {
+            param([string]$ClassName, [string]$Filter)
+            if ($ClassName -eq 'Win32_LogicalDisk') {
+                return @(
+                    [PSCustomObject]@{
+                        DeviceID   = 'C:'
+                        VolumeName = 'System'
+                        FileSystem = 'NTFS'
+                        Size       = 100GB
+                        FreeSpace  = 3GB
+                        Compressed = $false
+                    }
+                )
+            }
+            return @()
+        }
+        function Format-Size { param($Bytes) return "$Bytes" }
+        function Add-AuditFinding {
+            param([string]$Severity, [string]$Category, [string]$Message, [string]$Recommendation = '')
+        }
+        function Add-AuditError {
+            param([string]$Section, [string]$Message)
+        }
+
+        $script:IconDisk = '[OK]'
+        $script:IconError = '[ERROR]'
+        $script:Profile = 'Quick'
+        $script:Report = [ordered]@{
+            Hardware = [ordered]@{
+                Disks = [ordered]@{ FreePercent = 0; TotalGB = 0; FreeGB = 0; Volumes = @(); PhysicalDisks = @() }
+            }
+        }
+    }
+
+    It 'викликає канонічну Get-BravoStorageFreeSpaceSeverity замість власного if/elseif на critical-томі' {
+        Mock Get-BravoStorageFreeSpaceSeverity { return 'Critical' } -Verifiable
+
+        Get-BravoStorageAudit
+
+        Should -Invoke Get-BravoStorageFreeSpaceSeverity -Times 1 -Exactly -ParameterFilter {
+            $FreePercent -eq 3
+        }
+    }
+}

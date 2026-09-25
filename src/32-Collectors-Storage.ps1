@@ -648,7 +648,14 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
-        if ($freePercent -lt $criticalThreshold) {
+        # Канонічна класифікація (Get-BravoStorageFreeSpaceSeverity) — та сама
+        # функція, що й у basic-прохід (Get-BravoStorageAudit), щоб обидва
+        # шляхи узгоджено оцінювали один і той самий поріг. IsSystemDrive
+        # передається лише тут (SystemWarning належить deep risk summary).
+        $isSystemDriveVolume = ($driveLetter -eq $systemDrive)
+        $severity = Get-BravoStorageFreeSpaceSeverity -FreePercent $freePercent -IsSystemDrive $isSystemDriveVolume -DriveType ([string]$volume.DriveType)
+
+        if ($severity -eq 'Critical') {
             $risk.CriticalVolumes += $volumeRisk
 
             Add-AuditFinding `
@@ -660,7 +667,7 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
-        if ($freePercent -lt $warningThreshold) {
+        if ($severity -eq 'Warning') {
             $risk.WarningVolumes += $volumeRisk
 
             Add-AuditFinding `
@@ -672,7 +679,7 @@ function Get-BravoStorageRiskSummary {
             continue
         }
 
-        if ($driveLetter -eq $systemDrive -and $freePercent -lt $systemWarningThreshold) {
+        if ($severity -eq 'SystemWarning') {
             $risk.SystemVolumeWarnings += $volumeRisk
 
             Add-AuditFinding `
@@ -731,9 +738,15 @@ function Get-BravoStorageAudit {
             $script:Report.Hardware.Disks.Volumes += $volume
 
             if ($emitBasicFindings) {
-                if ($volume.FreePercent -lt $thresholds.CriticalFreePercent) {
+                # Канонічна класифікація (Get-BravoStorageFreeSpaceSeverity) —
+                # та сама, що й у Get-BravoStorageRiskSummary. IsSystemDrive
+                # свідомо не передається: basic-прохід і раніше не мав
+                # системно-специфічного порогу тут (SystemWarning належить
+                # лише deep risk summary).
+                $basicSeverity = Get-BravoStorageFreeSpaceSeverity -FreePercent $volume.FreePercent
+                if ($basicSeverity -eq 'Critical') {
                     Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.CriticalFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
-                } elseif ($volume.FreePercent -lt $thresholds.WarningFreePercent) {
+                } elseif ($basicSeverity -eq 'Warning') {
                     Add-AuditFinding -Severity 'WARNING' -Category 'Storage.FreeSpace' -Message "На диску $($volume.DeviceID) менше $($thresholds.WarningFreePercent)% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
                 }
             }
