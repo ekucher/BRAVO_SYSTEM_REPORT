@@ -404,7 +404,12 @@ function Get-BravoStorageDeepAudit {
                 $storage.StoragePools += [PSCustomObject]@{
                     FriendlyName      = $pool.FriendlyName
                     HealthStatus      = [string]$pool.HealthStatus
-                    OperationalStatus = [string]$pool.OperationalStatus
+                    # OperationalStatus — масив (напр. у деградованого пулу
+                    # може бути кілька одночасних статусів); -join, як і для
+                    # Volumes/PhysicalDisks вище, а не [string]-каст, що дав
+                    # би "System.Object[]" замість реальних значень (P2,
+                    # fresh-review Phase 10).
+                    OperationalStatus = ($pool.OperationalStatus -join ', ')
                     SizeGB            = Convert-BravoBytesToGB $pool.Size
                     AllocatedGB       = Convert-BravoBytesToGB $pool.AllocatedSize
                     IsReadOnly        = $pool.IsReadOnly
