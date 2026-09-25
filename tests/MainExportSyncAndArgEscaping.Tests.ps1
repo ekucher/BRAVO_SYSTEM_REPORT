@@ -259,7 +259,12 @@ Describe 'Export-BravoJsonReport / $script:SanitizeActive (src/50-Export-Json.ps
         $jsonPath = Join-Path $script:outputDir 'BravoSystemReport_REAL-PC_20260925_120000.json'
         $jsonContent = Get-Content -LiteralPath $jsonPath -Raw
 
-        $jsonContent | Should -Match 'REAL-PC'
+        # Анкорована перевірка ПОВНОГО реального шляху (не лише підрядка
+        # 'REAL-PC' — той самий підрядок присутній і в sanitized basename
+        # 'BravoSystemReport_REAL-PC_...html', тож попередня перевірка не
+        # відрізняла sanitize/не-sanitize гілку; третя хвиля фреш-ревʼю
+        # Phase 10, mutation-testing підтвердив vacuousness).
+        $jsonContent | Should -Match 'C:\\\\Reports\\\\BravoSystemReport_REAL-PC'
     }
 
     It '$script:SanitizeActive не встановлено взагалі: fail-safe до НЕ-sanitize поведінки (реальний шлях серіалізується) — регресія на fail-open call-site gap, знайдену фреш-ревʼю Phase 10' {
