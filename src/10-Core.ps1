@@ -141,6 +141,8 @@ function Get-BravoPrimaryNetworkInterface {
             }
         }
     } catch {
+        # Свідомо ігноруємо: сучасний Get-NetRoute/Get-NetAdapter шлях недоступний
+        # або впав (наприклад, немає модуля NetTCPIP) — нижче є CIM/WMI fallback.
     }
 
     try {
@@ -170,6 +172,8 @@ function Get-BravoPrimaryNetworkInterface {
             }
         }
     } catch {
+        # Свідомо ігноруємо: обидва методи (NetAdapter та CIM) недоступні —
+        # повертаємо $null, виклик нижче трактує це як "primary interface не знайдено".
     }
 
     return $null
@@ -232,6 +236,8 @@ function Get-BravoAllUsableIPv4AddressList {
             }
         }
     } catch {
+        # Свідомо ігноруємо: CIM-запит недоступний на цій машині —
+        # повертаємо порожній список замість переривання збору мережевих даних.
     }
 
     return @($result)

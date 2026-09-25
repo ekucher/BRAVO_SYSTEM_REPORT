@@ -77,7 +77,7 @@ function Export-BravoZipReport {
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Zip' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Zip' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка створення ZIP: $($_.Exception.Message)" -ForegroundColor Red
         } finally {
             if ($null -ne $zipArchive) { $zipArchive.Dispose() }

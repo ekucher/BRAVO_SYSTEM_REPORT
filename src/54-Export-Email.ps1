@@ -27,7 +27,7 @@ function Send-BravoEmailReport {
             Send-MailMessage -To $EmailTo -From $EmailFrom -Subject "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)" -Body $mailBody -SmtpServer $smtpToUse -Attachments $attachments -ErrorAction Stop
             Write-Host "  $IconEmail Email відправлено на $EmailTo" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Email' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Email' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка відправки Email: $($_.Exception.Message)" -ForegroundColor Red
         }
     }

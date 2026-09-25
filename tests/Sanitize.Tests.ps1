@@ -1,0 +1,470 @@
+﻿# MODULE: tests/Sanitize.Tests.ps1
+# Pester-тести для src/45-Sanitize.ps1 (P1/v0.4.3 Safe Sharing).
+
+BeforeAll {
+    . (Join-Path $PSScriptRoot '..\src\45-Sanitize.ps1')
+
+    function New-BravoFakeReport {
+        [ordered]@{
+            ComputerName = 'REAL-PC'
+            OutputPath = 'C:\Users\jdoe\Reports'
+            Dashboard = [ordered]@{ Header = [ordered]@{ ComputerName = 'REAL-PC' } }
+            Meta = [ordered]@{ UserName = 'jdoe'; UserDomainName = 'CORP' }
+            Hardware = [ordered]@{
+                ComputerSystem = [ordered]@{ Domain = 'corp.local' }
+                Motherboard = [ordered]@{ Manufacturer = 'ASUS'; Product = 'ROG STRIX'; SerialNumber = 'SN-MB-1'; Version = 'Rev 1.0' }
+                RAM = [ordered]@{ Modules = @([PSCustomObject]@{ SerialNumber = 'SN-RAM-1' }) }
+                Disks = [ordered]@{
+                    PhysicalDisks = @([PSCustomObject]@{ SerialNumber = 'SN-DISK-1' })
+                    Deep = [PSCustomObject]@{
+                        Disks = @([PSCustomObject]@{ SerialNumber = 'SN-DEEPDISK-1' })
+                        SmartPredictFailures = @([PSCustomObject]@{ InstanceName = 'IDE\DiskWDC_WD10EZEX-SECRET-SERIAL-98765\4&2413cfbc&0&0.0.0'; PredictFailure = $true; Reason = 0 })
+                    }
+                }
+                Monitors = @([PSCustomObject]@{ SerialNumber = 'SN-MONITOR-1'; Model = 'XG27ACS' })
+            }
+            BIOS = [ordered]@{ SerialNumber = 'SN-BIOS-1' }
+            Health = [ordered]@{
+                Findings = @(
+                    [PSCustomObject]@{ Severity = 'CRITICAL'; Category = 'Storage.SMART'; Message = "SMART передбачає можливий збій диска 'IDE\DiskWDC_WD10EZEX-SECRET-SERIAL-98765\4&2413cfbc&0&0.0.0' (PredictFailure=True)."; Recommendation = 'Негайно створіть резервну копію даних і заплануйте заміну диска.' }
+                    [PSCustomObject]@{ Severity = 'WARNING'; Category = 'Hardware.CPU'; Message = 'Завантаження CPU підвищене: 85%.'; Recommendation = 'Спостерігайте за динамікою навантаження CPU.' }
+                )
+            }
+            Services = [ordered]@{
+                AutomaticStopped = @(
+                    [PSCustomObject]@{ Name = 'SvcA'; DisplayName = 'Service A'; StartName = 'CORP\svc-account' }
+                    [PSCustomObject]@{ Name = 'SvcB'; DisplayName = 'Service B'; StartName = 'LocalSystem' }
+                    [PSCustomObject]@{ Name = 'SvcC'; DisplayName = 'Service C'; StartName = 'NT AUTHORITY\NETWORK SERVICE' }
+                )
+            }
+            Network = [ordered]@{
+                General = [ordered]@{ Hostname = 'REAL-PC'; Domain = 'corp.local' }
+                IP = [ordered]@{
+                    IPv4 = @('192.168.1.10', '192.168.1.10')
+                    PrimaryIPv4 = '192.168.1.10'
+                    PrimaryInterface = [PSCustomObject]@{ IPv4 = '192.168.1.10'; Gateway = '192.168.1.1' }
+                    PublicIPv4 = '203.0.113.5'
+                    PublicIPv4ISP = 'Example ISP LLC'
+                    PublicIPv4Organization = 'Example Org'
+                    PublicIPv4ASN = 'AS64500'
+                    PublicIPv4Country = 'Ukraine'
+                    PublicIPv4Region = 'Kyiv Oblast'
+                    PublicIPv4City = 'Kyiv'
+                    PublicIPv4Timezone = 'Europe/Kyiv'
+                }
+                Routing = [ordered]@{
+                    DefaultGateway = '192.168.1.1'
+                    DefaultGateways = @('192.168.1.1')
+                    DNSServers = @('192.168.1.1', '192.168.1.2')
+                    DNSSuffixSearchOrder = @('corp.local')
+                    RoutingTable = @([PSCustomObject]@{ DestinationPrefix = '192.168.1.0/24'; NextHop = '192.168.1.1' })
+                }
+                Adapters = @(
+                    # Adapter 0: 'corp.local' навмисно збігається з Routing.DNSSuffixSearchOrder —
+                    # перевірка deterministic cross-section токена (той самий маскер).
+                    [PSCustomObject]@{ MACAddress = 'AA-BB-CC-DD-EE-FF'; IPv4 = @('192.168.1.10'); Gateway = @('192.168.1.1'); DNS = @('192.168.1.1'); DNSSuffixSearchOrder = @('corp.local', 'internal.local', 'branch.company.ua') }
+                    # Adapter 1/2: null/empty DNSSuffixSearchOrder — sanitizer не повинен падати.
+                    [PSCustomObject]@{ MACAddress = ''; IPv4 = @(); Gateway = @(); DNS = @(); DNSSuffixSearchOrder = $null }
+                    [PSCustomObject]@{ MACAddress = ''; IPv4 = @(); Gateway = @(); DNS = @(); DNSSuffixSearchOrder = @() }
+                )
+                Connections = [ordered]@{
+                    ListeningPorts = @([PSCustomObject]@{ LocalAddress = '192.168.1.10' })
+                    EstablishedConnections = @([PSCustomObject]@{ LocalAddress = '192.168.1.10'; RemoteAddress = '192.168.1.20' })
+                }
+                ARP = @([PSCustomObject]@{ IPAddress = '192.168.1.1'; LinkLayerAddress = '11-22-33-44-55-66' })
+                SmbShares = @([PSCustomObject]@{ Name = 'Share1'; Path = 'C:\Users\jdoe\Share1' })
+                WinHttpProxy = [ordered]@{
+                    RawOutput = @('Proxy Server(s) :  proxy.secret-corp.local:8080', 'Bypass List     :  *.secret-corp.local;10.20.30.0/24')
+                }
+            }
+            Users = [ordered]@{ LocalAdmins = @('jdoe', 'Administrator') }
+            Security = [ordered]@{
+                RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker'); FirewallScope = '10.21.0.0/24, 192.168.50.0/24, Any, LocalSubnet' }
+                Autoruns = @([PSCustomObject]@{ Name = 'OneDrive'; Command = 'C:\Users\jdoe\AppData\Local\Microsoft\OneDrive\OneDrive.exe /background'; Source = 'Run'; Hive = 'HKCU' })
+                ScheduledTasks = @([PSCustomObject]@{ Name = 'MyTask'; Path = '\'; State = 'Ready'; Author = 'CORP\jdoe'; Execute = 'C:\Users\jdoe\script.exe'; Arguments = ''; IsMicrosoftDefault = $false })
+            }
+            Software = [ordered]@{ Installed = @([PSCustomObject]@{ InstallLocation = 'C:\Users\jdoe\AppData\Local\SomeApp' }) }
+            Updates = [ordered]@{
+                WindowsUpdate = [ordered]@{ WSUSServer = 'http://wsus.corp.local:8530' }
+                Installed = [ordered]@{
+                    Recent = @(
+                        [PSCustomObject]@{ HotFixID = 'KB123'; Description = 'Update'; InstalledBy = 'CORP\jdoe'; InstalledOnText = '2026-01-01' }
+                    )
+                }
+            }
+            EventLogs = [ordered]@{
+                TopErrorSources = @([PSCustomObject]@{ Source = 'Disk'; Count = 3; LastMessage = 'Error on \\WORKSTATION1 for user CORP\jdoe at 10.0.0.5' })
+                LogSummaries = @(
+                    [PSCustomObject]@{
+                        LogName = 'Security'
+                        TopProviders = @([PSCustomObject]@{ ProviderName = 'Microsoft-Windows-Security-Auditing'; Count = 2; LastMessage = 'Logon by CORP\jdoe from 10.0.0.5' })
+                    }
+                )
+                HardwareDiagnostics = @([PSCustomObject]@{ Provider = 'Disk'; Status = 'Detected'; Count = 1; LastMessage = 'Disk failure detail for CORP\jdoe' })
+            }
+            CollectionErrors = @([PSCustomObject]@{ Time = '2026-01-01 00:00:00'; Section = 'Security.RemoteAccess'; Message = "Access to the path 'C:\Users\jdoe\Reports' is denied." })
+            ExportErrors = @([PSCustomObject]@{ Time = '2026-01-01 00:00:00'; Section = 'Export.Zip'; Message = "Could not find a part of the path 'C:\Users\jdoe\Reports\report.zip'." })
+        }
+    }
+}
+
+Describe 'New-BravoSanitizeMasker' {
+    It 'та сама вхідна строка завжди дає той самий токен' {
+        $masker = New-BravoSanitizeMasker -Prefix 'TEST'
+        (& $masker 'value-a') | Should -Be (& $masker 'value-a')
+    }
+
+    It 'різні вхідні значення дають різні токени з наростаючим номером' {
+        $masker = New-BravoSanitizeMasker -Prefix 'TEST'
+        (& $masker 'value-a') | Should -Be 'REDACTED-TEST-1'
+        (& $masker 'value-b') | Should -Be 'REDACTED-TEST-2'
+    }
+
+    It 'порожнє/null значення повертається без змін (нема що маскувати)' {
+        $masker = New-BravoSanitizeMasker -Prefix 'TEST'
+        (& $masker '') | Should -Be ''
+        (& $masker $null) | Should -Be $null
+    }
+}
+
+Describe 'Invoke-BravoReportSanitization -Level Basic' {
+    BeforeEach {
+        $script:report = New-BravoFakeReport
+        Invoke-BravoReportSanitization -Report $script:report -Level 'Basic' | Out-Null
+    }
+
+    It 'маскує ComputerName у всіх трьох місцях однаково' {
+        $script:report.ComputerName | Should -Match '^REDACTED-COMPUTERNAME-'
+        $script:report.ComputerName | Should -Be $script:report.Dashboard.Header.ComputerName
+        $script:report.ComputerName | Should -Be $script:report.Network.General.Hostname
+    }
+
+    It 'маскує user name і domain' {
+        $script:report.Meta.UserName | Should -Match '^REDACTED-USER-'
+        $script:report.Meta.UserDomainName | Should -Match '^REDACTED-DOMAIN-'
+        $script:report.Hardware.ComputerSystem.Domain | Should -Match '^REDACTED-DOMAIN-'
+    }
+
+    It 'маскує DNS suffix і public IPv4' {
+        $script:report.Network.Routing.DNSSuffixSearchOrder[0] | Should -Match '^REDACTED-DNSSUFFIX-'
+        $script:report.Network.IP.PublicIPv4 | Should -Match '^REDACTED-PUBLIC-IP-'
+    }
+
+    It 'маскує per-adapter DNSSuffixSearchOrder навіть у Basic (Release Blocker Fixes v0.6.1) — усі значення, жодного original literal' {
+        $adapterSuffixes = @($script:report.Network.Adapters[0].DNSSuffixSearchOrder)
+        $adapterSuffixes.Count | Should -Be 3
+        $adapterSuffixes | ForEach-Object { $_ | Should -Match '^REDACTED-DNSSUFFIX-' }
+        $adapterSuffixes | Should -Not -Contain 'corp.local'
+        $adapterSuffixes | Should -Not -Contain 'internal.local'
+        $adapterSuffixes | Should -Not -Contain 'branch.company.ua'
+    }
+
+    It 'той самий DNS suffix у Routing і в адаптера отримує однаковий deterministic токен' {
+        $script:report.Network.Adapters[0].DNSSuffixSearchOrder[0] | Should -Be $script:report.Network.Routing.DNSSuffixSearchOrder[0]
+    }
+
+    It 'null/порожній per-adapter DNSSuffixSearchOrder не ламає санітизацію і лишається без змін' {
+        $script:report.Network.Adapters[1].DNSSuffixSearchOrder | Should -Be $null
+        @($script:report.Network.Adapters[2].DNSSuffixSearchOrder).Count | Should -Be 0
+    }
+
+    It 'маскує MAC-адреси і серійні номери (BIOS, RAM, PhysicalDisks, Storage Deep)' {
+        $script:report.Network.Adapters[0].MACAddress | Should -Match '^REDACTED-MAC-'
+        $script:report.BIOS.SerialNumber | Should -Match '^REDACTED-SERIAL-'
+        $script:report.Hardware.RAM.Modules[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
+        $script:report.Hardware.Disks.PhysicalDisks[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
+        $script:report.Hardware.Disks.Deep.Disks[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
+    }
+
+    It 'маскує серійний номер монітора (v0.5.0-tail), Model лишається' {
+        $script:report.Hardware.Monitors[0].SerialNumber | Should -Match '^REDACTED-SERIAL-'
+        $script:report.Hardware.Monitors[0].Model | Should -Be 'XG27ACS'
+    }
+
+    It 'маскує серійний номер материнської плати (Release Blocker Fixes v0.6.1), Manufacturer/Product лишаються' {
+        $script:report.Hardware.Motherboard.SerialNumber | Should -Match '^REDACTED-SERIAL-'
+        $script:report.Hardware.Motherboard.Manufacturer | Should -Be 'ASUS'
+        $script:report.Hardware.Motherboard.Product | Should -Be 'ROG STRIX'
+    }
+
+    It 'маскує Report.OutputPath (Release Blocker Fixes v0.6.1)' {
+        $script:report.OutputPath | Should -Match '^REDACTED-PATH-'
+    }
+
+    It 'маскує StartName облікових записів служб (Release Blocker Fixes v0.6.1), крім вбудованих ідентичностей' {
+        $script:report.Services.AutomaticStopped[0].StartName | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Services.AutomaticStopped[1].StartName | Should -Be 'LocalSystem'
+        $script:report.Services.AutomaticStopped[2].StartName | Should -Be 'NT AUTHORITY\NETWORK SERVICE'
+    }
+
+    It 'маскує MAC-адреси в ARP-кеші (v0.5.0) навіть у Basic, IP-адреса в ARP лишається' {
+        $script:report.Network.ARP[0].LinkLayerAddress | Should -Match '^REDACTED-MAC-'
+        $script:report.Network.ARP[0].IPAddress | Should -Be '192.168.1.1'
+    }
+
+    It 'маскує Command в Autoruns (v0.5.0-tail) навіть у Basic, Name лишається' {
+        $script:report.Security.Autoruns[0].Command | Should -Match '^REDACTED-PATH-'
+        $script:report.Security.Autoruns[0].Name | Should -Be 'OneDrive'
+    }
+
+    It 'маскує Author і Execute у ScheduledTasks (v0.5.0-tail) навіть у Basic, Name лишається' {
+        $script:report.Security.ScheduledTasks[0].Author | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Security.ScheduledTasks[0].Execute | Should -Match '^REDACTED-PATH-'
+        $script:report.Security.ScheduledTasks[0].Name | Should -Be 'MyTask'
+    }
+
+    It 'маскує шлях SMB share (v0.5.0-tail) навіть у Basic' {
+        $script:report.Network.SmbShares[0].Path | Should -Match '^REDACTED-PATH-'
+        $script:report.Network.SmbShares[0].Name | Should -Be 'Share1'
+    }
+
+    It 'маскує локальних адміністраторів, дозволених RDP-користувачів і install path ПЗ' {
+        $script:report.Users.LocalAdmins | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Security.RemoteAccess.AllowedUsers | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Software.Installed[0].InstallLocation | Should -Match '^REDACTED-PATH-'
+    }
+
+    It 'маскує InstalledBy у Updates.Installed.Recent (delta review v0.6.1)' {
+        $script:report.Updates.Installed.Recent[0].InstalledBy | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Updates.Installed.Recent[0].HotFixID | Should -Be 'KB123'
+    }
+
+    It 'редагує Network.WinHttpProxy.RawOutput навіть у Basic (P1, exact-head review Phase 10)' {
+        $script:report.Network.WinHttpProxy.RawOutput | Should -Be @('REDACTED-WINHTTP-PROXY')
+    }
+
+    It 'редагує CollectionErrors[].Message і ExportErrors[].Message навіть у Basic (P1, fresh-review Phase 10 — $_.Exception.Message може містити реальний шлях/hostname/обліковий запис)' {
+        $script:report.CollectionErrors[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
+        $script:report.ExportErrors[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
+    }
+
+    It 'редагує Network.WinHttpProxy.Error навіть у Basic (той самий ризик-підклас, fresh-review Phase 10)' {
+        $reportWithProxyError = New-BravoFakeReport
+        $reportWithProxyError.Network.WinHttpProxy.Error = 'netsh failed against proxy.corp.local'
+
+        Invoke-BravoReportSanitization -Report $reportWithProxyError -Level 'Basic' | Out-Null
+
+        $reportWithProxyError.Network.WinHttpProxy.Error | Should -Be 'REDACTED-WINHTTP-PROXY-ERROR'
+    }
+
+    It 'НЕ маскує Security.RemoteAccess.FirewallScope у Basic-режимі (задокументована поведінка — лише Strict)' {
+        $script:report.Security.RemoteAccess.FirewallScope | Should -Be '10.21.0.0/24, 192.168.50.0/24, Any, LocalSubnet'
+    }
+
+    It 'маскує Updates.WindowsUpdate.WSUSServer (delta review v0.6.1)' {
+        $script:report.Updates.WindowsUpdate.WSUSServer | Should -Match '^REDACTED-WSUS-'
+    }
+
+    It 'редагує EventLogs LastMessage (TopErrorSources, LogSummaries.TopProviders, HardwareDiagnostics) навіть у Basic (delta review v0.6.1)' {
+        $script:report.EventLogs.TopErrorSources[0].LastMessage | Should -Be 'REDACTED-EVENTLOG-MESSAGE'
+        $script:report.EventLogs.LogSummaries[0].TopProviders[0].LastMessage | Should -Be 'REDACTED-EVENTLOG-MESSAGE'
+        $script:report.EventLogs.HardwareDiagnostics[0].LastMessage | Should -Be 'REDACTED-EVENTLOG-MESSAGE'
+    }
+
+    It 'НЕ маскує приватні IPv4 у Basic-режимі' {
+        $script:report.Network.IP.PrimaryIPv4 | Should -Be '192.168.1.10'
+        $script:report.Network.Routing.DefaultGateway | Should -Be '192.168.1.1'
+    }
+
+    It 'НЕ маскує GeoIP/ISP-метадані у Basic-режимі (задокументована поведінка — лише Strict)' {
+        $script:report.Network.IP.PublicIPv4ISP | Should -Be 'Example ISP LLC'
+        $script:report.Network.IP.PublicIPv4Organization | Should -Be 'Example Org'
+        $script:report.Network.IP.PublicIPv4ASN | Should -Be 'AS64500'
+        $script:report.Network.IP.PublicIPv4Country | Should -Be 'Ukraine'
+        $script:report.Network.IP.PublicIPv4Region | Should -Be 'Kyiv Oblast'
+        $script:report.Network.IP.PublicIPv4City | Should -Be 'Kyiv'
+        $script:report.Network.IP.PublicIPv4Timezone | Should -Be 'Europe/Kyiv'
+    }
+
+    It 'маскує Hardware.Disks.Deep.SmartPredictFailures[].InstanceName і той самий raw-рядок у Health.Findings[].Message (Issue #105, Phase 10.1) навіть у Basic' {
+        $instanceName = $script:report.Hardware.Disks.Deep.SmartPredictFailures[0].InstanceName
+        $instanceName | Should -Match '^REDACTED-SERIAL-'
+
+        $smartFinding = $script:report.Health.Findings[0]
+        $smartFinding.Category | Should -Be 'Storage.SMART'
+        $smartFinding.Message | Should -Not -Match 'SECRET-SERIAL-98765'
+        $smartFinding.Message | Should -Match ([regex]::Escape($instanceName))
+
+        # Той самий маскер (консистентний токен) — не два різних REDACTED-SERIAL-N
+        # для одного й того самого raw-значення в двох різних полях звіту.
+        $smartFinding.Message | Should -Match ([regex]::Escape($script:report.Hardware.Disks.Deep.SmartPredictFailures[0].InstanceName))
+    }
+
+    It 'не змінює Severity/Category/кількість Health.Findings при маскуванні SMART-повідомлення' {
+        $script:report.Health.Findings.Count | Should -Be 2
+        $script:report.Health.Findings[0].Severity | Should -Be 'CRITICAL'
+        $script:report.Health.Findings[0].Category | Should -Be 'Storage.SMART'
+        $script:report.Health.Findings[1].Severity | Should -Be 'WARNING'
+        $script:report.Health.Findings[1].Category | Should -Be 'Hardware.CPU'
+        $script:report.Health.Findings[1].Message | Should -Be 'Завантаження CPU підвищене: 85%.'
+    }
+}
+
+Describe 'Invoke-BravoReportSanitization -Level Strict' {
+    BeforeEach {
+        $script:report = New-BravoFakeReport
+        Invoke-BravoReportSanitization -Report $script:report -Level 'Strict' | Out-Null
+    }
+
+    It 'маскує приватні IPv4 (IP-масив, PrimaryIPv4, PrimaryInterface, adapters, routing, listening ports)' {
+        $script:report.Network.IP.IPv4 | ForEach-Object { $_ | Should -Match '^REDACTED-PRIVATE-IP-' }
+        $script:report.Network.IP.PrimaryIPv4 | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.IP.PrimaryInterface.IPv4 | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.IP.PrimaryInterface.Gateway | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Routing.DefaultGateway | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Routing.DNSServers | ForEach-Object { $_ | Should -Match '^REDACTED-PRIVATE-IP-' }
+        $script:report.Network.Adapters[0].IPv4[0] | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Connections.ListeningPorts[0].LocalAddress | Should -Match '^REDACTED-PRIVATE-IP-'
+    }
+
+    It 'маскує LocalAddress/RemoteAddress в EstablishedConnections (v0.5.0-tail), лише в Strict' {
+        $script:report.Network.Connections.EstablishedConnections[0].LocalAddress | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Connections.EstablishedConnections[0].RemoteAddress | Should -Match '^REDACTED-PRIVATE-IP-'
+    }
+
+    It 'маскує IP-адреси в ARP-кеші і Routing table (v0.5.0), лише в Strict' {
+        $script:report.Network.ARP[0].IPAddress | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Routing.RoutingTable[0].DestinationPrefix | Should -Match '^REDACTED-PRIVATE-IP-'
+        $script:report.Network.Routing.RoutingTable[0].NextHop | Should -Match '^REDACTED-PRIVATE-IP-'
+    }
+
+    It 'той самий IPv4, що зустрічається кілька разів (masив і PrimaryIPv4), маскується в один і той самий токен' {
+        $script:report.Network.IP.IPv4[0] | Should -Be $script:report.Network.IP.IPv4[1]
+        $script:report.Network.IP.IPv4[0] | Should -Be $script:report.Network.IP.PrimaryIPv4
+    }
+
+    It 'все з Basic лишається замаскованим і в Strict' {
+        $script:report.ComputerName | Should -Match '^REDACTED-COMPUTERNAME-'
+        $script:report.Network.IP.PublicIPv4 | Should -Match '^REDACTED-PUBLIC-IP-'
+    }
+
+    It 'per-adapter DNSSuffixSearchOrder замасковано і в Strict — жодного original literal' {
+        $adapterSuffixes = @($script:report.Network.Adapters[0].DNSSuffixSearchOrder)
+        $adapterSuffixes | ForEach-Object { $_ | Should -Match '^REDACTED-DNSSUFFIX-' }
+        $adapterSuffixes | Should -Not -Contain 'corp.local'
+        $adapterSuffixes | Should -Not -Contain 'internal.local'
+        $adapterSuffixes | Should -Not -Contain 'branch.company.ua'
+    }
+
+    It 'маскує адресоподібні токени в Security.RemoteAccess.FirewallScope, зберігаючи семантичні ключові слова (P1, exact-head review Phase 10)' {
+        $maskedScope = $script:report.Security.RemoteAccess.FirewallScope
+        $tokens = $maskedScope -split ',\s*'
+        $tokens[0] | Should -Match '^REDACTED-PRIVATE-IP-'
+        $tokens[1] | Should -Match '^REDACTED-PRIVATE-IP-'
+        $tokens[2] | Should -Be 'Any'
+        $tokens[3] | Should -Be 'LocalSubnet'
+    }
+
+    It 'маскує Security.RemoteAccess.FirewallScope НАВІТЬ якщо звіт не має секції Network (fresh-review Phase 10: маскування раніше ненавмисно залежало від $Report.Network)' {
+        $reportWithoutNetwork = [ordered]@{
+            Security = [ordered]@{
+                RemoteAccess = [ordered]@{ FirewallScope = '10.55.66.0/24, Any' }
+            }
+        }
+
+        Invoke-BravoReportSanitization -Report $reportWithoutNetwork -Level 'Strict' | Out-Null
+
+        $tokens = $reportWithoutNetwork.Security.RemoteAccess.FirewallScope -split ',\s*'
+        $tokens[0] | Should -Match '^REDACTED-PRIVATE-IP-'
+        $tokens[1] | Should -Be 'Any'
+    }
+
+    It 'редагує GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) — лише в Strict' {
+        $script:report.Network.IP.PublicIPv4ISP | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Organization | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4ASN | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Country | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Region | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4City | Should -Be 'REDACTED-GEOIP'
+        $script:report.Network.IP.PublicIPv4Timezone | Should -Be 'REDACTED-GEOIP'
+    }
+}
+
+Describe 'Invoke-BravoReportSanitizationGated (fail-closed gate, Release Blocker Fixes v0.6.1)' {
+    It 'успішне маскування — Success=$true, порожній ErrorMessage' {
+        $report = New-BravoFakeReport
+        $result = Invoke-BravoReportSanitizationGated -Report $report -Level 'Basic'
+        $result.Success | Should -Be $true
+        $result.ErrorMessage | Should -Be ''
+    }
+
+    It 'збій усередині Invoke-BravoReportSanitization — Success=$false, виняток НЕ прокидається назовні' {
+        Mock Invoke-BravoReportSanitization { throw 'Симульований збій маскування посередині проходу' }
+        $report = New-BravoFakeReport
+        { $script:gatedResult = Invoke-BravoReportSanitizationGated -Report $report -Level 'Basic' } | Should -Not -Throw
+        $script:gatedResult.Success | Should -Be $false
+        $script:gatedResult.ErrorMessage | Should -Match 'Симульований збій'
+    }
+}
+
+Describe 'Sanitize leakage — жодне чутливе значення НЕ потрапляє в серіалізований JSON (Strict)' {
+    It 'sentinel-значення відсутні в ConvertTo-Json виводі після Strict-санітизації' {
+        $report = New-BravoFakeReport
+        $report.ComputerName = 'HOSTNAME_SENTINEL'
+        $report.Dashboard.Header.ComputerName = 'HOSTNAME_SENTINEL'
+        $report.Network.General.Hostname = 'HOSTNAME_SENTINEL'
+        $report.Meta.UserName = 'USERNAME_SENTINEL'
+        $report.Meta.UserDomainName = 'DOMAIN_SENTINEL'
+        $report.Hardware.Motherboard.SerialNumber = 'MOTHERBOARD_SERIAL_SENTINEL'
+        $report.Services.AutomaticStopped[0].StartName = 'CORP\SERVICE_ACCOUNT_SENTINEL'
+        $report.Network.IP.PublicIPv4 = '203.0.113.99'
+        $report.Network.IP.PublicIPv4ISP = 'ISP_SENTINEL'
+        $report.Network.IP.PublicIPv4City = 'CITY_SENTINEL'
+        $report.Network.IP.PrimaryIPv4 = '10.20.30.40'
+        $report.OutputPath = 'C:\Users\SECRETUSER\Reports'
+        $report.Network.Adapters[0].DNSSuffixSearchOrder = @('DNS_SUFFIX_SENTINEL.corp.example.com')
+        $report.Updates.Installed.Recent[0].InstalledBy = 'CORP\INSTALLEDBY_SENTINEL'
+        $report.Updates.WindowsUpdate.WSUSServer = 'http://WSUS_SENTINEL.corp.local:8530'
+        $report.EventLogs.TopErrorSources[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
+        $report.EventLogs.LogSummaries[0].TopProviders[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
+        $report.EventLogs.HardwareDiagnostics[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
+        $report.Security.RemoteAccess.FirewallScope = '10.66.77.0/24, Any, 172.16.5.0/24'
+        $report.Network.WinHttpProxy.RawOutput = @('Proxy Server(s) :  WINHTTP_PROXY_SENTINEL.corp.local:8080')
+        $report.CollectionErrors[0].Message = "Access to the path 'C:\Users\COLLECTIONERROR_SENTINEL\Reports' is denied."
+        $report.ExportErrors[0].Message = "Could not find a part of the path 'C:\Users\EXPORTERROR_SENTINEL\report.zip'."
+        $report.Hardware.Disks.Deep.SmartPredictFailures[0].InstanceName = 'IDE\DiskWDC_SMART_INSTANCE_SENTINEL\4&2413cfbc&0&0.0.0'
+        $report.Health.Findings[0].Message = "SMART передбачає можливий збій диска 'IDE\DiskWDC_SMART_INSTANCE_SENTINEL\4&2413cfbc&0&0.0.0' (PredictFailure=True)."
+
+        Invoke-BravoReportSanitization -Report $report -Level 'Strict' | Out-Null
+        $json = $report | ConvertTo-Json -Depth 10
+
+        $json | Should -Not -Match 'HOSTNAME_SENTINEL'
+        $json | Should -Not -Match 'USERNAME_SENTINEL'
+        $json | Should -Not -Match 'DOMAIN_SENTINEL'
+        $json | Should -Not -Match 'MOTHERBOARD_SERIAL_SENTINEL'
+        $json | Should -Not -Match 'SERVICE_ACCOUNT_SENTINEL'
+        $json | Should -Not -Match '203\.0\.113\.99'
+        $json | Should -Not -Match 'ISP_SENTINEL'
+        $json | Should -Not -Match 'CITY_SENTINEL'
+        $json | Should -Not -Match '10\.20\.30\.40'
+        $json | Should -Not -Match 'SECRETUSER'
+        $json | Should -Not -Match 'C:\\\\Users\\\\SECRETUSER'
+        $json | Should -Not -Match 'DNS_SUFFIX_SENTINEL'
+        $json | Should -Not -Match 'INSTALLEDBY_SENTINEL'
+        $json | Should -Not -Match 'WSUS_SENTINEL'
+        $json | Should -Not -Match 'EVENTLOG_MESSAGE_SENTINEL'
+        $json | Should -Not -Match 'COLLECTIONERROR_SENTINEL'
+        $json | Should -Not -Match 'EXPORTERROR_SENTINEL'
+        $json | Should -Not -Match '10\.66\.77\.0'
+        $json | Should -Not -Match '172\.16\.5\.0'
+        # Анкорована перевірка розпарсеного токена З серіалізованого $json
+        # (не in-memory $report — Describe перевіряє саме серіалізований
+        # вивід), замінює unanchored 'Should -Match ''Any'''. Друга хвиля
+        # фреш-ревʼю Phase 10: mutation testing показав, що стара
+        # unanchored перевірка НЕ була vacuous у цій конкретній фікстурі
+        # (усі інші джерела підрядка "any" тут перекриті сентинелами), але
+        # анкорована перевірка розпарсеного токена все одно надійніша й не
+        # покладається на цю крихку властивість фікстури.
+        $parsedFirewallScope = (($json | ConvertFrom-Json).Security.RemoteAccess.FirewallScope) -split ',\s*'
+        $parsedFirewallScope[1] | Should -Be 'Any'
+        $json | Should -Not -Match 'WINHTTP_PROXY_SENTINEL'
+        $json | Should -Not -Match 'SMART_INSTANCE_SENTINEL'
+
+        # Health.Findings semantics (Severity/Category/кількість) не деградували
+        # внаслідок маскування Message (Issue #105, Phase 10.1).
+        $parsedFindings = ($json | ConvertFrom-Json).Health.Findings
+        $parsedFindings.Count | Should -Be 2
+        $parsedFindings[0].Severity | Should -Be 'CRITICAL'
+        $parsedFindings[0].Category | Should -Be 'Storage.SMART'
+    }
+}

@@ -1,21 +1,26 @@
 name: PR Validation
 
 # TRUST BOUNDARY
-# This workflow is the only one allowed to react to `pull_request`, because a
-# pull request may carry arbitrary code from an untrusted contributor.
-#
-# It therefore runs exclusively on ephemeral GitHub-hosted runners and performs
-# static checks only: it never builds or executes the pull request code, and it
-# never touches the persistent self-hosted Windows runner.
+# A pull request may carry arbitrary code from an untrusted contributor, so
+# this workflow (and any other workflow reacting to `pull_request`, e.g.
+# powershell-static-check.yml) runs exclusively on ephemeral GitHub-hosted
+# runners and performs static checks only: it never builds or executes the
+# pull request code, and it never touches the persistent self-hosted Windows
+# runner. The "Self-hosted runner trust guard" step below is the actual
+# enforced invariant: no workflow in this repository may combine a
+# `pull_request`/`pull_request_target` trigger with a `self-hosted` runner.
 #
 # Windows integration validation for trusted revisions lives in
-# .github/workflows/local-windows-validation.yml.
+# .github/workflows/local-windows-validation.yml, which only reacts to
+# `push`/`workflow_dispatch`.
 
 on:
   pull_request:
     branches:
       - main
+      - developer
       - bravo/integration/modular-build
+      - 'release/**'
 
 # Read-only: static validation needs nothing else.
 permissions:
@@ -48,8 +53,9 @@ jobs:
           for required in \
             "Get-BravoSystemReport.ps1" \
             "Build-BRAVO-SystemReport.ps1" \
-            "src/Get-BravoSystemReport.ps1" \
+            "src/90-Main.ps1" \
             "src/BRAVO.build.json" \
+            "dist/Get-BravoSystemReport.ps1" \
             "README.md" \
             "CHANGELOG.md"
           do
@@ -83,8 +89,7 @@ jobs:
 
           $scripts = @($manifest.files) + @(
             "Get-BravoSystemReport.ps1",
-            "Build-BRAVO-SystemReport.ps1",
-            "src/Get-BravoSystemReport.ps1"
+            "Build-BRAVO-SystemReport.ps1"
           )
 
           $failed = $false
