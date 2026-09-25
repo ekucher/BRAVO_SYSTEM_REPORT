@@ -43,6 +43,45 @@ function New-BravoSanitizeMasker {
     }.GetNewClosure()
 }
 
+# Чиста функція: маскує лише адресоподібні токени у комма-роздільному
+# Security.RemoteAccess.FirewallScope (Get-NetFirewallAddressFilter.RemoteAddress
+# join, src/34-Collectors-Security.ps1) — значення тут суміш реальних
+# приватних IP/CIDR/діапазонів (напр. "10.21.0.0/24") і семантичних
+# ключових слів Windows Firewall ("Any", "LocalSubnet", "DefaultGateway"
+# тощо), тому суцільне маскування всього рядка одним маскером зробило б
+# "Any"/"LocalSubnet" нечитабельними без жодної privacy-користі (P1,
+# exact-head review Phase 10).
+function ConvertTo-BravoSanitizedFirewallScope {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Scope,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Masker
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Scope)) { return $Scope }
+
+    # Windows Firewall семантичні ключові слова для RemoteAddress
+    # (задокументовано в Get-NetFirewallAddressFilter/netsh advfirewall) —
+    # не адреси, не потребують і не повинні маскуватись.
+    $knownScopeKeywords = @(
+        'Any', 'LocalSubnet', 'DNS', 'DHCP', 'WINS', 'DefaultGateway',
+        'Intranet', 'RemoteIntranet', 'Internet', 'Ply2Renders'
+    )
+
+    $tokens = $Scope -split ',\s*'
+    $maskedTokens = foreach ($token in $tokens) {
+        if ($token -in $knownScopeKeywords) {
+            $token
+        } else {
+            & $Masker $token
+        }
+    }
+
+    return ($maskedTokens -join ', ')
+}
+
 function Invoke-BravoReportSanitization {
     [CmdletBinding()]
     param(
@@ -291,6 +330,17 @@ function Invoke-BravoReportSanitization {
                 if ($conn.RemoteAddress) { $conn.RemoteAddress = & $maskPrivateIP $conn.RemoteAddress }
             }
         }
+
+        # --- RDP firewall scope (Security.RemoteAccess.FirewallScope, P1
+        # exact-head review Phase 10) — та сама категорія PRIVATE-IP, що й
+        # решта мережевих адрес у цьому блоці: RemoteAddress фаєрвол-правила
+        # часто містить конкретні внутрішні підмережі/VPN-діапазони, лишені
+        # незамаскованими раніше. ConvertTo-BravoSanitizedFirewallScope
+        # маскує лише адресоподібні токени, зберігаючи семантичні ключові
+        # слова ("Any"/"LocalSubnet") читабельними.
+        if ($Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.FirewallScope) {
+            $Report.Security.RemoteAccess.FirewallScope = ConvertTo-BravoSanitizedFirewallScope -Scope $Report.Security.RemoteAccess.FirewallScope -Masker $maskPrivateIP
+        }
     }
 
     # --- SMB shares: шлях може містити username (напр. C:\Users\jdoe\Share) —
@@ -315,6 +365,22 @@ function Invoke-BravoReportSanitization {
     }
     if ($Report.Updates -and $Report.Updates.WindowsUpdate -and $Report.Updates.WindowsUpdate.WSUSServer) {
         $Report.Updates.WindowsUpdate.WSUSServer = & $maskWsus $Report.Updates.WindowsUpdate.WSUSServer
+    }
+
+    # --- Network.WinHttpProxy.RawOutput (P1, exact-head review Phase 10) —
+    # сирий вивід `netsh winhttp show proxy` (Full/Deep/Forensic) часто
+    # містить внутрішній proxy hostname, bypass-list домени й топологію —
+    # та сама категорія ризику, що й WSUSServer вище (внутрішній
+    # hostname/URL, ідентифікує організацію). Свідомо Option A (повна
+    # редакція фіксованим токеном, а не вибірковий regex-парсинг): сирий
+    # текст — діагностична зручність, не контрактне поле схеми, тож
+    # вибірковий парсер лише додав би крихкість без реальної користі.
+    # Завжди (Basic), не лише Strict — той самий рівень ризику, що й
+    # WSUSServer/EventLogs LastMessage вище. Уже розпарсений Status
+    # (enum-подібне значення 'Detected'/'Unavailable'/'NotAvailable') не є
+    # чутливим і лишається як є.
+    if ($Report.Network -and $Report.Network.WinHttpProxy -and $Report.Network.WinHttpProxy.RawOutput -and @($Report.Network.WinHttpProxy.RawOutput).Count -gt 0) {
+        $Report.Network.WinHttpProxy.RawOutput = @('REDACTED-WINHTTP-PROXY')
     }
 
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage

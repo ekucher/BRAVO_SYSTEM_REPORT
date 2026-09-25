@@ -10,13 +10,35 @@ function Export-BravoJsonReport {
 
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$BaseFileName
+        [string]$BaseFileName,
+
+        # Sanitize (P1, exact-head review Phase 10) — Invoke-BravoReportSanitization
+        # runs ONCE, before any exporter populates Report.GeneratedFiles, so
+        # the array always contains real absolute paths under the real
+        # $OutputDir even when the rest of the report (incl. Report.OutputPath
+        # itself) is masked. Those paths get serialized into every
+        # (re-)written JSON -- and its ZIP/email copies -- leaking the real
+        # output directory. Real paths are still needed operationally
+        # (Export-BravoZipReport/Send-BravoEmailReport read
+        # Report.GeneratedFiles to know what to attach), so only the
+        # SERIALIZED VIEW is changed here -- the live array is restored right
+        # after serialization.
+        [switch]$Sanitize
     )
 
     # JSON
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
-        $jsonContent = ConvertTo-Json $script:Report -Depth 12
+
+        $originalGeneratedFiles = $script:Report.GeneratedFiles
+        if ($Sanitize) {
+            $script:Report.GeneratedFiles = @($originalGeneratedFiles | ForEach-Object { Split-Path -Path $_ -Leaf })
+        }
+        try {
+            $jsonContent = ConvertTo-Json $script:Report -Depth 12
+        } finally {
+            if ($Sanitize) { $script:Report.GeneratedFiles = $originalGeneratedFiles }
+        }
         # Out-File -Encoding utf8 у Windows PowerShell 5.1 завжди додає BOM,
         # що ламає суворі JSON-парсери (RFC 8259 не допускає BOM) у зовнішніх
         # CI/monitoring-пайплайнах, які читають цей файл. Пишемо через
