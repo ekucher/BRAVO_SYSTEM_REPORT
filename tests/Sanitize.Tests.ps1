@@ -72,6 +72,24 @@ BeforeAll {
                 ScheduledTasks = @([PSCustomObject]@{ Name = 'MyTask'; Path = '\'; State = 'Ready'; Author = 'CORP\jdoe'; Execute = 'C:\Users\jdoe\script.exe'; Arguments = ''; IsMicrosoftDefault = $false })
             }
             Software = [ordered]@{ Installed = @([PSCustomObject]@{ InstallLocation = 'C:\Users\jdoe\AppData\Local\SomeApp' }) }
+            Updates = [ordered]@{
+                WindowsUpdate = [ordered]@{ WSUSServer = 'http://wsus.corp.local:8530' }
+                Installed = [ordered]@{
+                    Recent = @(
+                        [PSCustomObject]@{ HotFixID = 'KB123'; Description = 'Update'; InstalledBy = 'CORP\jdoe'; InstalledOnText = '2026-01-01' }
+                    )
+                }
+            }
+            EventLogs = [ordered]@{
+                TopErrorSources = @([PSCustomObject]@{ Source = 'Disk'; Count = 3; LastMessage = 'Error on \\WORKSTATION1 for user CORP\jdoe at 10.0.0.5' })
+                LogSummaries = @(
+                    [PSCustomObject]@{
+                        LogName = 'Security'
+                        TopProviders = @([PSCustomObject]@{ ProviderName = 'Microsoft-Windows-Security-Auditing'; Count = 2; LastMessage = 'Logon by CORP\jdoe from 10.0.0.5' })
+                    }
+                )
+                HardwareDiagnostics = @([PSCustomObject]@{ Provider = 'Disk'; Status = 'Detected'; Count = 1; LastMessage = 'Disk failure detail for CORP\jdoe' })
+            }
         }
     }
 }
@@ -192,6 +210,21 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Software.Installed[0].InstallLocation | Should -Match '^REDACTED-PATH-'
     }
 
+    It 'маскує InstalledBy у Updates.Installed.Recent (delta review v0.6.1)' {
+        $script:report.Updates.Installed.Recent[0].InstalledBy | Should -Match '^REDACTED-ADMIN-'
+        $script:report.Updates.Installed.Recent[0].HotFixID | Should -Be 'KB123'
+    }
+
+    It 'маскує Updates.WindowsUpdate.WSUSServer (delta review v0.6.1)' {
+        $script:report.Updates.WindowsUpdate.WSUSServer | Should -Match '^REDACTED-WSUS-'
+    }
+
+    It 'редагує EventLogs LastMessage (TopErrorSources, LogSummaries.TopProviders, HardwareDiagnostics) навіть у Basic (delta review v0.6.1)' {
+        $script:report.EventLogs.TopErrorSources[0].LastMessage | Should -Be 'REDACTED-EVENTLOG-MESSAGE'
+        $script:report.EventLogs.LogSummaries[0].TopProviders[0].LastMessage | Should -Be 'REDACTED-EVENTLOG-MESSAGE'
+        $script:report.EventLogs.HardwareDiagnostics[0].LastMessage | Should -Be 'REDACTED-EVENTLOG-MESSAGE'
+    }
+
     It 'НЕ маскує приватні IPv4 у Basic-режимі' {
         $script:report.Network.IP.PrimaryIPv4 | Should -Be '192.168.1.10'
         $script:report.Network.Routing.DefaultGateway | Should -Be '192.168.1.1'
@@ -298,6 +331,11 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $report.Network.IP.PrimaryIPv4 = '10.20.30.40'
         $report.OutputPath = 'C:\Users\SECRETUSER\Reports'
         $report.Network.Adapters[0].DNSSuffixSearchOrder = @('DNS_SUFFIX_SENTINEL.corp.example.com')
+        $report.Updates.Installed.Recent[0].InstalledBy = 'CORP\INSTALLEDBY_SENTINEL'
+        $report.Updates.WindowsUpdate.WSUSServer = 'http://WSUS_SENTINEL.corp.local:8530'
+        $report.EventLogs.TopErrorSources[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
+        $report.EventLogs.LogSummaries[0].TopProviders[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
+        $report.EventLogs.HardwareDiagnostics[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
 
         Invoke-BravoReportSanitization -Report $report -Level 'Strict' | Out-Null
         $json = $report | ConvertTo-Json -Depth 10
@@ -314,5 +352,8 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $json | Should -Not -Match 'SECRETUSER'
         $json | Should -Not -Match 'C:\\\\Users\\\\SECRETUSER'
         $json | Should -Not -Match 'DNS_SUFFIX_SENTINEL'
+        $json | Should -Not -Match 'INSTALLEDBY_SENTINEL'
+        $json | Should -Not -Match 'WSUS_SENTINEL'
+        $json | Should -Not -Match 'EVENTLOG_MESSAGE_SENTINEL'
     }
 }

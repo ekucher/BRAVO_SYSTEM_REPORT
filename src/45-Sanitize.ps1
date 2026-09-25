@@ -63,6 +63,7 @@ function Invoke-BravoReportSanitization {
     $maskAdmin    = New-BravoSanitizeMasker -Prefix 'ADMIN'
     $maskPath     = New-BravoSanitizeMasker -Prefix 'PATH'
     $maskPrivateIP = New-BravoSanitizeMasker -Prefix 'PRIVATE-IP'
+    $maskWsus     = New-BravoSanitizeMasker -Prefix 'WSUS'
 
     # --- Computer name ---
     if ($Report.ComputerName) { $Report.ComputerName = & $maskComputer $Report.ComputerName }
@@ -298,6 +299,51 @@ function Invoke-BravoReportSanitization {
     if ($Report.Network -and $Report.Network.SmbShares) {
         foreach ($share in @($Report.Network.SmbShares)) {
             if ($share.Path) { $share.Path = & $maskPath $share.Path }
+        }
+    }
+
+    # --- Updates: встановлені оновлення (InstalledBy) і WSUS-сервер
+    # (delta review v0.6.1) — та сама категорія ADMIN, що й LocalAdmins/
+    # AllowedUsers/ScheduledTasks.Author: Get-HotFix.InstalledBy зазвичай
+    # DOMAIN\user. WSUSServer — внутрішній hostname/URL, ідентифікує
+    # організацію так само, як DNS suffix, тому маскується завжди (Basic),
+    # окремим маскером (не той самий Counter, що й DNSSUFFIX).
+    if ($Report.Updates -and $Report.Updates.Installed -and $Report.Updates.Installed.Recent) {
+        foreach ($hotfix in @($Report.Updates.Installed.Recent)) {
+            if ($hotfix.InstalledBy) { $hotfix.InstalledBy = & $maskAdmin $hotfix.InstalledBy }
+        }
+    }
+    if ($Report.Updates -and $Report.Updates.WindowsUpdate -and $Report.Updates.WindowsUpdate.WSUSServer) {
+        $Report.Updates.WindowsUpdate.WSUSServer = & $maskWsus $Report.Updates.WindowsUpdate.WSUSServer
+    }
+
+    # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
+    # (TopErrorSources, per-log LogSummaries.TopProviders, HardwareDiagnostics)
+    # — повний необроблений текст події (Security-лог часто містить
+    # account/domain/workstation/IP). Повна редакція фіксованим токеном
+    # (не per-value масив, як інші поля) — вибірковий парсинг вільного
+    # тексту небезпечний і непотрібний, самого факту "яка подія найчастіша"
+    # достатньо без розкриття вмісту повідомлення. Завжди (Basic), не лише
+    # Strict — той самий рівень ризику, що й DNS suffix/шляхи вище.
+    if ($Report.EventLogs) {
+        if ($Report.EventLogs.TopErrorSources) {
+            foreach ($source in @($Report.EventLogs.TopErrorSources)) {
+                if ($source.LastMessage) { $source.LastMessage = 'REDACTED-EVENTLOG-MESSAGE' }
+            }
+        }
+        if ($Report.EventLogs.LogSummaries) {
+            foreach ($logSummary in @($Report.EventLogs.LogSummaries)) {
+                if ($logSummary.TopProviders) {
+                    foreach ($provider in @($logSummary.TopProviders)) {
+                        if ($provider.LastMessage) { $provider.LastMessage = 'REDACTED-EVENTLOG-MESSAGE' }
+                    }
+                }
+            }
+        }
+        if ($Report.EventLogs.HardwareDiagnostics) {
+            foreach ($diag in @($Report.EventLogs.HardwareDiagnostics)) {
+                if ($diag.LastMessage) { $diag.LastMessage = 'REDACTED-EVENTLOG-MESSAGE' }
+            }
         }
     }
 
