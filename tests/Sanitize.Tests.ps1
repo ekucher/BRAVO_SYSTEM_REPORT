@@ -93,6 +93,8 @@ BeforeAll {
                 )
                 HardwareDiagnostics = @([PSCustomObject]@{ Provider = 'Disk'; Status = 'Detected'; Count = 1; LastMessage = 'Disk failure detail for CORP\jdoe' })
             }
+            CollectionErrors = @([PSCustomObject]@{ Time = '2026-01-01 00:00:00'; Section = 'Security.RemoteAccess'; Message = "Access to the path 'C:\Users\jdoe\Reports' is denied." })
+            ExportErrors = @([PSCustomObject]@{ Time = '2026-01-01 00:00:00'; Section = 'Export.Zip'; Message = "Could not find a part of the path 'C:\Users\jdoe\Reports\report.zip'." })
         }
     }
 }
@@ -220,6 +222,11 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
 
     It 'редагує Network.WinHttpProxy.RawOutput навіть у Basic (P1, exact-head review Phase 10)' {
         $script:report.Network.WinHttpProxy.RawOutput | Should -Be @('REDACTED-WINHTTP-PROXY')
+    }
+
+    It 'редагує CollectionErrors[].Message і ExportErrors[].Message навіть у Basic (P1, fresh-review Phase 10 — $_.Exception.Message може містити реальний шлях/hostname/обліковий запис)' {
+        $script:report.CollectionErrors[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
+        $script:report.ExportErrors[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
     }
 
     It 'редагує Network.WinHttpProxy.Error навіть у Basic (той самий ризик-підклас, fresh-review Phase 10)' {
@@ -381,6 +388,8 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $report.EventLogs.HardwareDiagnostics[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
         $report.Security.RemoteAccess.FirewallScope = '10.66.77.0/24, Any, 172.16.5.0/24'
         $report.Network.WinHttpProxy.RawOutput = @('Proxy Server(s) :  WINHTTP_PROXY_SENTINEL.corp.local:8080')
+        $report.CollectionErrors[0].Message = "Access to the path 'C:\Users\COLLECTIONERROR_SENTINEL\Reports' is denied."
+        $report.ExportErrors[0].Message = "Could not find a part of the path 'C:\Users\EXPORTERROR_SENTINEL\report.zip'."
 
         Invoke-BravoReportSanitization -Report $report -Level 'Strict' | Out-Null
         $json = $report | ConvertTo-Json -Depth 10
@@ -400,6 +409,8 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $json | Should -Not -Match 'INSTALLEDBY_SENTINEL'
         $json | Should -Not -Match 'WSUS_SENTINEL'
         $json | Should -Not -Match 'EVENTLOG_MESSAGE_SENTINEL'
+        $json | Should -Not -Match 'COLLECTIONERROR_SENTINEL'
+        $json | Should -Not -Match 'EXPORTERROR_SENTINEL'
         $json | Should -Not -Match '10\.66\.77\.0'
         $json | Should -Not -Match '172\.16\.5\.0'
         # Анкорована перевірка розпарсеного токена З серіалізованого $json

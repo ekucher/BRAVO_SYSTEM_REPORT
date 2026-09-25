@@ -291,3 +291,33 @@ Describe 'Export-BravoJsonReport / $script:SanitizeActive (src/50-Export-Json.ps
         (Get-Content -LiteralPath $jsonPath -Raw) | Should -Match 'C:\\\\Reports\\\\BravoSystemReport_REAL-PC'
     }
 }
+
+Describe 'Add-ExportError (src/90-Main.ps1) — редагує Message коли $script:SanitizeActive, навіть для помилок, доданих ПІСЛЯ одноразового проходу Sanitize (P1, fresh-review Phase 10)' {
+    BeforeAll {
+        $source = Get-BravoFunctionSourceFromAst -Content $script:MainContent -FunctionName 'Add-ExportError'
+        . ([scriptblock]::Create($source))
+    }
+
+    AfterEach {
+        Remove-Variable -Name SanitizeActive -Scope Script -ErrorAction SilentlyContinue
+    }
+
+    It '$script:SanitizeActive=$true: Message редагується в REDACTED-ERROR-MESSAGE' {
+        $script:SanitizeActive = $true
+        $script:Report = [PSCustomObject]@{ ExportErrors = @() }
+
+        Add-ExportError -Section 'Export.Zip' -Message "Access to the path 'C:\Users\jdoe\Reports\report.zip' is denied."
+
+        $script:Report.ExportErrors[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
+        $script:Report.ExportErrors[0].Section | Should -Be 'Export.Zip'
+    }
+
+    It '$script:SanitizeActive=$false: Message лишається реальним (не-sanitize запуск)' {
+        $script:SanitizeActive = $false
+        $script:Report = [PSCustomObject]@{ ExportErrors = @() }
+
+        Add-ExportError -Section 'Export.Zip' -Message "Access to the path 'C:\Users\jdoe\Reports\report.zip' is denied."
+
+        $script:Report.ExportErrors[0].Message | Should -Match 'jdoe'
+    }
+}

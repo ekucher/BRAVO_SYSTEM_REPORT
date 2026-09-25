@@ -100,6 +100,19 @@ function Add-ExportError {
 
     if (-not $script:Report) { return }
 
+    # P1, fresh-review Phase 10 (нова знахідка після 3 хвиль ревʼю
+    # попередніх фіксів): Invoke-BravoReportSanitization виконується ОДИН
+    # РАЗ, до фази export'у — але ExportErrors можуть додаватись ПІСЛЯ
+    # цього проходу (HTML/CSV/ZIP/Email-помилки виникають саме під час
+    # export-фази). $_.Exception.Message у цих помилках може містити
+    # реальний шлях/hostname/обліковий запис (напр. access-denied на
+    # C:\Users\jdoe\...). Редагуємо тут, у джерелі, замість покладатись
+    # лише на одноразовий прохід Invoke-BravoReportSanitization (який
+    # покриває решту вже наявних ExportErrors на момент свого виклику,
+    # див. src/45-Sanitize.ps1) — так покриваються й записи, додані вже
+    # ПІСЛЯ санітизації.
+    if ($script:SanitizeActive) { $Message = 'REDACTED-ERROR-MESSAGE' }
+
     $script:Report.ExportErrors += [PSCustomObject]@{
         Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         Section = $Section

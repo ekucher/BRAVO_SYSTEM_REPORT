@@ -401,6 +401,31 @@ function Invoke-BravoReportSanitization {
         $Report.Network.WinHttpProxy.Error = 'REDACTED-WINHTTP-PROXY-ERROR'
     }
 
+    # --- CollectionErrors/ExportErrors: $_.Exception.Message з довільного
+    # виключення (P1, fresh-review Phase 10) — доступ-заборонено, помилки
+    # шляхів тощо часто містять реальний шлях/hostname/обліковий запис
+    # (напр. "Access to the path 'C:\Users\jdoe\...' is denied"). Той самий
+    # ризик-клас, що й EventLogs LastMessage нижче — повна редакція
+    # фіксованим токеном, завжди (Basic), той самий підхід.
+    # CollectionErrors повністю наповнюється ДО цього одноразового проходу
+    # (усі колектори виконуються до Update-BravoHealthScore/Sanitize) — тут
+    # покриваються всі записи. ExportErrors можуть з'являтись і ПІСЛЕ цього
+    # проходу (export-фаза йде після санітизації) — ці пізніші записи
+    # редагуються при додаванні в Add-ExportError (src/90-Main.ps1), що
+    # читає той самий $script:SanitizeActive; цей блок тут покриває лише
+    # записи, наявні НА МОМЕНТ виклику санітизації (напр. помилку
+    # резолюції OutputPath, що трапляється до export-фази).
+    if ($Report.CollectionErrors) {
+        foreach ($errorEntry in @($Report.CollectionErrors)) {
+            if ($errorEntry.Message) { $errorEntry.Message = 'REDACTED-ERROR-MESSAGE' }
+        }
+    }
+    if ($Report.ExportErrors) {
+        foreach ($errorEntry in @($Report.ExportErrors)) {
+            if ($errorEntry.Message) { $errorEntry.Message = 'REDACTED-ERROR-MESSAGE' }
+        }
+    }
+
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
     # (TopErrorSources, per-log LogSummaries.TopProviders, HardwareDiagnostics)
     # — повний необроблений текст події (Security-лог часто містить
