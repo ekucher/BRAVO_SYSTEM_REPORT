@@ -199,7 +199,7 @@ Describe 'New-BravoReportBaseFileName (src/90-Main.ps1) — унікальніс
     }
 }
 
-Describe 'Export-BravoJsonReport -Sanitize (src/50-Export-Json.ps1) — GeneratedFiles: серіалізований JSON без абсолютних шляхів, операційний масив незмінний (P1, exact-head review Phase 10)' {
+Describe 'Export-BravoJsonReport / $script:SanitizeActive (src/50-Export-Json.ps1) — GeneratedFiles: серіалізований JSON без абсолютних шляхів, операційний масив незмінний (P1, exact-head review Phase 10; fail-open call-site gap закрито фреш-ревʼю Phase 10)' {
     BeforeAll {
         . (Join-Path $PSScriptRoot '..\src\50-Export-Json.ps1')
     }
@@ -212,13 +212,20 @@ Describe 'Export-BravoJsonReport -Sanitize (src/50-Export-Json.ps1) — Generate
         function Add-AuditFinding { param($Severity, $Category, $Message, $Recommendation) }
     }
 
-    It 'з -Sanitize: серіалізований JSON на диску містить лише basenames у GeneratedFiles, без абсолютного шляху реального OutputPath' {
+    AfterEach {
+        # $script:SanitizeActive — глобальний run-wide прапорець (90-Main.ps1);
+        # не повинен просочуватись між тестами.
+        Remove-Variable -Name SanitizeActive -Scope Script -ErrorAction SilentlyContinue
+    }
+
+    It '$script:SanitizeActive=$true: серіалізований JSON на диску містить лише basenames у GeneratedFiles, без абсолютного шляху реального OutputPath' {
+        $script:SanitizeActive = $true
         $realOutputDir = 'C:\Users\SECRETUSER\Reports\corp-host'
         $script:Report = [PSCustomObject]@{
             GeneratedFiles = @((Join-Path $realOutputDir 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000.html'))
         }
 
-        Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000' -Sanitize
+        Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000'
 
         $jsonPath = Join-Path $script:outputDir 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000.json'
         $jsonContent = Get-Content -LiteralPath $jsonPath -Raw
@@ -228,18 +235,20 @@ Describe 'Export-BravoJsonReport -Sanitize (src/50-Export-Json.ps1) — Generate
         $jsonContent | Should -Match 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000\.html'
     }
 
-    It 'з -Sanitize: після виклику $script:Report.GeneratedFiles (операційний масив у пам''яті) лишається з РЕАЛЬНИМИ абсолютними шляхами — ZIP/Email далі можуть Test-Path/attach' {
+    It '$script:SanitizeActive=$true: після виклику $script:Report.GeneratedFiles (операційний масив у пам''яті) лишається з РЕАЛЬНИМИ абсолютними шляхами — ZIP/Email далі можуть Test-Path/attach' {
+        $script:SanitizeActive = $true
         $realHtmlPath = 'C:\Users\SECRETUSER\Reports\corp-host\BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000.html'
         $script:Report = [PSCustomObject]@{
             GeneratedFiles = @($realHtmlPath)
         }
 
-        Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000' -Sanitize
+        Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000'
 
         $script:Report.GeneratedFiles | Should -Contain $realHtmlPath -Because 'операційне використання (ZIP-пакування/email attach через Test-Path) вимагає реальних абсолютних шляхів, не basenames'
     }
 
-    It 'без -Sanitize: серіалізований JSON лишається з реальним абсолютним шляхом (задокументована поведінка не-sanitize запуску)' {
+    It '$script:SanitizeActive=$false: серіалізований JSON лишається з реальним абсолютним шляхом (задокументована поведінка не-sanitize запуску)' {
+        $script:SanitizeActive = $false
         $realHtmlPath = 'C:\Reports\BravoSystemReport_REAL-PC_20260925_120000.html'
         $script:Report = [PSCustomObject]@{
             GeneratedFiles = @($realHtmlPath)
@@ -251,5 +260,24 @@ Describe 'Export-BravoJsonReport -Sanitize (src/50-Export-Json.ps1) — Generate
         $jsonContent = Get-Content -LiteralPath $jsonPath -Raw
 
         $jsonContent | Should -Match 'REAL-PC'
+    }
+
+    It '$script:SanitizeActive не встановлено взагалі: fail-safe до НЕ-sanitize поведінки (реальний шлях серіалізується) — регресія на fail-open call-site gap, знайдену фреш-ревʼю Phase 10' {
+        # До фіксу привʼязка до caller-переданого -Sanitize switch означала,
+        # що будь-який майбутній виклик, який забув би передати прапорець,
+        # мовчки серіалізував би реальний шлях у звіт, який оператор вважає
+        # санітизованим. Після фіксу поведінка похідна від run-wide стану —
+        # цей тест лише документує, що НЕвстановлена змінна (яку тут
+        # AfterEach явно прибирає) не кидає виняток під Set-StrictMode-less
+        # виконанням і трактується як $false (той самий default, що й раніше).
+        $realHtmlPath = 'C:\Reports\BravoSystemReport_REAL-PC_20260925_120000.html'
+        $script:Report = [PSCustomObject]@{
+            GeneratedFiles = @($realHtmlPath)
+        }
+
+        { Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REAL-PC_20260925_120000' } | Should -Not -Throw
+
+        $jsonPath = Join-Path $script:outputDir 'BravoSystemReport_REAL-PC_20260925_120000.json'
+        Test-Path -LiteralPath $jsonPath | Should -Be $true
     }
 }

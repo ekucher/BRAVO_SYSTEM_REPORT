@@ -480,7 +480,16 @@ function New-BravoReportBaseFileName {
     return "BravoSystemReport_${RealComputerName}_${Timestamp}"
 }
 
-$baseFileName = New-BravoReportBaseFileName -Timestamp $reportTimestamp -SanitizeActive:($Sanitize -and -not $script:SanitizeFailed) -RealComputerName $env:COMPUTERNAME -SanitizedComputerName $script:Report.ComputerName
+# $script:SanitizeActive (замість передачі -Sanitize:$Sanitize окремо на
+# кожен виклик Export-BravoJsonReport, fresh-review Phase 10) — обчислюється
+# РІВНО ОДИН РАЗ тут і читається Export-BravoJsonReport напряму зі
+# script-скоупу. Раніше кожен call site мусив сам пам'ятати передати
+# -Sanitize:$Sanitize; будь-який майбутній виклик, що забув би прапорець,
+# мовчки серіалізував би реальний OutputPath у звіт, який оператор вважає
+# санітизованим (fail-open для privacy-критичної функції). Похідне
+# script-значення прибирає саму можливість такої помилки виклику.
+$script:SanitizeActive = ($Sanitize -and -not $script:SanitizeFailed)
+$baseFileName = New-BravoReportBaseFileName -Timestamp $reportTimestamp -SanitizeActive:$script:SanitizeActive -RealComputerName $env:COMPUTERNAME -SanitizedComputerName $script:Report.ComputerName
 
 Write-Host ''
 Write-Host '=== ГЕНЕРАЦІЯ ЗВІТІВ ===' -ForegroundColor Cyan
@@ -507,7 +516,7 @@ if ($script:SanitizeFailed) {
         param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
         $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
         if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
-            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
+            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
         return [PSCustomObject]@{
@@ -520,7 +529,7 @@ if ($script:SanitizeFailed) {
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
     $exportErrorCount = @($script:Report.ExportErrors).Count
     $generatedFilesCount = @($script:Report.GeneratedFiles).Count
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName -Sanitize:$Sanitize
+    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
     # HTML
     Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
