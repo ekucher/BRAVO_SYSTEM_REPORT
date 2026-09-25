@@ -150,6 +150,32 @@ function Test-BravoDefenderRealTimeProtectionWarning {
     return (-not $RealTimeProtectionEnabled) -and ($AMRunningMode -notin @('Passive', 'SxS Passive'))
 }
 
+# Чиста функція: парсить вивід `auditpol /get /category:* /r` (CSV) за
+# ПОЗИЦІЄЮ колонки, а не за назвою заголовка. `auditpol.exe` локалізує сам
+# рядок заголовка CSV (не лише значення) на не-EN збірках Windows — читання
+# за англ. назвами колонок ('Policy Target'/'Subcategory GUID'/'Inclusion
+# Setting') тоді мовчки повертає $null для кожного рядка. Порядок колонок —
+# фіксований, документований Microsoft для будь-якої локалі: Machine Name,
+# Policy Target, Subcategory, Subcategory GUID, Inclusion Setting, Exclusion
+# Setting. Той самий принцип, що й ConvertFrom-BravoNetAccountsOutput вище.
+function ConvertFrom-BravoAuditPolicyCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [string[]]$Lines
+    )
+
+    if (-not $Lines -or $Lines.Count -lt 2) { return @() }
+
+    $fixedHeader = @('MachineName', 'PolicyTarget', 'Subcategory', 'SubcategoryGuid', 'InclusionSetting', 'ExclusionSetting')
+    $dataLines = @($Lines | Select-Object -Skip 1)
+    if ($dataLines.Count -eq 0) { return @() }
+
+    return @($dataLines | ConvertFrom-Csv -Header $fixedHeader)
+}
+
 # Чиста-за-даними обгортка над Confirm-SecureBootUEFI (Release Blocker
 # Fixes v0.6.1) — винесена окремо, щоб розрізняти access-denied (сесія без
 # elevation — не доказ апаратної відсутності Secure Boot) від справжнього
@@ -189,6 +215,33 @@ function Get-BravoSecureBootStatus {
             Error     = $_.Exception.Message
         }
     }
+}
+
+# Чиста функція: розрізняє access-denied на захищеному CIM namespace
+# root\cimv2\Security\MicrosoftTpm від "класу/namespace немає" (реального
+# NotPresent). Get-CimInstance на access-denied типово кидає
+# Microsoft.Management.Infrastructure.CimException з
+# CategoryInfo.Category='PermissionDenied' (не System.UnauthorizedAccessException,
+# як Confirm-SecureBootUEFI), тож перевіряємо і тип винятку (на випадок, якщо
+# провайдер все ж кине UnauthorizedAccessException), і CategoryInfo, і текст
+# повідомлення — жоден із трьох сигналів локально не гарантований поодинці.
+function Test-BravoTpmAccessDeniedError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        $ErrorRecord
+    )
+
+    if (-not $ErrorRecord) { return $false }
+
+    if ($ErrorRecord.Exception -is [System.UnauthorizedAccessException]) { return $true }
+
+    if ($ErrorRecord.CategoryInfo -and $ErrorRecord.CategoryInfo.Category -eq 'PermissionDenied') { return $true }
+
+    if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Message -match 'Access is denied') { return $true }
+
+    return $false
 }
 
 function Get-BravoSecurityAudit {
@@ -312,12 +365,27 @@ function Get-BravoSecurityAudit {
                     $script:Report.Security.TPM.Status = 'NotPresent'
                 }
             } catch {
-                # Клас Win32_Tpm/namespace відсутній — типово означає відсутність
-                # фізичного/firmware TPM (старе обладнання, VM без vTPM), не
-                # помилка збору (та сама логіка, що й для Secure Boot вище).
-                $script:Report.Security.TPM.Present = $false
-                $script:Report.Security.TPM.Status = 'NotPresent'
-                $script:Report.Security.TPM.Error = $_.Exception.Message
+                # Access denied на root\cimv2\Security\MicrosoftTpm (захищений
+                # namespace, вимагає elevated-сесії) — НЕ доказ відсутності
+                # фізичного TPM, лише брак прав у поточному контексті
+                # виконання (той самий принцип, що й Secure Boot вище).
+                # Get-CimInstance на access-denied зазвичай кидає
+                # Microsoft.Management.Infrastructure.CimException (не
+                # System.UnauthorizedAccessException, як Confirm-SecureBootUEFI),
+                # тож розрізняємо за CategoryInfo/повідомленням, а не лише за
+                # типом винятку.
+                if (Test-BravoTpmAccessDeniedError -ErrorRecord $_) {
+                    $script:Report.Security.TPM.Present = $null
+                    $script:Report.Security.TPM.Status = 'Unavailable'
+                    $script:Report.Security.TPM.Error = $_.Exception.Message
+                } else {
+                    # Клас Win32_Tpm/namespace відсутній — типово означає
+                    # відсутність фізичного/firmware TPM (старе обладнання,
+                    # VM без vTPM), не помилка збору.
+                    $script:Report.Security.TPM.Present = $false
+                    $script:Report.Security.TPM.Status = 'NotPresent'
+                    $script:Report.Security.TPM.Error = $_.Exception.Message
+                }
             }
 
             # --- SMBv1 ---
@@ -616,14 +684,14 @@ function Get-BravoSecurityAudit {
                     $auditPolicyCsv = & auditpol /get /category:* /r 2>&1
 
                     if ($LASTEXITCODE -eq 0) {
-                        $auditPolicyEntries = $auditPolicyCsv | ConvertFrom-Csv -ErrorAction Stop
+                        $auditPolicyEntries = ConvertFrom-BravoAuditPolicyCsv -Lines $auditPolicyCsv
 
                         foreach ($entry in $auditPolicyEntries) {
                             $script:Report.Security.AuditPolicy.Subcategories += [PSCustomObject]@{
-                                Category          = $entry.'Policy Target'
+                                Category          = $entry.PolicyTarget
                                 Subcategory       = $entry.Subcategory
-                                SubcategoryGuid   = $entry.'Subcategory GUID'
-                                InclusionSetting  = $entry.'Inclusion Setting'
+                                SubcategoryGuid   = $entry.SubcategoryGuid
+                                InclusionSetting  = $entry.InclusionSetting
                             }
                         }
 
@@ -714,7 +782,13 @@ function Get-BravoSecurityAudit {
             # позначаємо прапорцем IsMicrosoftDefault=true — той самий
             # принцип "дані видимі, findings обережні", що вже застосований
             # для ARP/Storage ReservedVolumes.
-            if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+            # Явний внутрішній гейт Deep/Forensic (окремо від зовнішнього
+            # Full/Deep/Forensic на початку цього блоку) — раніше коментар
+            # вище твердив "гейтовано окремо Deep/Forensic", але коду, що це
+            # реально перевіряє, не було: plain Full теж запускав
+            # Get-ScheduledTask, суперечачи задокументованому в HTML контракту
+            # профілю Full.
+            if ($Profile -in @('Deep','Forensic') -and (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
                 try {
                     $scheduledTasks = Get-ScheduledTask -ErrorAction Stop
                     foreach ($task in $scheduledTasks) {
