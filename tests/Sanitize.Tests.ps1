@@ -222,6 +222,15 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Network.WinHttpProxy.RawOutput | Should -Be @('REDACTED-WINHTTP-PROXY')
     }
 
+    It 'редагує Network.WinHttpProxy.Error навіть у Basic (той самий ризик-підклас, fresh-review Phase 10)' {
+        $reportWithProxyError = New-BravoFakeReport
+        $reportWithProxyError.Network.WinHttpProxy.Error = 'netsh failed against proxy.corp.local'
+
+        Invoke-BravoReportSanitization -Report $reportWithProxyError -Level 'Basic' | Out-Null
+
+        $reportWithProxyError.Network.WinHttpProxy.Error | Should -Be 'REDACTED-WINHTTP-PROXY'
+    }
+
     It 'НЕ маскує Security.RemoteAccess.FirewallScope у Basic-режимі (задокументована поведінка — лише Strict)' {
         $script:report.Security.RemoteAccess.FirewallScope | Should -Be '10.21.0.0/24, 192.168.50.0/24, Any, LocalSubnet'
     }
@@ -307,6 +316,20 @@ Describe 'Invoke-BravoReportSanitization -Level Strict' {
         $tokens[3] | Should -Be 'LocalSubnet'
     }
 
+    It 'маскує Security.RemoteAccess.FirewallScope НАВІТЬ якщо звіт не має секції Network (fresh-review Phase 10: маскування раніше ненавмисно залежало від $Report.Network)' {
+        $reportWithoutNetwork = [ordered]@{
+            Security = [ordered]@{
+                RemoteAccess = [ordered]@{ FirewallScope = '10.55.66.0/24, Any' }
+            }
+        }
+
+        Invoke-BravoReportSanitization -Report $reportWithoutNetwork -Level 'Strict' | Out-Null
+
+        $tokens = $reportWithoutNetwork.Security.RemoteAccess.FirewallScope -split ',\s*'
+        $tokens[0] | Should -Match '^REDACTED-PRIVATE-IP-'
+        $tokens[1] | Should -Be 'Any'
+    }
+
     It 'редагує GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) — лише в Strict' {
         $script:report.Network.IP.PublicIPv4ISP | Should -Be 'REDACTED-GEOIP'
         $script:report.Network.IP.PublicIPv4Organization | Should -Be 'REDACTED-GEOIP'
@@ -379,7 +402,10 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $json | Should -Not -Match 'EVENTLOG_MESSAGE_SENTINEL'
         $json | Should -Not -Match '10\.66\.77\.0'
         $json | Should -Not -Match '172\.16\.5\.0'
-        $json | Should -Match 'Any'
+        # Анкорована перевірка розпарсеного токена (не unanchored 'Should
+        # -Match ''Any''' — це майже vacuous, "any" — підрядок звичайних
+        # слів; виправлено фреш-ревʼю Phase 10).
+        (@($report.Security.RemoteAccess.FirewallScope -split ',\s*'))[1] | Should -Be 'Any'
         $json | Should -Not -Match 'WINHTTP_PROXY_SENTINEL'
     }
 }

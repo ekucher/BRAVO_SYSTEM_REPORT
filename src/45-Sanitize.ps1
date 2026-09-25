@@ -64,10 +64,13 @@ function ConvertTo-BravoSanitizedFirewallScope {
 
     # Windows Firewall семантичні ключові слова для RemoteAddress
     # (задокументовано в Get-NetFirewallAddressFilter/netsh advfirewall) —
-    # не адреси, не потребують і не повинні маскуватись.
+    # не адреси, не потребують і не повинні маскуватись. 'RmtIntranet' —
+    # правильне написання токена (не 'RemoteIntranet', виправлено
+    # фреш-ревʼю Phase 10); PlayToDevice/PlayToRenderers/LocalSubnet6 додані
+    # як додаткові задокументовані токени.
     $knownScopeKeywords = @(
-        'Any', 'LocalSubnet', 'DNS', 'DHCP', 'WINS', 'DefaultGateway',
-        'Intranet', 'RemoteIntranet', 'Internet', 'Ply2Renders'
+        'Any', 'LocalSubnet', 'LocalSubnet6', 'DNS', 'DHCP', 'WINS', 'DefaultGateway',
+        'Intranet', 'RmtIntranet', 'Internet', 'Ply2Renders', 'PlayToDevice', 'PlayToRenderers'
     )
 
     $tokens = $Scope -split ',\s*'
@@ -330,17 +333,20 @@ function Invoke-BravoReportSanitization {
                 if ($conn.RemoteAddress) { $conn.RemoteAddress = & $maskPrivateIP $conn.RemoteAddress }
             }
         }
+    }
 
-        # --- RDP firewall scope (Security.RemoteAccess.FirewallScope, P1
-        # exact-head review Phase 10) — та сама категорія PRIVATE-IP, що й
-        # решта мережевих адрес у цьому блоці: RemoteAddress фаєрвол-правила
-        # часто містить конкретні внутрішні підмережі/VPN-діапазони, лишені
-        # незамаскованими раніше. ConvertTo-BravoSanitizedFirewallScope
-        # маскує лише адресоподібні токени, зберігаючи семантичні ключові
-        # слова ("Any"/"LocalSubnet") читабельними.
-        if ($Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.FirewallScope) {
-            $Report.Security.RemoteAccess.FirewallScope = ConvertTo-BravoSanitizedFirewallScope -Scope $Report.Security.RemoteAccess.FirewallScope -Masker $maskPrivateIP
-        }
+    # --- RDP firewall scope (Security.RemoteAccess.FirewallScope, P1
+    # exact-head review Phase 10) — та сама категорія PRIVATE-IP, що й решта
+    # мережевих адрес вище: RemoteAddress фаєрвол-правила часто містить
+    # конкретні внутрішні підмережі/VPN-діапазони, лишені незамаскованими
+    # раніше. ConvertTo-BravoSanitizedFirewallScope маскує лише адресоподібні
+    # токени, зберігаючи семантичні ключові слова ("Any"/"LocalSubnet")
+    # читабельними. Власний блок-умова окремо від "$Level -eq 'Strict' -and
+    # $Report.Network" вище (fresh-review Phase 10): це Security-поле, і його
+    # маскування не повинно залежати від наявності секції Network у звіті —
+    # раніше воно ненавмисно було вкладене в перевірку $Report.Network.
+    if ($Level -eq 'Strict' -and $Report.Security -and $Report.Security.RemoteAccess -and $Report.Security.RemoteAccess.FirewallScope) {
+        $Report.Security.RemoteAccess.FirewallScope = ConvertTo-BravoSanitizedFirewallScope -Scope $Report.Security.RemoteAccess.FirewallScope -Masker $maskPrivateIP
     }
 
     # --- SMB shares: шлях може містити username (напр. C:\Users\jdoe\Share) —
@@ -381,6 +387,13 @@ function Invoke-BravoReportSanitization {
     # чутливим і лишається як є.
     if ($Report.Network -and $Report.Network.WinHttpProxy -and $Report.Network.WinHttpProxy.RawOutput -and @($Report.Network.WinHttpProxy.RawOutput).Count -gt 0) {
         $Report.Network.WinHttpProxy.RawOutput = @('REDACTED-WINHTTP-PROXY')
+    }
+    # Той самий ризик-підклас, що й RawOutput вище (fresh-review Phase 10):
+    # Error — це $_.Exception.Message від невдалого виклику netsh, теоретично
+    # міг би містити фрагмент команди/шляху; редагується так само на всякий
+    # випадок, хоча типовий текст помилки netsh малоймовірно несе топологію.
+    if ($Report.Network -and $Report.Network.WinHttpProxy -and $Report.Network.WinHttpProxy.Error) {
+        $Report.Network.WinHttpProxy.Error = 'REDACTED-WINHTTP-PROXY'
     }
 
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
