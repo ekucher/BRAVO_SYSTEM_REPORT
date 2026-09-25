@@ -312,6 +312,65 @@ Describe 'Get-BravoStorageRiskSummary' {
     }
 }
 
+Describe 'Resolve-BravoStorageVolumeReservedClass (канонічна reserved-класифікація, P2 exact-head review Phase 10)' {
+    # Один спільний WarningThreshold для всіх кейсів нижче, як і в
+    # Get-BravoStorageRiskSummary/Export-BravoHtmlReport.
+    BeforeAll { $script:warningThreshold = (Get-BravoStorageThresholds).WarningFreePercent }
+
+    It 'том З літерою диска -> NotReserved, незалежно від PartitionType/FreePercent' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter 'C' -PartitionType '' -FreePercent 1.0 -WarningThreshold $script:warningThreshold | Should -Be 'NotReserved'
+    }
+
+    It 'PartitionType=System без літери диска -> KnownReserved' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType 'System' -FreePercent 50.0 -WarningThreshold $script:warningThreshold | Should -Be 'KnownReserved'
+    }
+
+    It 'PartitionType=Reserved без літери диска -> KnownReserved' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType 'Reserved' -FreePercent 50.0 -WarningThreshold $script:warningThreshold | Should -Be 'KnownReserved'
+    }
+
+    It 'PartitionType=Recovery без літери диска -> KnownReserved' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType 'Recovery' -FreePercent 50.0 -WarningThreshold $script:warningThreshold | Should -Be 'KnownReserved'
+    }
+
+    It 'folder-mounted НОРМАЛЬНИЙ data-том (PartitionType=Basic, FreePercent вище WarningThreshold) без літери диска -> NotReserved (НЕ помилково Reserved)' {
+        # Це і є P2-знахідка: folder-mounted том зі ЗВИЧАЙНИМ (не низьким)
+        # вільним місцем не повинен класифікуватись як Reserved лише через
+        # відсутність літери диска.
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType 'Basic' -FreePercent ($script:warningThreshold + 10) -WarningThreshold $script:warningThreshold | Should -Be 'NotReserved'
+    }
+
+    It 'folder-mounted data-том (PartitionType=Basic, FreePercent НИЖЧЕ WarningThreshold) без літери диска -> NotReserved (некорельований поріг стосується лише порожнього/Unknown PartitionType)' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType 'Basic' -FreePercent ($script:warningThreshold - 1) -WarningThreshold $script:warningThreshold | Should -Be 'NotReserved'
+    }
+
+    It 'порожній PartitionType без літери диска, FreePercent НИЖЧЕ WarningThreshold -> UncorrelatedLowSpace' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType '' -FreePercent ($script:warningThreshold - 1) -WarningThreshold $script:warningThreshold | Should -Be 'UncorrelatedLowSpace'
+    }
+
+    It 'PartitionType=Unknown без літери диска, FreePercent НИЖЧЕ WarningThreshold -> UncorrelatedLowSpace' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType 'Unknown' -FreePercent ($script:warningThreshold - 1) -WarningThreshold $script:warningThreshold | Should -Be 'UncorrelatedLowSpace'
+    }
+
+    It 'порожній PartitionType без літери диска, FreePercent ВИЩЕ WarningThreshold -> NotReserved' {
+        Resolve-BravoStorageVolumeReservedClass -DriveLetter $null -PartitionType '' -FreePercent ($script:warningThreshold + 10) -WarningThreshold $script:warningThreshold | Should -Be 'NotReserved'
+    }
+}
+
+Describe 'Export-BravoHtmlReport (src/51-Export-Html.ps1) — узгодженість reserved-класифікації з Get-BravoStorageRiskSummary (P2, exact-head review Phase 10)' {
+    # До фіксу HTML-таблиця томів незалежно перевіряла лише "-not
+    # $hasDriveLetter" (без урахування PartitionType/FreePercent), тоді як
+    # Get-BravoStorageRiskSummary уже мала точнішу диференційовану логіку —
+    # той самий том міг одночасно отримати CRITICAL-знахідку в Findings і
+    # показ "RESERVED" у HTML. Структурна перевірка джерела гарантує, що
+    # HTML більше не дублює/не розходиться з канонічною класифікацією.
+    It 'викликає канонічну Resolve-BravoStorageVolumeReservedClass, а не власну "-not $hasDriveLetter" евристику' {
+        $htmlSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\src\51-Export-Html.ps1') -Raw
+        $htmlSource | Should -Match 'Resolve-BravoStorageVolumeReservedClass'
+        $htmlSource | Should -Not -Match '\$riskText\s*=\s*if\s*\(-not\s*\$hasDriveLetter\)'
+    }
+}
+
 Describe 'Resolve-BravoPartitionType (канонічна класифікація партицій, v0.6.1 acceptance-review)' {
     It 'GPT EFI System GUID -> System (незалежно від Type)' {
         Resolve-BravoPartitionType -Type 'Unknown' -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' | Should -Be 'System'

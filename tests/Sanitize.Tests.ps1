@@ -64,10 +64,13 @@ BeforeAll {
                 }
                 ARP = @([PSCustomObject]@{ IPAddress = '192.168.1.1'; LinkLayerAddress = '11-22-33-44-55-66' })
                 SmbShares = @([PSCustomObject]@{ Name = 'Share1'; Path = 'C:\Users\jdoe\Share1' })
+                WinHttpProxy = [ordered]@{
+                    RawOutput = @('Proxy Server(s) :  proxy.secret-corp.local:8080', 'Bypass List     :  *.secret-corp.local;10.20.30.0/24')
+                }
             }
             Users = [ordered]@{ LocalAdmins = @('jdoe', 'Administrator') }
             Security = [ordered]@{
-                RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker') }
+                RemoteAccess = [ordered]@{ AllowedUsers = @('jdoe', 'RemoteWorker'); FirewallScope = '10.21.0.0/24, 192.168.50.0/24, Any, LocalSubnet' }
                 Autoruns = @([PSCustomObject]@{ Name = 'OneDrive'; Command = 'C:\Users\jdoe\AppData\Local\Microsoft\OneDrive\OneDrive.exe /background'; Source = 'Run'; Hive = 'HKCU' })
                 ScheduledTasks = @([PSCustomObject]@{ Name = 'MyTask'; Path = '\'; State = 'Ready'; Author = 'CORP\jdoe'; Execute = 'C:\Users\jdoe\script.exe'; Arguments = ''; IsMicrosoftDefault = $false })
             }
@@ -215,6 +218,14 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
         $script:report.Updates.Installed.Recent[0].HotFixID | Should -Be 'KB123'
     }
 
+    It 'редагує Network.WinHttpProxy.RawOutput навіть у Basic (P1, exact-head review Phase 10)' {
+        $script:report.Network.WinHttpProxy.RawOutput | Should -Be @('REDACTED-WINHTTP-PROXY')
+    }
+
+    It 'НЕ маскує Security.RemoteAccess.FirewallScope у Basic-режимі (задокументована поведінка — лише Strict)' {
+        $script:report.Security.RemoteAccess.FirewallScope | Should -Be '10.21.0.0/24, 192.168.50.0/24, Any, LocalSubnet'
+    }
+
     It 'маскує Updates.WindowsUpdate.WSUSServer (delta review v0.6.1)' {
         $script:report.Updates.WindowsUpdate.WSUSServer | Should -Match '^REDACTED-WSUS-'
     }
@@ -287,6 +298,15 @@ Describe 'Invoke-BravoReportSanitization -Level Strict' {
         $adapterSuffixes | Should -Not -Contain 'branch.company.ua'
     }
 
+    It 'маскує адресоподібні токени в Security.RemoteAccess.FirewallScope, зберігаючи семантичні ключові слова (P1, exact-head review Phase 10)' {
+        $maskedScope = $script:report.Security.RemoteAccess.FirewallScope
+        $tokens = $maskedScope -split ',\s*'
+        $tokens[0] | Should -Match '^REDACTED-PRIVATE-IP-'
+        $tokens[1] | Should -Match '^REDACTED-PRIVATE-IP-'
+        $tokens[2] | Should -Be 'Any'
+        $tokens[3] | Should -Be 'LocalSubnet'
+    }
+
     It 'редагує GeoIP/ISP-метадані (Release Sync & Governance Fixes, v0.6.1) — лише в Strict' {
         $script:report.Network.IP.PublicIPv4ISP | Should -Be 'REDACTED-GEOIP'
         $script:report.Network.IP.PublicIPv4Organization | Should -Be 'REDACTED-GEOIP'
@@ -336,6 +356,8 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $report.EventLogs.TopErrorSources[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
         $report.EventLogs.LogSummaries[0].TopProviders[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
         $report.EventLogs.HardwareDiagnostics[0].LastMessage = 'EVENTLOG_MESSAGE_SENTINEL'
+        $report.Security.RemoteAccess.FirewallScope = '10.66.77.0/24, Any, 172.16.5.0/24'
+        $report.Network.WinHttpProxy.RawOutput = @('Proxy Server(s) :  WINHTTP_PROXY_SENTINEL.corp.local:8080')
 
         Invoke-BravoReportSanitization -Report $report -Level 'Strict' | Out-Null
         $json = $report | ConvertTo-Json -Depth 10
@@ -355,5 +377,9 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $json | Should -Not -Match 'INSTALLEDBY_SENTINEL'
         $json | Should -Not -Match 'WSUS_SENTINEL'
         $json | Should -Not -Match 'EVENTLOG_MESSAGE_SENTINEL'
+        $json | Should -Not -Match '10\.66\.77\.0'
+        $json | Should -Not -Match '172\.16\.5\.0'
+        $json | Should -Match 'Any'
+        $json | Should -Not -Match 'WINHTTP_PROXY_SENTINEL'
     }
 }

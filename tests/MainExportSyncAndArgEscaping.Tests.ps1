@@ -161,3 +161,95 @@ Describe 'Sync-BravoJsonIfExportErrorsChanged (src/90-Main.ps1) — переза
         $result.GeneratedFilesCount | Should -Be 1
     }
 }
+
+Describe 'New-BravoReportBaseFileName (src/90-Main.ps1) — унікальність basename при -Sanitize (P1, exact-head review Phase 10)' {
+    BeforeAll {
+        $source = Get-BravoFunctionSourceFromAst -Content $script:MainContent -FunctionName 'New-BravoReportBaseFileName'
+        . ([scriptblock]::Create($source))
+    }
+
+    It 'без -SanitizeActive повертає стабільний basename на основі реального ComputerName, без суфікса' {
+        $result = New-BravoReportBaseFileName -Timestamp '20260925_120000' -RealComputerName 'REAL-PC' -SanitizedComputerName 'REDACTED-COMPUTERNAME-1'
+        $result | Should -Be 'BravoSystemReport_REAL-PC_20260925_120000'
+    }
+
+    It 'з -SanitizeActive використовує замаскований ComputerName, а не реальний' {
+        $result = New-BravoReportBaseFileName -Timestamp '20260925_120000' -SanitizeActive -RealComputerName 'REAL-PC' -SanitizedComputerName 'REDACTED-COMPUTERNAME-1'
+        $result | Should -Match '^BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000_[0-9a-f]{8}$'
+        $result | Should -Not -Match 'REAL-PC'
+    }
+
+    It 'два послідовні виклики з -SanitizeActive і ОДНАКОВИМ замаскованим ComputerName дають РІЗНІ basename (запобігає колізії флоту, P1)' {
+        # New-BravoSanitizeMasker скидає Counter щоразу -> замаскований
+        # ComputerName ІДЕНТИЧНИЙ на кожній машині флоту в межах одного
+        # timestamp (наприклад, обидва завжди "REDACTED-COMPUTERNAME-1").
+        # Без випадкового суфікса ці дві машини перезаписали б артефакти
+        # одна одної в спільному OutputPath.
+        $first = New-BravoReportBaseFileName -Timestamp '20260925_120000' -SanitizeActive -RealComputerName 'REAL-PC-1' -SanitizedComputerName 'REDACTED-COMPUTERNAME-1'
+        $second = New-BravoReportBaseFileName -Timestamp '20260925_120000' -SanitizeActive -RealComputerName 'REAL-PC-2' -SanitizedComputerName 'REDACTED-COMPUTERNAME-1'
+
+        $first | Should -Not -Be $second
+    }
+
+    It 'суфікс НЕ є похідним від реального ComputerName (не GetHashCode/hostname-based) — той самий реальний хост, різні виклики, різні суфікси' {
+        $first = New-BravoReportBaseFileName -Timestamp '20260925_120000' -SanitizeActive -RealComputerName 'REAL-PC' -SanitizedComputerName 'REDACTED-COMPUTERNAME-1'
+        $second = New-BravoReportBaseFileName -Timestamp '20260925_120000' -SanitizeActive -RealComputerName 'REAL-PC' -SanitizedComputerName 'REDACTED-COMPUTERNAME-1'
+
+        $first | Should -Not -Be $second -Because 'детермінований (hostname-based) суфікс дав би однаковий результат для того самого реального хоста'
+    }
+}
+
+Describe 'Export-BravoJsonReport -Sanitize (src/50-Export-Json.ps1) — GeneratedFiles: серіалізований JSON без абсолютних шляхів, операційний масив незмінний (P1, exact-head review Phase 10)' {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot '..\src\50-Export-Json.ps1')
+    }
+
+    BeforeEach {
+        $script:outputDir = Join-Path $TestDrive 'out'
+        New-Item -ItemType Directory -Path $script:outputDir -Force | Out-Null
+
+        function Add-ExportError { param($Section, $Message) }
+        function Add-AuditFinding { param($Severity, $Category, $Message, $Recommendation) }
+    }
+
+    It 'з -Sanitize: серіалізований JSON на диску містить лише basenames у GeneratedFiles, без абсолютного шляху реального OutputPath' {
+        $realOutputDir = 'C:\Users\SECRETUSER\Reports\corp-host'
+        $script:Report = [PSCustomObject]@{
+            GeneratedFiles = @((Join-Path $realOutputDir 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000.html'))
+        }
+
+        Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000' -Sanitize
+
+        $jsonPath = Join-Path $script:outputDir 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000.json'
+        $jsonContent = Get-Content -LiteralPath $jsonPath -Raw
+
+        $jsonContent | Should -Not -Match 'SECRETUSER'
+        $jsonContent | Should -Not -Match 'corp-host'
+        $jsonContent | Should -Match 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000\.html'
+    }
+
+    It 'з -Sanitize: після виклику $script:Report.GeneratedFiles (операційний масив у пам''яті) лишається з РЕАЛЬНИМИ абсолютними шляхами — ZIP/Email далі можуть Test-Path/attach' {
+        $realHtmlPath = 'C:\Users\SECRETUSER\Reports\corp-host\BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000.html'
+        $script:Report = [PSCustomObject]@{
+            GeneratedFiles = @($realHtmlPath)
+        }
+
+        Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REDACTED-COMPUTERNAME-1_20260925_120000' -Sanitize
+
+        $script:Report.GeneratedFiles | Should -Contain $realHtmlPath -Because 'операційне використання (ZIP-пакування/email attach через Test-Path) вимагає реальних абсолютних шляхів, не basenames'
+    }
+
+    It 'без -Sanitize: серіалізований JSON лишається з реальним абсолютним шляхом (задокументована поведінка не-sanitize запуску)' {
+        $realHtmlPath = 'C:\Reports\BravoSystemReport_REAL-PC_20260925_120000.html'
+        $script:Report = [PSCustomObject]@{
+            GeneratedFiles = @($realHtmlPath)
+        }
+
+        Export-BravoJsonReport -OutputDir $script:outputDir -BaseFileName 'BravoSystemReport_REAL-PC_20260925_120000'
+
+        $jsonPath = Join-Path $script:outputDir 'BravoSystemReport_REAL-PC_20260925_120000.json'
+        $jsonContent = Get-Content -LiteralPath $jsonPath -Raw
+
+        $jsonContent | Should -Match 'REAL-PC'
+    }
+}

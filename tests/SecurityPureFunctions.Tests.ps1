@@ -54,6 +54,17 @@ Describe 'Test-BravoDefenderRealTimeProtectionWarning' {
         Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $false -AMRunningMode 'SxS Passive' | Should -Be $false
     }
 
+    It 'RealTimeProtectionEnabled=$false, AMRunningMode="Passive Mode" (реальне документоване значення Get-MpComputerStatus, P2 exact-head review Phase 10) — WARNING НЕ потрібен' {
+        # Офіційно задокументоване значення AMRunningMode (Microsoft Learn /
+        # Microsoft Tech Community) — "Passive Mode", НЕ просто "Passive".
+        # Коротка форма без "Mode" залишена як defensive fallback нижче.
+        Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $false -AMRunningMode 'Passive Mode' | Should -Be $false
+    }
+
+    It 'RealTimeProtectionEnabled=$false, AMRunningMode="SxS Passive Mode" (реальне документоване значення, P2 exact-head review Phase 10) — WARNING НЕ потрібен' {
+        Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $false -AMRunningMode 'SxS Passive Mode' | Should -Be $false
+    }
+
     It 'RealTimeProtectionEnabled=$true — WARNING не потрібен незалежно від AMRunningMode' {
         Test-BravoDefenderRealTimeProtectionWarning -RealTimeProtectionEnabled $true -AMRunningMode 'Normal' | Should -Be $false
     }
