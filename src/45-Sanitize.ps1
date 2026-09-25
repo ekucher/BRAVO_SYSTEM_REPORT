@@ -392,8 +392,13 @@ function Invoke-BravoReportSanitization {
     # Error — це $_.Exception.Message від невдалого виклику netsh, теоретично
     # міг би містити фрагмент команди/шляху; редагується так само на всякий
     # випадок, хоча типовий текст помилки netsh малоймовірно несе топологію.
+    # ОКРЕМИЙ токен від RawOutput (друга хвиля фреш-ревʼю Phase 10) — той
+    # самий токен для обох робив санітизований JSON неоднозначним: неможливо
+    # відрізнити "netsh відпрацював, вивід відредаговано" від "netsh
+    # провалився, помилку відредаговано", а це діагностично корисна
+    # відмінність навіть у sanitized-звіті.
     if ($Report.Network -and $Report.Network.WinHttpProxy -and $Report.Network.WinHttpProxy.Error) {
-        $Report.Network.WinHttpProxy.Error = 'REDACTED-WINHTTP-PROXY'
+        $Report.Network.WinHttpProxy.Error = 'REDACTED-WINHTTP-PROXY-ERROR'
     }
 
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage

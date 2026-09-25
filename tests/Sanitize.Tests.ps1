@@ -228,7 +228,7 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
 
         Invoke-BravoReportSanitization -Report $reportWithProxyError -Level 'Basic' | Out-Null
 
-        $reportWithProxyError.Network.WinHttpProxy.Error | Should -Be 'REDACTED-WINHTTP-PROXY'
+        $reportWithProxyError.Network.WinHttpProxy.Error | Should -Be 'REDACTED-WINHTTP-PROXY-ERROR'
     }
 
     It 'НЕ маскує Security.RemoteAccess.FirewallScope у Basic-режимі (задокументована поведінка — лише Strict)' {
@@ -402,10 +402,16 @@ Describe 'Sanitize leakage — жодне чутливе значення НЕ �
         $json | Should -Not -Match 'EVENTLOG_MESSAGE_SENTINEL'
         $json | Should -Not -Match '10\.66\.77\.0'
         $json | Should -Not -Match '172\.16\.5\.0'
-        # Анкорована перевірка розпарсеного токена (не unanchored 'Should
-        # -Match ''Any''' — це майже vacuous, "any" — підрядок звичайних
-        # слів; виправлено фреш-ревʼю Phase 10).
-        (@($report.Security.RemoteAccess.FirewallScope -split ',\s*'))[1] | Should -Be 'Any'
+        # Анкорована перевірка розпарсеного токена З серіалізованого $json
+        # (не in-memory $report — Describe перевіряє саме серіалізований
+        # вивід), замінює unanchored 'Should -Match ''Any'''. Друга хвиля
+        # фреш-ревʼю Phase 10: mutation testing показав, що стара
+        # unanchored перевірка НЕ була vacuous у цій конкретній фікстурі
+        # (усі інші джерела підрядка "any" тут перекриті сентинелами), але
+        # анкорована перевірка розпарсеного токена все одно надійніша й не
+        # покладається на цю крихку властивість фікстури.
+        $parsedFirewallScope = (($json | ConvertFrom-Json).Security.RemoteAccess.FirewallScope) -split ',\s*'
+        $parsedFirewallScope[1] | Should -Be 'Any'
         $json | Should -Not -Match 'WINHTTP_PROXY_SENTINEL'
     }
 }

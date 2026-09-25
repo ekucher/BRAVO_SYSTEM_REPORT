@@ -279,5 +279,10 @@ Describe 'Export-BravoJsonReport / $script:SanitizeActive (src/50-Export-Json.ps
 
         $jsonPath = Join-Path $script:outputDir 'BravoSystemReport_REAL-PC_20260925_120000.json'
         Test-Path -LiteralPath $jsonPath | Should -Be $true
+        # Друга хвиля фреш-ревʼю Phase 10: попередня версія цього тесту лише
+        # перевіряла Should -Not -Throw/Test-Path — не читала JSON, тому була
+        # vacuous і не впала б, навіть якби фікс нейтралізували (mutation
+        # testing підтвердив). Явна перевірка реального шляху в серіалізації.
+        (Get-Content -LiteralPath $jsonPath -Raw) | Should -Match 'C:\\\\Reports\\\\BravoSystemReport_REAL-PC'
     }
 }
