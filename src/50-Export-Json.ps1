@@ -16,7 +16,9 @@ function Export-BravoJsonReport {
     # JSON
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
-        ConvertTo-Json $script:Report -Depth 12 | Out-File $jsonPath -Encoding utf8
+        $jsonContent = ConvertTo-Json $script:Report -Depth 12
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($jsonPath, $jsonContent, $utf8NoBom)
         $script:Report.GeneratedFiles += $jsonPath
         Write-Host "  $IconJson JSON: $BaseFileName.json" -ForegroundColor Green
     } catch {
