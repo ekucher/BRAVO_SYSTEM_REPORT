@@ -19,6 +19,8 @@ param(
 
     [int]$EventLogDays = 0,
 
+    [switch]$SkipPublicIPLookup,
+
     [switch]$SkipUpdateSearch,
     [int]$UpdateSearchTimeoutSec = 180,
 
