@@ -318,7 +318,7 @@ Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CS
 Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
 
 # Email
-Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer -SmtpPort $SmtpPort -EmailUseSsl:$EmailUseSsl -EmailCredential $EmailCredential
 
 # Фінал
 $elapsedSeconds = [Math]::Round(((Get-Date) - $ScriptStartTime).TotalSeconds, 2)

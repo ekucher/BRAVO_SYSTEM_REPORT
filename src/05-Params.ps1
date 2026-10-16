@@ -24,5 +24,8 @@ param(
 
     [string]$EmailTo,
     [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
-    [string]$SmtpServer = ''
+    [string]$SmtpServer = '',
+    [int]$SmtpPort = 0,
+    [switch]$EmailUseSsl,
+    [System.Management.Automation.PSCredential]$EmailCredential
 )
