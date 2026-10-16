@@ -25,16 +25,14 @@ function Get-BravoProcessesServicesAudit {
         $script:Report.Services.Total = $serviceInfo.Count
         $script:Report.Services.Running = @($serviceInfo | Where-Object { $_.Status -eq 'Running' }).Count
 
-        if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
-            try {
-                $autoStopped = Get-CimInstance Win32_Service -Filter "StartMode='Auto' AND State<>'Running'" -ErrorAction Stop
-                $script:Report.Services.AutomaticStopped = @($autoStopped | Select-Object Name, DisplayName, State, StartMode, StartName)
-                if ($script:Report.Services.AutomaticStopped.Count -gt 0) {
-                    Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($script:Report.Services.AutomaticStopped.Count)." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
-                }
-            } catch {
-                Add-AuditError -Section 'Services.AutomaticStopped' -Message $_.Exception.Message
+        try {
+            $autoStopped = Get-AuditObject -ClassName 'Win32_Service' -Filter "StartMode='Auto' AND State<>'Running'"
+            $script:Report.Services.AutomaticStopped = @($autoStopped | Select-Object Name, DisplayName, State, StartMode, StartName)
+            if ($script:Report.Services.AutomaticStopped.Count -gt 0) {
+                Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($script:Report.Services.AutomaticStopped.Count)." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
             }
+        } catch {
+            Add-AuditError -Section 'Services.AutomaticStopped' -Message $_.Exception.Message
         }
     } catch {
         Add-AuditError -Section 'Services' -Message $_.Exception.Message
