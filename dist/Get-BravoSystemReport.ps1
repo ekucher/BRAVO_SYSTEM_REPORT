@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-17 01:26:36
+    GeneratedAt: 2026-10-17 01:31:12
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1550,7 +1550,7 @@ function Get-BravoSoftwareAudit {
 
         $softwareInfo = Get-ItemProperty $softwareRegistryPaths -ErrorAction SilentlyContinue |
             Where-Object { $_.DisplayName -and $_.DisplayName -notlike '*Update*' } |
-            Sort-Object DisplayName -Unique
+            Sort-Object DisplayName, DisplayVersion, Publisher -Unique
 
         foreach ($softwareItem in $softwareInfo) {
             if ($Profile -eq 'Quick') {
