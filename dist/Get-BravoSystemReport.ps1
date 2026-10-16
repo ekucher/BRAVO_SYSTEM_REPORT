@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-17 01:41:53
+    GeneratedAt: 2026-10-17 02:01:46
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -584,7 +584,8 @@ function Get-BravoOperatingSystemAudit {
     [CmdletBinding()]
     param()
 
-    # --- ОС ---
+    # --- ОС: базові поля ---
+    $osInfo = $null
     try {
         $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
         $script:Report.OS.Caption = $osInfo.Caption
@@ -592,31 +593,38 @@ function Get-BravoOperatingSystemAudit {
         $script:Report.OS.Build = $osInfo.BuildNumber
         $script:Report.OS.Architecture = $osInfo.OSArchitecture
 
-        $installDate = Convert-AuditDateTime -Value $osInfo.InstallDate -UseCim:$script:UseCim
-        if ($installDate) { $script:Report.OS.InstallDate = $installDate.ToString('yyyy-MM-dd') }
-
-        $lastBoot = Convert-AuditDateTime -Value $osInfo.LastBootUpTime -UseCim:$script:UseCim
-        if ($lastBoot) {
-            $uptime = (Get-Date) - $lastBoot
-            $script:Report.OS.LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
-            $script:Report.OS.UptimeDays = $uptime.Days
-            $script:Report.OS.UptimeHours = [Math]::Round($uptime.TotalHours, 1)
-            $script:Report.Dashboard.Header.UptimeText = "$($script:Report.OS.UptimeDays) дн. / $($script:Report.OS.UptimeHours) год."
-        }
-
         $script:Report.Dashboard.Metrics.OS.Value = $script:Report.OS.Caption
         $script:Report.Dashboard.Metrics.OS.Details = "Build $($script:Report.OS.Build), $($script:Report.OS.Architecture)"
         $script:Report.Dashboard.Metrics.OS.Status = 'OK'
-
-        if ($script:Report.OS.UptimeDays -gt 90) {
-            Add-AuditFinding -Severity 'WARNING' -Category 'OS' -Message "Uptime більше 90 днів: $($script:Report.OS.UptimeDays)" -Recommendation 'Заплануйте контрольоване перезавантаження після перевірки критичних служб.'
-            $script:Report.Dashboard.Metrics.OS.Status = 'WARNING'
-        }
 
         Write-Host "  $IconOk ОС: $($script:Report.OS.Caption)" -ForegroundColor Green
     } catch {
         Add-AuditError -Section 'OS' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка збору даних ОС: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # --- ОС: uptime (окремо, щоб збій тут не ламав базові поля вище) ---
+    if ($osInfo) {
+        try {
+            $installDate = Convert-AuditDateTime -Value $osInfo.InstallDate -UseCim:$script:UseCim
+            if ($installDate) { $script:Report.OS.InstallDate = $installDate.ToString('yyyy-MM-dd') }
+
+            $lastBoot = Convert-AuditDateTime -Value $osInfo.LastBootUpTime -UseCim:$script:UseCim
+            if ($lastBoot) {
+                $uptime = (Get-Date) - $lastBoot
+                $script:Report.OS.LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
+                $script:Report.OS.UptimeDays = $uptime.Days
+                $script:Report.OS.UptimeHours = [Math]::Round($uptime.TotalHours, 1)
+                $script:Report.Dashboard.Header.UptimeText = "$($script:Report.OS.UptimeDays) дн. / $($script:Report.OS.UptimeHours) год."
+
+                if ($script:Report.OS.UptimeDays -gt 90) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'OS' -Message "Uptime більше 90 днів: $($script:Report.OS.UptimeDays)" -Recommendation 'Заплануйте контрольоване перезавантаження після перевірки критичних служб.'
+                    $script:Report.Dashboard.Metrics.OS.Status = 'WARNING'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'OS.Uptime' -Message $_.Exception.Message
+        }
     }
 }
 
@@ -631,11 +639,10 @@ function Get-BravoHardwareAudit {
     [CmdletBinding()]
     param()
 
-    # --- Апаратне забезпечення ---
+    # --- Апаратне забезпечення: ComputerSystem + CPU ---
     try {
         $cpuInfo = Get-AuditObject -ClassName 'Win32_Processor' -First
         $computerSystemInfo = Get-AuditObject -ClassName 'Win32_ComputerSystem' -First
-        $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
 
         $script:Report.Hardware.ComputerSystem.Manufacturer = $computerSystemInfo.Manufacturer
         $script:Report.Hardware.ComputerSystem.Model = $computerSystemInfo.Model
@@ -647,6 +654,21 @@ function Get-BravoHardwareAudit {
         $script:Report.Hardware.CPU.LogicalProcessors = $cpuInfo.NumberOfLogicalProcessors
         $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
         $script:Report.Hardware.CPU.LoadPercent = [Math]::Round(($cpuInfo.LoadPercentage | Measure-Object -Average).Average)
+
+        $script:Report.Dashboard.Metrics.CPU.Value = "$($script:Report.Hardware.CPU.LoadPercent)%"
+        $script:Report.Dashboard.Metrics.CPU.Details = "$($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків"
+        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge 90) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge 75) { 'WARNING' } else { 'OK' }
+
+        Write-Host "  $IconCpu CPU: $($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків ($($script:Report.Hardware.CPU.LoadPercent)%)" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Hardware.CPU' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка апаратних даних (CPU): $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # --- Апаратне забезпечення: RAM (окремо, щоб збій тут не ламав CPU-дані вище) ---
+    try {
+        $computerSystemInfo = Get-AuditObject -ClassName 'Win32_ComputerSystem' -First
+        $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
         $script:Report.Hardware.RAM.TotalGB = $totalPhysicalMemoryGB
@@ -667,10 +689,6 @@ function Get-BravoHardwareAudit {
             $script:Report.Hardware.RAM.UsedGB = $usedMemoryGB
             $script:Report.Hardware.RAM.UsedPercent = $usedPercent
         }
-
-        $script:Report.Dashboard.Metrics.CPU.Value = "$($script:Report.Hardware.CPU.LoadPercent)%"
-        $script:Report.Dashboard.Metrics.CPU.Details = "$($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків"
-        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge 90) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge 75) { 'WARNING' } else { 'OK' }
 
         $script:Report.Dashboard.Metrics.RAM.Value = "$($script:Report.Hardware.RAM.UsedPercent)%"
         $script:Report.Dashboard.Metrics.RAM.Details = "$($script:Report.Hardware.RAM.UsedGB) GB використано з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB"
@@ -695,11 +713,10 @@ function Get-BravoHardwareAudit {
             }
         }
 
-        Write-Host "  $IconCpu CPU: $($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків ($($script:Report.Hardware.CPU.LoadPercent)%)" -ForegroundColor Green
         Write-Host "  $IconRam RAM: $($script:Report.Hardware.RAM.TotalGB) GB ($($script:Report.Hardware.RAM.UsedPercent)% використано)" -ForegroundColor Green
     } catch {
-        Add-AuditError -Section 'Hardware' -Message $_.Exception.Message
-        Write-Host "  $IconError Помилка апаратних даних: $($_.Exception.Message)" -ForegroundColor Red
+        Add-AuditError -Section 'Hardware.RAM' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка апаратних даних (RAM): $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
