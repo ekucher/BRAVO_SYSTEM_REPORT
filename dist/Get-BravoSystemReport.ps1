@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-17 02:01:46
+    GeneratedAt: 2026-10-17 02:05:53
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -2112,6 +2112,14 @@ function Invoke-BravoPendingUpdatesSearch {
 
         if (-not $completedJob) {
             try { Stop-Job -Job $searchJob -ErrorAction SilentlyContinue } catch {}
+            try { Wait-Job -Job $searchJob -Timeout 5 | Out-Null } catch {}
+
+            $cleanupError = $null
+            if ($searchJob.State -eq 'Running') {
+                $cleanupError = "Фоновий job пошуку оновлень не підтвердив зупинку після Stop-Job (State=$($searchJob.State)); можливий осиротілий дочірній процес."
+                Add-AuditError -Section 'Updates.PendingSearch.Cleanup' -Message $cleanupError
+            }
+
             return [ordered]@{
                 Status  = 'Timeout'
                 Method  = 'Microsoft.Update.Session (COM)'
@@ -2120,6 +2128,7 @@ function Invoke-BravoPendingUpdatesSearch {
                 TotalFound = 0
                 IsTruncated = $false
                 DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+                CleanupWarning = $cleanupError
             }
         }
 
