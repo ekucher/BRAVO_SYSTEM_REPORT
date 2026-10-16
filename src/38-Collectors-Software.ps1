@@ -18,7 +18,7 @@ function Get-BravoSoftwareAudit {
 
         $softwareInfo = Get-ItemProperty $softwareRegistryPaths -ErrorAction SilentlyContinue |
             Where-Object { $_.DisplayName -and $_.DisplayName -notlike '*Update*' } |
-            Sort-Object DisplayName -Unique
+            Sort-Object DisplayName, DisplayVersion, Publisher -Unique
 
         foreach ($softwareItem in $softwareInfo) {
             if ($Profile -eq 'Quick') {
