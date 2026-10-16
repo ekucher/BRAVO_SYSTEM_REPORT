@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-17 01:22:07
+    GeneratedAt: 2026-10-17 01:26:36
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -1024,10 +1024,15 @@ function Get-BravoStorageAudit {
             }
             $script:Report.Hardware.Disks.Volumes += $volume
 
-            if ($volume.FreePercent -lt 10) {
-                Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 10% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
-            } elseif ($volume.FreePercent -lt 20) {
-                Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 20% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
+            # Для Deep/Forensic ці знахідки видає детальніший Get-BravoStorageRiskSummary
+            # (з іншими, нижчими порогами 5/10/15%), тож тут вони пропускаються, щоб
+            # уникнути дублюючих/суперечливих CRITICAL/WARNING знахідок для одного тому.
+            if ($Profile -notin @('Deep','Forensic')) {
+                if ($volume.FreePercent -lt 10) {
+                    Add-AuditFinding -Severity 'CRITICAL' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 10% вільного місця: $($volume.FreePercent)%" -Recommendation 'Звільніть місце або розширте том.'
+                } elseif ($volume.FreePercent -lt 20) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'Storage' -Message "На диску $($volume.DeviceID) менше 20% вільного місця: $($volume.FreePercent)%" -Recommendation 'Перевірте темп росту даних і заплануйте очищення.'
+                }
             }
         }
 
