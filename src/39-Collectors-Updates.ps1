@@ -320,6 +320,8 @@ function Get-BravoInstalledUpdatesInfo {
         DaysSinceLastUpdate = $null
         InstalledLast30Days = 0
         Recent = @()
+        PossiblyIncomplete = $false
+        IncompleteReason = ''
     }
 
     $hotfixes = @()
@@ -335,6 +337,20 @@ function Get-BravoInstalledUpdatesInfo {
     }
 
     $installed.Total = @($hotfixes).Count
+
+    # Get-HotFix/Win32_QuickFixEngineering не реєструють більшість кумулятивних
+    # (CBS-based) оновлень на Windows 10/11/Server 2016+ (build >= 10240): на
+    # повністю пропатченому хості цей шлях часто повертає Total=0, через що
+    # DaysSinceLastUpdate лишається $null і попередження про застарілість
+    # оновлень нижче ніколи не спрацьовує, хоча хост може бути актуальним.
+    # Явно позначаємо цей випадок, а не мовчки показуємо "чисто".
+    $osBuildNumber = 0
+    [void][int]::TryParse((([string]$script:Report.OS.Build) -split '\.')[0], [ref]$osBuildNumber)
+    if ($osBuildNumber -ge 10240 -and $installed.Total -eq 0) {
+        $installed.PossiblyIncomplete = $true
+        $installed.IncompleteReason = 'Get-HotFix/Win32_QuickFixEngineering не реєструє більшість кумулятивних оновлень на цій версії Windows: Total=0 не означає відсутність встановлених оновлень.'
+    }
+
     if ($installed.Total -eq 0) { return $installed }
 
     $normalized = foreach ($hotfix in $hotfixes) {
@@ -470,14 +486,18 @@ function Invoke-BravoPendingUpdatesSearch {
     $canUseJob = ((Get-Command -Name 'Start-Job' -ErrorAction SilentlyContinue) -ne $null)
 
     if (-not $canUseJob) {
-        $inlineResult = & $searchBlock $MaxItems
+        # Без Start-Job немає способу безпечно обмежити час синхронного COM-викли-
+        # ку $updateSearcher.Search(): він не підтримує скасування, а без ізоляції
+        # в job/process його неможливо перервати, якщо WSUS/update-сервер недо-
+        # ступний. Краще явно повідомити про непідтримуване середовище, ніж
+        # запускати потенційно нескінченний виклик без жодного таймауту.
         return [ordered]@{
-            Status  = [string]$inlineResult.Status
-            Method  = [string]$inlineResult.Method
-            Error   = [string]$inlineResult.Error
-            Updates = @($inlineResult.Updates)
-            TotalFound = [int]$inlineResult.TotalFound
-            IsTruncated = [bool]$inlineResult.IsTruncated
+            Status  = 'Unsupported'
+            Method  = 'Microsoft.Update.Session (COM)'
+            Error   = 'Start-Job недоступний у цьому середовищі (можливо, Constrained Language Mode або WDAC): синхронний пошук оновлень без ізоляції job не можна безпечно обмежити таймаутом, тож пошук не виконувався.'
+            Updates = @()
+            TotalFound = 0
+            IsTruncated = $false
             DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
         }
     }
@@ -628,6 +648,8 @@ function Get-BravoUpdatesAudit {
 
         if ($null -ne $installedInfo.DaysSinceLastUpdate -and $installedInfo.DaysSinceLastUpdate -gt 60) {
             Add-AuditFinding -Severity 'WARNING' -Category 'Updates' -Message "Останнє оновлення встановлено $($installedInfo.DaysSinceLastUpdate) дн. тому ($($installedInfo.LastInstalledOn))" -Recommendation 'Перевірте, чи працює цикл оновлень Windows Update або WSUS.'
+        } elseif ($installedInfo.PossiblyIncomplete) {
+            Add-AuditFinding -Severity 'INFO' -Category 'Updates' -Message $installedInfo.IncompleteReason -Recommendation 'Перевірте історію оновлень через Параметри > Windows Update > Журнал оновлень або DISM /Get-Packages для повної картини.'
         }
     } catch {
         Add-AuditError -Section 'Updates.Installed' -Message $_.Exception.Message
