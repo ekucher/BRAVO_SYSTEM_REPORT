@@ -32,30 +32,43 @@ function Add-ZipEntry {
     ) | Out-Null
 }
 
-function Resolve-PackageVersion {
+function Assert-PackageVersionConsistency {
+    # Звіряє версію між src\90-Main.ps1 і CHANGELOG.md незалежно від того, чи
+    # викликач передав -Version явно (як робить release.yml). До цього фіксу
+    # цю звірку робив лише CI-крок "Resolve version" у release.yml, а локальний
+    # запуск без -Version (саме той, що документує README) просто брав першу
+    # знайдену версію й міг мовчки упакувати застарілу/неузгоджену версію.
     param(
         [string]$RepoPath
     )
 
     $ChangelogPath = Join-Path $RepoPath "CHANGELOG.md"
-    if (Test-Path -LiteralPath $ChangelogPath) {
-        $Changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
-        $ChangelogMatch = [regex]::Match($Changelog, '(?m)^##\s+v?(?<Version>\d+\.\d+\.\d+)')
-        if ($ChangelogMatch.Success) {
-            return $ChangelogMatch.Groups["Version"].Value
-        }
+    if (-not (Test-Path -LiteralPath $ChangelogPath)) {
+        throw "CHANGELOG.md not found: $ChangelogPath"
     }
+    $Changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
+    $ChangelogMatch = [regex]::Match($Changelog, '(?m)^##\s+v?(?<Version>\d+\.\d+\.\d+)')
+    if (-not $ChangelogMatch.Success) {
+        throw "Cannot read release version from CHANGELOG.md"
+    }
+    $ChangelogVersion = $ChangelogMatch.Groups["Version"].Value
 
     $MainModule = Join-Path $RepoPath (Join-Path "src" "90-Main.ps1")
-    if (Test-Path -LiteralPath $MainModule) {
-        $SourceContent = Get-Content -LiteralPath $MainModule -Raw -Encoding UTF8
-        $ScriptVersionMatch = [regex]::Match($SourceContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
-        if ($ScriptVersionMatch.Success) {
-            return $ScriptVersionMatch.Groups["Version"].Value
-        }
+    if (-not (Test-Path -LiteralPath $MainModule)) {
+        throw "src/90-Main.ps1 not found: $MainModule"
+    }
+    $SourceContent = Get-Content -LiteralPath $MainModule -Raw -Encoding UTF8
+    $ScriptVersionMatch = [regex]::Match($SourceContent, '\$ScriptVersion\s*=\s*["''](?<Version>[^"'']+)["'']')
+    if (-not $ScriptVersionMatch.Success) {
+        throw "Cannot read ScriptVersion from src/90-Main.ps1"
+    }
+    $ScriptVersion = $ScriptVersionMatch.Groups["Version"].Value
+
+    if ($ScriptVersion -ne $ChangelogVersion) {
+        throw "Version mismatch: src/90-Main.ps1=$ScriptVersion, CHANGELOG.md=$ChangelogVersion"
     }
 
-    throw "Cannot detect package version from CHANGELOG.md or src/90-Main.ps1"
+    return $ScriptVersion
 }
 
 Write-Host "=== BRAVO SYSTEM REPORT RELEASE PACKAGE ==="
@@ -83,8 +96,11 @@ if (-not (Test-Path -LiteralPath $RuntimeScript)) {
     throw "Runtime script not found: $RuntimeScript. Спочатку виконайте Build-BRAVO-SystemReport.ps1."
 }
 
+$ConsistentVersion = Assert-PackageVersionConsistency -RepoPath $RepoPath
+Write-Ok "Версія узгоджена між src/90-Main.ps1 і CHANGELOG.md: $ConsistentVersion"
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Resolve-PackageVersion -RepoPath $RepoPath
+    $Version = $ConsistentVersion
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
