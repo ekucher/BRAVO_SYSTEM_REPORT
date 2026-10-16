@@ -5,11 +5,10 @@ function Get-BravoHardwareAudit {
     [CmdletBinding()]
     param()
 
-    # --- Апаратне забезпечення ---
+    # --- Апаратне забезпечення: ComputerSystem + CPU ---
     try {
         $cpuInfo = Get-AuditObject -ClassName 'Win32_Processor' -First
         $computerSystemInfo = Get-AuditObject -ClassName 'Win32_ComputerSystem' -First
-        $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
 
         $script:Report.Hardware.ComputerSystem.Manufacturer = $computerSystemInfo.Manufacturer
         $script:Report.Hardware.ComputerSystem.Model = $computerSystemInfo.Model
@@ -21,6 +20,21 @@ function Get-BravoHardwareAudit {
         $script:Report.Hardware.CPU.LogicalProcessors = $cpuInfo.NumberOfLogicalProcessors
         $script:Report.Hardware.CPU.MaxClockSpeedMHz = $cpuInfo.MaxClockSpeed
         $script:Report.Hardware.CPU.LoadPercent = [Math]::Round(($cpuInfo.LoadPercentage | Measure-Object -Average).Average)
+
+        $script:Report.Dashboard.Metrics.CPU.Value = "$($script:Report.Hardware.CPU.LoadPercent)%"
+        $script:Report.Dashboard.Metrics.CPU.Details = "$($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків"
+        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge 90) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge 75) { 'WARNING' } else { 'OK' }
+
+        Write-Host "  $IconCpu CPU: $($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків ($($script:Report.Hardware.CPU.LoadPercent)%)" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Hardware.CPU' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка апаратних даних (CPU): $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # --- Апаратне забезпечення: RAM (окремо, щоб збій тут не ламав CPU-дані вище) ---
+    try {
+        $computerSystemInfo = Get-AuditObject -ClassName 'Win32_ComputerSystem' -First
+        $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
         $script:Report.Hardware.RAM.TotalGB = $totalPhysicalMemoryGB
@@ -41,10 +55,6 @@ function Get-BravoHardwareAudit {
             $script:Report.Hardware.RAM.UsedGB = $usedMemoryGB
             $script:Report.Hardware.RAM.UsedPercent = $usedPercent
         }
-
-        $script:Report.Dashboard.Metrics.CPU.Value = "$($script:Report.Hardware.CPU.LoadPercent)%"
-        $script:Report.Dashboard.Metrics.CPU.Details = "$($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків"
-        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge 90) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge 75) { 'WARNING' } else { 'OK' }
 
         $script:Report.Dashboard.Metrics.RAM.Value = "$($script:Report.Hardware.RAM.UsedPercent)%"
         $script:Report.Dashboard.Metrics.RAM.Details = "$($script:Report.Hardware.RAM.UsedGB) GB використано з $($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB"
@@ -69,10 +79,9 @@ function Get-BravoHardwareAudit {
             }
         }
 
-        Write-Host "  $IconCpu CPU: $($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків ($($script:Report.Hardware.CPU.LoadPercent)%)" -ForegroundColor Green
         Write-Host "  $IconRam RAM: $($script:Report.Hardware.RAM.TotalGB) GB ($($script:Report.Hardware.RAM.UsedPercent)% використано)" -ForegroundColor Green
     } catch {
-        Add-AuditError -Section 'Hardware' -Message $_.Exception.Message
-        Write-Host "  $IconError Помилка апаратних даних: $($_.Exception.Message)" -ForegroundColor Red
+        Add-AuditError -Section 'Hardware.RAM' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка апаратних даних (RAM): $($_.Exception.Message)" -ForegroundColor Red
     }
 }
