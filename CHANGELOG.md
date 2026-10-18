@@ -24,6 +24,28 @@
   - Повний Pester suite: 363/368 passed; 5 skip/fail — ті самі pre-existing VM-специфічні
     flaky-тести (порожній `Win32_BaseBoard` на цій VM, нестабільна кореляція `Get-NetAdapter`),
     не пов'язані з цим фіксом.
+- **P2 (Issue #103): `.NET Framework 4.8.1` allowlist не покривав Windows 10 20H2/21H1/21H2**
+  (`src/39b-Collectors-Runtime.ps1`) — `$dotNet481SupportedBuilds` визнавав лише build 19045
+  (22H2) і 20348 (Server 2022 RTM), хоча офіційна таблиця системних вимог .NET Framework
+  (learn.microsoft.com/dotnet/framework/get-started/system-requirements, перевірено 2026-10-18)
+  підтверджує 4.8.1 як "Installable separately" і для build 19042 (20H2), 19043 (21H1), 19044
+  (21H2, те саме build number і для Windows 10 Enterprise LTSC 2021) — такі машини помилково
+  отримували рекомендацію "максимум 4.8". Знайдено незалежним review-ботом на PR #102.
+  Регресійне покриття: `tests/RuntimeCollectors.Tests.ps1` (3 нові It для 19042/19043/19044,
+  виправлено помилковий негативний тест, який раніше фіксував саме цю поведінку як очікувану).
+- **P2 (Issue #104): Contract-change guard у `powershell-static-check.yml` не покривав поля,
+  додані динамічно в колекторах** — guard тригерився лише на diff `src/20-ReportModel.ps1`,
+  тож PR міг перейменувати/додати/видалити поле репорту, що задається через `Add-Member`
+  прямо в колекторі (напр. `Hardware.Disks.Deep`/`StorageRisk` у
+  `src/32-Collectors-Storage.ps1`), не торкаючись моделі — і обійти обидві перевірки
+  (`SchemaVersion`, `CHANGELOG.md`). Замість декларування повної форми в моделі (що довело
+  б до дублювання структури у двох місцях і не покрило б майбутні колектори), guard
+  розширено детектором: будь-який доданий/видалений рядок `Add-Member -MemberType
+  NoteProperty -Name`/`-NotePropertyName` у diff'і будь-якого `src/*.ps1` файлу тепер теж
+  вимагає той самий `SchemaVersion`+`CHANGELOG` supplement. Знайдено незалежним review-ботом
+  на PR #102. Перевірено end-to-end у disposable `git worktree` (5 сценаріїв: no-op,
+  новий Add-Member без контракт-бампу → throw, SchemaVersion без CHANGELOG → throw, обидва →
+  pass, непов'язана зміна в тому ж файлі → no false-positive).
 
 ## Unreleased — v0.6.1 Stabilization continuation (гілка `integration/v0.6.1-secure`)
 
