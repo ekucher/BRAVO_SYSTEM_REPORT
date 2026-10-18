@@ -14,6 +14,7 @@ function Export-BravoJsonReport {
     )
 
     # JSON
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
 
@@ -82,8 +83,10 @@ function Export-BravoJsonReport {
         }
         $script:Report.GeneratedFiles += $jsonPath
         Write-Host "  $IconJson JSON: $BaseFileName.json" -ForegroundColor Green
+        return New-BravoExportResult -Type 'Json' -Success $true -Path $jsonPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     } catch {
         Add-ExportError -Section 'Export.Json' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка JSON: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Json' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }

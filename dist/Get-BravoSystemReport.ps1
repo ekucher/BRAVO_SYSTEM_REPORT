@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-18 13:15:59
+    GeneratedAt: 2026-10-18 15:01:00
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -5151,6 +5151,62 @@ function Invoke-BravoReportSanitizationGated {
 
 
 # ============================================================
+# MODULE: src/49-Export-Result.ps1
+# ============================================================
+
+# MODULE: 49-Export-Result.ps1
+# Уніфікований структурований результат export-функцій (Issue #99).
+#
+# До цього фіксу кожен Export-Bravo*Report/Send-BravoEmailReport нічого не
+# повертав — Main (src/90-Main.ps1) визначав success/failure лише
+# опосередковано, діфом $script:Report.ExportErrors.Count/GeneratedFiles.Count
+# "до" і "після" викликів. Це працювало, але не давало Main жодного прямого
+# сигналу "саме ЦЕЙ виклик зробив/не зробив" — лише "щось змінилось відтоді".
+#
+# Кожен exporter тепер ЯВНО повертає New-BravoExportResult. Існуючі канали
+# (Add-ExportError для audit trail, Write-Host для console UX,
+# $script:Report.GeneratedFiles += для фактичного списку файлів) лишаються
+# незмінними поряд з цим — нова структура доповнює їх, а не замінює
+# (помилка не повинна губитись, якщо хтось дивиться лише на один канал).
+function New-BravoExportResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Json', 'Html', 'Pdf', 'Csv', 'Zip', 'Email', 'Txt', 'Md')]
+        [string]$Type,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$Success,
+
+        # Exporter не виконав роботу через свідомий вибір (switch вимкнено,
+        # опційна залежність відсутня, передумова не виконана) — НЕ помилка.
+        # Skipped завжди йде разом із Success=$true.
+        [switch]$Skipped,
+
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Path = $null,
+
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$ErrorMessage = $null,
+
+        [AllowNull()]
+        [Nullable[double]]$DurationSeconds = $null
+    )
+
+    return [PSCustomObject]@{
+        Type            = $Type
+        Success         = $Success
+        Skipped         = [bool]$Skipped
+        Path            = if ($Path) { $Path } else { $null }
+        Error           = if ($ErrorMessage) { $ErrorMessage } else { $null }
+        DurationSeconds = if ($null -ne $DurationSeconds) { [Math]::Round($DurationSeconds, 2) } else { $null }
+    }
+}
+
+
+# ============================================================
 # MODULE: src/50-Export-Json.ps1
 # ============================================================
 
@@ -5170,6 +5226,7 @@ function Export-BravoJsonReport {
     )
 
     # JSON
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $jsonPath = Join-Path $OutputDir "$BaseFileName.json"
 
@@ -5238,9 +5295,11 @@ function Export-BravoJsonReport {
         }
         $script:Report.GeneratedFiles += $jsonPath
         Write-Host "  $IconJson JSON: $BaseFileName.json" -ForegroundColor Green
+        return New-BravoExportResult -Type 'Json' -Success $true -Path $jsonPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     } catch {
         Add-ExportError -Section 'Export.Json' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка JSON: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Json' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }
 
@@ -5277,6 +5336,8 @@ function Export-BravoHtmlReport {
         [ValidateNotNullOrEmpty()]
         [string]$ScriptVersion
     )
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     if (-not $JSONOnly) {
         try {
@@ -5990,11 +6051,15 @@ function Export-BravoHtmlReport {
             $htmlContent | Out-File $htmlPath -Encoding utf8
             $script:Report.GeneratedFiles += $htmlPath
             Write-Host "  $IconHtml HTML: $BaseFileName.html" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Html' -Success $true -Path $htmlPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Html' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка HTML: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Html' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     }
+
+    return New-BravoExportResult -Type 'Html' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }
 
 # Чиста-по-суті функція локалізації msedge.exe: спершу PATH (Get-Command),
@@ -6034,18 +6099,20 @@ function Export-BravoPdfReport {
         [string]$BaseFileName
     )
 
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     $htmlPath = Join-Path $OutputDir "$BaseFileName.html"
     if (-not (Test-Path -LiteralPath $htmlPath)) {
         # Нема з чого конвертувати (HTML не створено/помилка HTML-етапу) —
         # той HTML-етап уже зафіксував власну ExportError, тут дублювати
         # не потрібно.
-        return
+        return New-BravoExportResult -Type 'Pdf' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 
     $edgePath = Get-BravoEdgeExecutablePath
     if (-not $edgePath) {
         Write-Host "  [INFO] Edge CLI PDF: msedge.exe не знайдено на цій машині — PDF пропущено (не помилка, опційна фіча)." -ForegroundColor Yellow
-        return
+        return New-BravoExportResult -Type 'Pdf' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 
     try {
@@ -6064,12 +6131,16 @@ function Export-BravoPdfReport {
         if ($process.ExitCode -eq 0 -and (Test-Path -LiteralPath $pdfPath)) {
             $script:Report.GeneratedFiles += $pdfPath
             Write-Host "  $IconHtml PDF: $BaseFileName.pdf" -ForegroundColor White
+            return New-BravoExportResult -Type 'Pdf' -Success $true -Path $pdfPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } else {
-            Add-ExportError -Section 'Export.Pdf' -Message "msedge.exe --print-to-pdf завершився з exit code $($process.ExitCode), PDF-файл не з'явився."
+            $pdfErrorMessage = "msedge.exe --print-to-pdf завершився з exit code $($process.ExitCode), PDF-файл не з'явився."
+            Add-ExportError -Section 'Export.Pdf' -Message $pdfErrorMessage
+            return New-BravoExportResult -Type 'Pdf' -Success $false -ErrorMessage $pdfErrorMessage -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     } catch {
         Add-ExportError -Section 'Export.Pdf' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка PDF: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Pdf' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }
 
@@ -6097,6 +6168,8 @@ function Export-BravoCsvReport {
     )
 
     # CSV
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     if ($CSV) {
         try {
             $csvPath = Join-Path $OutputDir "$BaseFileName.csv"
@@ -6142,11 +6215,15 @@ function Export-BravoCsvReport {
             $csvData | Export-Csv $csvPath -NoTypeInformation -Encoding utf8
             $script:Report.GeneratedFiles += $csvPath
             Write-Host "  $IconCsv CSV: $BaseFileName.csv" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Csv' -Success $true -Path $csvPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Csv' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка CSV: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Csv' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     }
+
+    return New-BravoExportResult -Type 'Csv' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }
 
 
@@ -6203,6 +6280,8 @@ function Export-BravoZipReport {
     )
 
     # ZIP
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     if ($Zip) {
         $zipArchive = $null
         $zipStream = $null
@@ -6232,14 +6311,18 @@ function Export-BravoZipReport {
 
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Zip' -Success $true -Path $zipPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Zip' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка створення ZIP: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Zip' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } finally {
             if ($null -ne $zipArchive) { $zipArchive.Dispose() }
             if ($null -ne $zipStream) { $zipStream.Dispose() }
         }
     }
+
+    return New-BravoExportResult -Type 'Zip' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }
 
 
@@ -6274,6 +6357,8 @@ function Send-BravoEmailReport {
     )
 
     # Email
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     if ($EmailTo) {
         try {
             $smtpToUse = if ($SmtpServer) { $SmtpServer } else { "smtp.$($env:USERDNSDOMAIN.ToLower())" }
@@ -6286,20 +6371,30 @@ function Send-BravoEmailReport {
                 Subject     = "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)"
                 Body        = $mailBody
                 SmtpServer  = $smtpToUse
-                Attachments = $attachments
                 ErrorAction = 'Stop'
             }
+            # Send-MailMessage валідує -Attachments як ValidateNotNullOrEmpty
+            # (реальний Microsoft.PowerShell.Utility cmdlet) — передача
+            # порожнього масиву (напр. якщо жоден не-ZIP файл ще не
+            # згенеровано) падала б ще до спроби відправки, маскуючи
+            # справжню причину під "помилку Email". Той самий патерн, що й
+            # опційні Port/UseSsl/Credential нижче.
+            if ($attachments.Count -gt 0) { $mailParams.Attachments = $attachments }
             if ($SmtpPort -gt 0) { $mailParams.Port = $SmtpPort }
             if ($EmailUseSsl) { $mailParams.UseSsl = $true }
             if ($EmailCredential) { $mailParams.Credential = $EmailCredential }
 
             Send-MailMessage @mailParams
             Write-Host "  $IconEmail Email відправлено на $EmailTo $(if ($EmailUseSsl) { '(TLS)' } else { '(plaintext SMTP — вкажіть -EmailUseSsl для шифрування)' })" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Email' -Success $true -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Email' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка відправки Email: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Email' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     }
+
+    return New-BravoExportResult -Type 'Email' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }
 
 
@@ -6327,7 +6422,9 @@ function Export-BravoTxtReport {
         [bool]$TXT
     )
 
-    if (-not $TXT) { return }
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    if (-not $TXT) { return New-BravoExportResult -Type 'Txt' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds }
 
     try {
         $txtPath = Join-Path $OutputDir "$BaseFileName.txt"
@@ -6380,9 +6477,11 @@ function Export-BravoTxtReport {
         Set-Content -LiteralPath $txtPath -Value $lines -Encoding utf8
         $script:Report.GeneratedFiles += $txtPath
         Write-Host "  $IconCsv TXT: $BaseFileName.txt" -ForegroundColor Green
+        return New-BravoExportResult -Type 'Txt' -Success $true -Path $txtPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     } catch {
         Add-ExportError -Section 'Export.Txt' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка TXT: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Txt' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }
 
@@ -6413,7 +6512,9 @@ function Export-BravoMdReport {
         [bool]$MD
     )
 
-    if (-not $MD) { return }
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    if (-not $MD) { return New-BravoExportResult -Type 'Md' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds }
 
     try {
         $mdPath = Join-Path $OutputDir "$BaseFileName.md"
@@ -6477,9 +6578,11 @@ function Export-BravoMdReport {
         Set-Content -LiteralPath $mdPath -Value $lines -Encoding utf8
         $script:Report.GeneratedFiles += $mdPath
         Write-Host "  $IconCsv MD: $BaseFileName.md" -ForegroundColor Green
+        return New-BravoExportResult -Type 'Md' -Success $true -Path $mdPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     } catch {
         Add-ExportError -Section 'Export.Md' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка MD: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Md' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }
 
@@ -7019,7 +7122,7 @@ if ($script:SanitizeFailed) {
         param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
         $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
         if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
-            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+            $script:ExportResults += Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
         return [PSCustomObject]@{
@@ -7030,33 +7133,44 @@ if ($script:SanitizeFailed) {
 
     # JSON — Health Score вже фінальний (рахувався до початку export-етапів),
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
+    #
+    # Issue #99: кожен Export-Bravo*Report/Send-BravoEmailReport тепер явно
+    # повертає New-BravoExportResult (Success/Skipped/Path/Error/
+    # DurationSeconds) — Main зберігає ці результати в $script:ExportResults
+    # для діагностики/тестів, маючи прямий сигнал success/failure на кожен
+    # виклик, а не лише опосередкований діф ExportErrors/GeneratedFiles
+    # лічильників. Сам $script:Report.GeneratedFiles і Add-ExportError audit
+    # trail лишаються незмінними (кожен exporter продовжує сам їх вести) —
+    # нова структура доповнює ці канали, а не замінює.
+    $script:ExportResults = @()
+
     $exportErrorCount = @($script:Report.ExportErrors).Count
     $generatedFilesCount = @($script:Report.GeneratedFiles).Count
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    $script:ExportResults += Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
     # HTML
-    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+    $script:ExportResults += Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
 
     # PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
     # виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
     # встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
     # взагалі, тож PDF теж пропускається (нема з чого конвертувати).
     if ($ExportPdf -and -not $JSONOnly) {
-        Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
+        $script:ExportResults += Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
     }
 
     # TXT (plain-text summary — v0.6.0 Reports and UX, той самий формат
     # слугує й copy-friendly support summary) — не залежить від HTML/PDF,
     # генерується прямо з $script:Report, тож не гейтується -JSONOnly.
-    Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
+    $script:ExportResults += Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
 
     # MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
     # самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
     # $script:Report, тож не гейтується -JSONOnly.
-    Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
+    $script:ExportResults += Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
 
     # CSV
-    Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
+    $script:ExportResults += Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
@@ -7068,7 +7182,8 @@ if ($script:SanitizeFailed) {
     $generatedFilesCount = $syncResult.GeneratedFilesCount
 
     # ZIP
-    Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    $zipResult = Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    $script:ExportResults += $zipResult
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
     # Якщо сам ZIP додав ExportError — JSON на диску (не копія всередині вже
@@ -7081,7 +7196,8 @@ if ($script:SanitizeFailed) {
     # момент відправки (Health Score вже фінальний; JSON-вкладення може не
     # містити ExportErrors від самого Email — лист не може повідомити про власну
     # невдалу відправку заднім числом, це очікуване обмеження).
-    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer -SmtpPort $SmtpPort -EmailUseSsl:$EmailUseSsl -EmailCredential $EmailCredential
+    $emailResult = Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer -SmtpPort $SmtpPort -EmailUseSsl:$EmailUseSsl -EmailCredential $EmailCredential
+    $script:ExportResults += $emailResult
 
     # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
     # (не вкладення вже відправленого листа) відображає це.

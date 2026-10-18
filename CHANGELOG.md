@@ -1,4 +1,31 @@
-﻿## Unreleased — v0.6.1 Stabilization continuation (гілка `integration/v0.6.1-secure`)
+﻿## Unreleased — post-v0.6.1 follow-ups
+
+`ScriptVersion`/`SchemaVersion` без змін (структура не персистується в report model).
+
+- **P2 (Issue #99): structured result contract для exporters** — жоден з 8 export-шляхів
+  (JSON/HTML/PDF/CSV/ZIP/Email/TXT/MD) нічого не повертав; Main (`src/90-Main.ps1`) визначав
+  success/failure лише опосередковано, діфом `ExportErrors.Count`/`GeneratedFiles.Count` "до" й
+  "після" кожного виклику. Новий `src/49-Export-Result.ps1` (`New-BravoExportResult`) дає єдиний
+  контракт: `Type`/`Success`/`Skipped`/`Path`/`Error`/`DurationSeconds`. Кожен
+  `Export-Bravo*Report`/`Send-BravoEmailReport` тепер явно повертає цю структуру на кожному зі
+  своїх шляхів (success/skip-за-вибором-користувача/skip-за-відсутньою-опційною-залежністю/
+  failure) — існуючі канали (`Add-ExportError` audit trail, `Write-Host` console UX,
+  `GeneratedFiles +=`) лишаються незмінними поряд з цим. Main явно захоплює кожен результат у
+  `$script:ExportResults` (транзієнтний, НЕ частина персистованого report model).
+  - Побічна знахідка під час написання тестів: `Send-BravoEmailReport`
+    (`src/54-Export-Email.ps1`) завжди передавав `-Attachments` у `Send-MailMessage`, навіть
+    порожнім масивом — реальний cmdlet валідує цей параметр як `ValidateNotNullOrEmpty` і впав
+    би ще до спроби відправки (маскуючи справжню причину під "помилку Email"), якби жоден
+    не-ZIP файл ще не було згенеровано. Виправлено тим самим патерном, що й опційні
+    Port/UseSsl/Credential: `-Attachments` передається лише коли список непорожній.
+  - Нові тести: `tests/ExportResult.Tests.ps1` (21 тест — чиста функція
+    `New-BravoExportResult` + success/skip/failure контракт для всіх 8 exporter-шляхів, включно
+    з регресійним тестом на знахідку вище).
+  - Повний Pester suite: 363/368 passed; 5 skip/fail — ті самі pre-existing VM-специфічні
+    flaky-тести (порожній `Win32_BaseBoard` на цій VM, нестабільна кореляція `Get-NetAdapter`),
+    не пов'язані з цим фіксом.
+
+## Unreleased — v0.6.1 Stabilization continuation (гілка `integration/v0.6.1-secure`)
 
 Продовження стабілізаційного циклу поверх `release/v0.6.1-stable` (PR #85). `ScriptVersion`
 лишається `0.6.1`; `SchemaVersion` без змін.

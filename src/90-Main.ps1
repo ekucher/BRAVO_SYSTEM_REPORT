@@ -529,7 +529,7 @@ if ($script:SanitizeFailed) {
         param([int]$PriorCount, [int]$PriorGeneratedFilesCount)
         $currentGeneratedFilesCount = @($script:Report.GeneratedFiles).Count
         if ((@($script:Report.ExportErrors).Count -gt $PriorCount) -or ($currentGeneratedFilesCount -ne $PriorGeneratedFilesCount)) {
-            Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+            $script:ExportResults += Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
             $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
         }
         return [PSCustomObject]@{
@@ -540,33 +540,44 @@ if ($script:SanitizeFailed) {
 
     # JSON — Health Score вже фінальний (рахувався до початку export-етапів),
     # тому перший запис одразу авторитетний щодо CollectionErrors/Findings.
+    #
+    # Issue #99: кожен Export-Bravo*Report/Send-BravoEmailReport тепер явно
+    # повертає New-BravoExportResult (Success/Skipped/Path/Error/
+    # DurationSeconds) — Main зберігає ці результати в $script:ExportResults
+    # для діагностики/тестів, маючи прямий сигнал success/failure на кожен
+    # виклик, а не лише опосередкований діф ExportErrors/GeneratedFiles
+    # лічильників. Сам $script:Report.GeneratedFiles і Add-ExportError audit
+    # trail лишаються незмінними (кожен exporter продовжує сам їх вести) —
+    # нова структура доповнює ці канали, а не замінює.
+    $script:ExportResults = @()
+
     $exportErrorCount = @($script:Report.ExportErrors).Count
     $generatedFilesCount = @($script:Report.GeneratedFiles).Count
-    Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
+    $script:ExportResults += Export-BravoJsonReport -OutputDir $outputDir -BaseFileName $baseFileName
 
     # HTML
-    Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
+    $script:ExportResults += Export-BravoHtmlReport -OutputDir $outputDir -BaseFileName $baseFileName -JSONOnly $JSONOnly -EventLogDays $EventLogDays -Profile $Profile -ScriptVersion $ScriptVersion
 
     # PDF (опційно, через headless Microsoft Edge) — потребує HTML, тому
     # виконується одразу після Export-BravoHtmlReport і до ZIP, щоб .pdf
     # встиг потрапити в GeneratedFiles до пакування. -JSONOnly вимикає HTML
     # взагалі, тож PDF теж пропускається (нема з чого конвертувати).
     if ($ExportPdf -and -not $JSONOnly) {
-        Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
+        $script:ExportResults += Export-BravoPdfReport -OutputDir $outputDir -BaseFileName $baseFileName
     }
 
     # TXT (plain-text summary — v0.6.0 Reports and UX, той самий формат
     # слугує й copy-friendly support summary) — не залежить від HTML/PDF,
     # генерується прямо з $script:Report, тож не гейтується -JSONOnly.
-    Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
+    $script:ExportResults += Export-BravoTxtReport -OutputDir $outputDir -BaseFileName $baseFileName -TXT $TXT
 
     # MD (Markdown summary — v0.6.0 Reports and UX, для Redmine/GitHub) — той
     # самий принцип, що й TXT: не залежить від HTML/PDF, генерується прямо з
     # $script:Report, тож не гейтується -JSONOnly.
-    Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
+    $script:ExportResults += Export-BravoMdReport -OutputDir $outputDir -BaseFileName $baseFileName -MD $MD
 
     # CSV
-    Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
+    $script:ExportResults += Export-BravoCsvReport -OutputDir $outputDir -BaseFileName $baseFileName -CSV $CSV
 
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
@@ -578,7 +589,8 @@ if ($script:SanitizeFailed) {
     $generatedFilesCount = $syncResult.GeneratedFilesCount
 
     # ZIP
-    Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    $zipResult = Export-BravoZipReport -OutputDir $outputDir -BaseFileName $baseFileName -Zip $Zip
+    $script:ExportResults += $zipResult
     $script:Report.GeneratedFiles = @($script:Report.GeneratedFiles | Select-Object -Unique)
 
     # Якщо сам ZIP додав ExportError — JSON на диску (не копія всередині вже
@@ -591,7 +603,8 @@ if ($script:SanitizeFailed) {
     # момент відправки (Health Score вже фінальний; JSON-вкладення може не
     # містити ExportErrors від самого Email — лист не може повідомити про власну
     # невдалу відправку заднім числом, це очікуване обмеження).
-    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer -SmtpPort $SmtpPort -EmailUseSsl:$EmailUseSsl -EmailCredential $EmailCredential
+    $emailResult = Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer -SmtpPort $SmtpPort -EmailUseSsl:$EmailUseSsl -EmailCredential $EmailCredential
+    $script:ExportResults += $emailResult
 
     # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
     # (не вкладення вже відправленого листа) відображає це.

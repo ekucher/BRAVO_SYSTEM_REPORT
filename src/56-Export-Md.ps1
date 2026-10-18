@@ -20,7 +20,9 @@ function Export-BravoMdReport {
         [bool]$MD
     )
 
-    if (-not $MD) { return }
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    if (-not $MD) { return New-BravoExportResult -Type 'Md' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds }
 
     try {
         $mdPath = Join-Path $OutputDir "$BaseFileName.md"
@@ -84,8 +86,10 @@ function Export-BravoMdReport {
         Set-Content -LiteralPath $mdPath -Value $lines -Encoding utf8
         $script:Report.GeneratedFiles += $mdPath
         Write-Host "  $IconCsv MD: $BaseFileName.md" -ForegroundColor Green
+        return New-BravoExportResult -Type 'Md' -Success $true -Path $mdPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     } catch {
         Add-ExportError -Section 'Export.Md' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка MD: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Md' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }

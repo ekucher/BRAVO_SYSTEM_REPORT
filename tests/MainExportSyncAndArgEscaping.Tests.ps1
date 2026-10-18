@@ -201,6 +201,7 @@ Describe 'New-BravoReportBaseFileName (src/90-Main.ps1) — унікальніс
 
 Describe 'Export-BravoJsonReport / $script:SanitizeActive (src/50-Export-Json.ps1) — GeneratedFiles: серіалізований JSON без абсолютних шляхів, операційний масив незмінний (P1, exact-head review Phase 10; fail-open call-site gap закрито фреш-ревʼю Phase 10)' {
     BeforeAll {
+        . (Join-Path $PSScriptRoot '..\src\49-Export-Result.ps1')
         . (Join-Path $PSScriptRoot '..\src\50-Export-Json.ps1')
     }
 

@@ -18,7 +18,9 @@ function Export-BravoTxtReport {
         [bool]$TXT
     )
 
-    if (-not $TXT) { return }
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    if (-not $TXT) { return New-BravoExportResult -Type 'Txt' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds }
 
     try {
         $txtPath = Join-Path $OutputDir "$BaseFileName.txt"
@@ -71,8 +73,10 @@ function Export-BravoTxtReport {
         Set-Content -LiteralPath $txtPath -Value $lines -Encoding utf8
         $script:Report.GeneratedFiles += $txtPath
         Write-Host "  $IconCsv TXT: $BaseFileName.txt" -ForegroundColor Green
+        return New-BravoExportResult -Type 'Txt' -Success $true -Path $txtPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     } catch {
         Add-ExportError -Section 'Export.Txt' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка TXT: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Txt' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }
