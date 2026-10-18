@@ -47,6 +47,8 @@ function Export-BravoZipReport {
     )
 
     # ZIP
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     if ($Zip) {
         $zipArchive = $null
         $zipStream = $null
@@ -76,12 +78,16 @@ function Export-BravoZipReport {
 
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Zip' -Success $true -Path $zipPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Zip' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка створення ZIP: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Zip' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } finally {
             if ($null -ne $zipArchive) { $zipArchive.Dispose() }
             if ($null -ne $zipStream) { $zipStream.Dispose() }
         }
     }
+
+    return New-BravoExportResult -Type 'Zip' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }

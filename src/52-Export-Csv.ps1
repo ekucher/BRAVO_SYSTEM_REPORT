@@ -17,6 +17,8 @@ function Export-BravoCsvReport {
     )
 
     # CSV
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     if ($CSV) {
         try {
             $csvPath = Join-Path $OutputDir "$BaseFileName.csv"
@@ -62,9 +64,13 @@ function Export-BravoCsvReport {
             $csvData | Export-Csv $csvPath -NoTypeInformation -Encoding utf8
             $script:Report.GeneratedFiles += $csvPath
             Write-Host "  $IconCsv CSV: $BaseFileName.csv" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Csv' -Success $true -Path $csvPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Csv' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка CSV: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Csv' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     }
+
+    return New-BravoExportResult -Type 'Csv' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }

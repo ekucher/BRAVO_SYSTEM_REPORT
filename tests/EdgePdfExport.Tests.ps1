@@ -3,6 +3,7 @@
 # v0.6.1 Advanced UX: -ExportPdf через headless Microsoft Edge).
 
 BeforeAll {
+    . (Join-Path $PSScriptRoot '..\src\49-Export-Result.ps1')
     . (Join-Path $PSScriptRoot '..\src\51-Export-Html.ps1')
 }
 

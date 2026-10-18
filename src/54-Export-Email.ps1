@@ -25,6 +25,8 @@ function Send-BravoEmailReport {
     )
 
     # Email
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     if ($EmailTo) {
         try {
             $smtpToUse = if ($SmtpServer) { $SmtpServer } else { "smtp.$($env:USERDNSDOMAIN.ToLower())" }
@@ -37,18 +39,28 @@ function Send-BravoEmailReport {
                 Subject     = "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)"
                 Body        = $mailBody
                 SmtpServer  = $smtpToUse
-                Attachments = $attachments
                 ErrorAction = 'Stop'
             }
+            # Send-MailMessage валідує -Attachments як ValidateNotNullOrEmpty
+            # (реальний Microsoft.PowerShell.Utility cmdlet) — передача
+            # порожнього масиву (напр. якщо жоден не-ZIP файл ще не
+            # згенеровано) падала б ще до спроби відправки, маскуючи
+            # справжню причину під "помилку Email". Той самий патерн, що й
+            # опційні Port/UseSsl/Credential нижче.
+            if ($attachments.Count -gt 0) { $mailParams.Attachments = $attachments }
             if ($SmtpPort -gt 0) { $mailParams.Port = $SmtpPort }
             if ($EmailUseSsl) { $mailParams.UseSsl = $true }
             if ($EmailCredential) { $mailParams.Credential = $EmailCredential }
 
             Send-MailMessage @mailParams
             Write-Host "  $IconEmail Email відправлено на $EmailTo $(if ($EmailUseSsl) { '(TLS)' } else { '(plaintext SMTP — вкажіть -EmailUseSsl для шифрування)' })" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Email' -Success $true -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Email' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка відправки Email: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Email' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     }
+
+    return New-BravoExportResult -Type 'Email' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }

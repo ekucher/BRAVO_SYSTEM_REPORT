@@ -27,6 +27,8 @@ function Export-BravoHtmlReport {
         [string]$ScriptVersion
     )
 
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     if (-not $JSONOnly) {
         try {
             $htmlPath = Join-Path $OutputDir "$BaseFileName.html"
@@ -739,11 +741,15 @@ function Export-BravoHtmlReport {
             $htmlContent | Out-File $htmlPath -Encoding utf8
             $script:Report.GeneratedFiles += $htmlPath
             Write-Host "  $IconHtml HTML: $BaseFileName.html" -ForegroundColor Green
+            return New-BravoExportResult -Type 'Html' -Success $true -Path $htmlPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } catch {
             Add-ExportError -Section 'Export.Html' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка HTML: $($_.Exception.Message)" -ForegroundColor Red
+            return New-BravoExportResult -Type 'Html' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     }
+
+    return New-BravoExportResult -Type 'Html' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
 }
 
 # Чиста-по-суті функція локалізації msedge.exe: спершу PATH (Get-Command),
@@ -783,18 +789,20 @@ function Export-BravoPdfReport {
         [string]$BaseFileName
     )
 
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     $htmlPath = Join-Path $OutputDir "$BaseFileName.html"
     if (-not (Test-Path -LiteralPath $htmlPath)) {
         # Нема з чого конвертувати (HTML не створено/помилка HTML-етапу) —
         # той HTML-етап уже зафіксував власну ExportError, тут дублювати
         # не потрібно.
-        return
+        return New-BravoExportResult -Type 'Pdf' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 
     $edgePath = Get-BravoEdgeExecutablePath
     if (-not $edgePath) {
         Write-Host "  [INFO] Edge CLI PDF: msedge.exe не знайдено на цій машині — PDF пропущено (не помилка, опційна фіча)." -ForegroundColor Yellow
-        return
+        return New-BravoExportResult -Type 'Pdf' -Success $true -Skipped -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 
     try {
@@ -813,11 +821,15 @@ function Export-BravoPdfReport {
         if ($process.ExitCode -eq 0 -and (Test-Path -LiteralPath $pdfPath)) {
             $script:Report.GeneratedFiles += $pdfPath
             Write-Host "  $IconHtml PDF: $BaseFileName.pdf" -ForegroundColor White
+            return New-BravoExportResult -Type 'Pdf' -Success $true -Path $pdfPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } else {
-            Add-ExportError -Section 'Export.Pdf' -Message "msedge.exe --print-to-pdf завершився з exit code $($process.ExitCode), PDF-файл не з'явився."
+            $pdfErrorMessage = "msedge.exe --print-to-pdf завершився з exit code $($process.ExitCode), PDF-файл не з'явився."
+            Add-ExportError -Section 'Export.Pdf' -Message $pdfErrorMessage
+            return New-BravoExportResult -Type 'Pdf' -Success $false -ErrorMessage $pdfErrorMessage -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         }
     } catch {
         Add-ExportError -Section 'Export.Pdf' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка PDF: $($_.Exception.Message)" -ForegroundColor Red
+        return New-BravoExportResult -Type 'Pdf' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
     }
 }
