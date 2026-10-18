@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-18 13:15:59
+    GeneratedAt: 2026-10-18 14:35:12
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -4420,16 +4420,25 @@ function Get-BravoRuntimeAudit {
     try {
         # .NET Framework 4.8.1 підтримується на Windows 11 22H2+ (build 22621+),
         # Windows Server 2022 23H2/Annual Channel+ (build 25398+, теж >= 22621),
-        # а також офіційно бекпортований (KB5029250 і новіші кумулятивні
-        # оновлення) на Windows 10 22H2 (build 19045) і базовий Windows
-        # Server 2022 RTM (build 20348) — обидва НЕ покриваються єдиним
-        # порогом "-ge 22621" (Release Blocker Fixes v0.6.1: раніше такі
-        # машини помилково отримували рекомендацію "максимум 4.8", хоча
-        # 4.8.1 для них реально доступний). На старіших ОС (Windows 7
-        # SP1–10 до 22H2, Server 2012–2019) 4.8.1 не існує як окремий
-        # пакет — інсталятор там блокується "не підтримується цією ОС",
-        # тож максимум, який можна рекомендувати, — 4.8.
-        $dotNet481SupportedBuilds = @(19045, 20348) # Win10 22H2, Server 2022 RTM
+        # а також офіційно як "installable separately" на Windows 10
+        # 20H2/21H1/21H2/22H2 і базовому Windows Server 2022 RTM — жоден з
+        # них НЕ покривається єдиним порогом "-ge 22621" (Release Blocker
+        # Fixes v0.6.1 додав 19045/20348; Issue #103 — review-бот на PR #102
+        # підняв, що таблиця системних вимог .NET Framework
+        # (learn.microsoft.com/dotnet/framework/get-started/system-requirements,
+        # перевірено 2026-10-18) підтверджує 4.8.1 "Installable separately"
+        # і для 19042/19043/19044 — раніше такі машини помилково отримували
+        # рекомендацію "максимум 4.8"). Build -> версія: 19042=20H2,
+        # 19043=21H1, 19044=21H2 (те саме build number і для Enterprise LTSC
+        # 2021 — окремого запису не потрібно), 19045=22H2, 20348=Server 2022
+        # RTM. 20H2/21H1 самі вже поза mainstream support (out-of-support у
+        # таблиці Microsoft), але це про сервісінг Windows, не про сумісність
+        # .NET Framework — 4.8.1 там інсталюється й працює. На старіших ОС
+        # (Windows 7 SP1 – Windows 10 2004/1909/1903, Server 2012–2019)
+        # 4.8.1 не існує як окремий пакет — інсталятор там блокується "не
+        # підтримується цією ОС", тож максимум, який можна рекомендувати, —
+        # 4.8.
+        $dotNet481SupportedBuilds = @(19042, 19043, 19044, 19045, 20348) # Win10 20H2/21H1/21H2/22H2, Server 2022 RTM
         $osBuildNumber = 0
         $osBuildParsed = [int]::TryParse([string]$script:Report.OS.Build, [ref]$osBuildNumber)
         $supports481 = $osBuildParsed -and (($osBuildNumber -ge 22621) -or ($osBuildNumber -in $dotNet481SupportedBuilds))
