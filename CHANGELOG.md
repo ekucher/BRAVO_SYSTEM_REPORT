@@ -11,6 +11,19 @@
   отримували рекомендацію "максимум 4.8". Знайдено незалежним review-ботом на PR #102.
   Регресійне покриття: `tests/RuntimeCollectors.Tests.ps1` (3 нові It для 19042/19043/19044,
   виправлено помилковий негативний тест, який раніше фіксував саме цю поведінку як очікувану).
+- **P2 (Issue #104): Contract-change guard у `powershell-static-check.yml` не покривав поля,
+  додані динамічно в колекторах** — guard тригерився лише на diff `src/20-ReportModel.ps1`,
+  тож PR міг перейменувати/додати/видалити поле репорту, що задається через `Add-Member`
+  прямо в колекторі (напр. `Hardware.Disks.Deep`/`StorageRisk` у
+  `src/32-Collectors-Storage.ps1`), не торкаючись моделі — і обійти обидві перевірки
+  (`SchemaVersion`, `CHANGELOG.md`). Замість декларування повної форми в моделі (що довело
+  б до дублювання структури у двох місцях і не покрило б майбутні колектори), guard
+  розширено детектором: будь-який доданий/видалений рядок `Add-Member -MemberType
+  NoteProperty -Name`/`-NotePropertyName` у diff'і будь-якого `src/*.ps1` файлу тепер теж
+  вимагає той самий `SchemaVersion`+`CHANGELOG` supplement. Знайдено незалежним review-ботом
+  на PR #102. Перевірено end-to-end у disposable `git worktree` (5 сценаріїв: no-op,
+  новий Add-Member без контракт-бампу → throw, SchemaVersion без CHANGELOG → throw, обидва →
+  pass, непов'язана зміна в тому ж файлі → no false-positive).
 
 ## Unreleased — v0.6.1 Stabilization continuation (гілка `integration/v0.6.1-secure`)
 

@@ -136,23 +136,42 @@ jobs:
 
           $reportModelChanged = $changedFiles -contains "src/20-ReportModel.ps1"
 
-          if ($reportModelChanged) {
-            Write-Host "[INFO] src/20-ReportModel.ps1 changed - report contract may have changed."
+          # Issue #104: report contract fields can also be added/renamed/removed
+          # dynamically inside a collector (e.g. Hardware.Disks.Deep/StorageRisk
+          # in src/32-Collectors-Storage.ps1, via Add-Member) without ever
+          # touching src/20-ReportModel.ps1 - such a diff would previously
+          # bypass both the SchemaVersion and CHANGELOG checks below. Detect
+          # added/removed Add-Member report-field lines anywhere under src/,
+          # not just in one allowlisted file, so a future collector adopting
+          # the same dynamic-field pattern is covered automatically.
+          $dynamicFieldDiffLines = git diff "$baseSha" "$headSha" -- 'src/*.ps1' |
+            Select-String -Pattern '^[+-]\s*.*Add-Member\s+(-MemberType\s+NoteProperty\s+-Name|-NotePropertyName)\s+[''"]'
+
+          $contractMayHaveChanged = $reportModelChanged -or [bool]$dynamicFieldDiffLines
+
+          if ($contractMayHaveChanged) {
+            if ($reportModelChanged) {
+              Write-Host "[INFO] src/20-ReportModel.ps1 changed - report contract may have changed."
+            }
+            if ($dynamicFieldDiffLines) {
+              Write-Host "[INFO] Dynamically-added report field(s) changed (Add-Member) outside src/20-ReportModel.ps1:"
+              $dynamicFieldDiffLines | ForEach-Object { Write-Host "  $($_.Line.Trim())" }
+            }
 
             $schemaVersionDiff = git diff "$baseSha" "$headSha" -- src/20-ReportModel.ps1 | Select-String -Pattern '^\s*[+-]\s*SchemaVersion\s*='
             $changelogChanged = $changedFiles -contains "CHANGELOG.md"
 
             if (-not $schemaVersionDiff) {
-              throw "src/20-ReportModel.ps1 changed, but SchemaVersion value in diff did not change. If this is a report contract change, bump SchemaVersion (docs/AI_RULES.md item 6). If the contract did not change, verify the diff really does not touch report structure."
+              throw "Report contract may have changed (src/20-ReportModel.ps1 and/or a dynamically-added field via Add-Member in another src/ module), but SchemaVersion value in src/20-ReportModel.ps1 did not change. If this is a report contract change, bump SchemaVersion (docs/AI_RULES.md item 6). If the contract did not change, verify the diff really does not touch report structure."
             }
 
             if (-not $changelogChanged) {
-              throw "src/20-ReportModel.ps1 changed (SchemaVersion bumped), but CHANGELOG.md was not updated (docs/AI_RULES.md item 6)."
+              throw "Report contract changed (SchemaVersion bumped), but CHANGELOG.md was not updated (docs/AI_RULES.md item 6)."
             }
 
             Write-Host "[OK] SchemaVersion and CHANGELOG.md updated together with the contract change"
           } else {
-            Write-Host "[OK] src/20-ReportModel.ps1 not changed - check not applicable"
+            Write-Host "[OK] No report-model or dynamically-added-field changes detected - check not applicable"
           }
 
       - name: Встановити Pester
