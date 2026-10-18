@@ -47,7 +47,7 @@ function Send-BravoEmailReport {
             Send-MailMessage @mailParams
             Write-Host "  $IconEmail Email відправлено на $EmailTo $(if ($EmailUseSsl) { '(TLS)' } else { '(plaintext SMTP — вкажіть -EmailUseSsl для шифрування)' })" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Email' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Email' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка відправки Email: $($_.Exception.Message)" -ForegroundColor Red
         }
     }

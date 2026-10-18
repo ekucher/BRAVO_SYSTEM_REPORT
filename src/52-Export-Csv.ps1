@@ -38,6 +38,8 @@ function Export-BravoCsvReport {
                 [PSCustomObject]@{Parameter='IPv4'; Value=($script:Report.Network.IP.IPv4 -join '; ')}
                 [PSCustomObject]@{Parameter='RDP_Enabled'; Value=$script:Report.Security.RemoteAccess.RDPEnabled}
                 [PSCustomObject]@{Parameter='UAC_Enabled'; Value=$script:Report.Security.UAC.Enabled}
+                [PSCustomObject]@{Parameter='SecureBoot_Status'; Value=$script:Report.Security.SecureBoot.Status}
+                [PSCustomObject]@{Parameter='TPM_Status'; Value=$script:Report.Security.TPM.Status}
                 [PSCustomObject]@{Parameter='Processes'; Value=$script:Report.Processes.Total}
                 [PSCustomObject]@{Parameter='Running_Services'; Value=$script:Report.Services.Running}
                 [PSCustomObject]@{Parameter='AutomaticStoppedServices'; Value=$script:Report.Services.AutomaticStopped.Count}
@@ -61,7 +63,7 @@ function Export-BravoCsvReport {
             $script:Report.GeneratedFiles += $csvPath
             Write-Host "  $IconCsv CSV: $BaseFileName.csv" -ForegroundColor Green
         } catch {
-            Add-AuditError -Section 'Export.Csv' -Message $_.Exception.Message
+            Add-ExportError -Section 'Export.Csv' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка CSV: $($_.Exception.Message)" -ForegroundColor Red
         }
     }

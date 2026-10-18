@@ -10,16 +10,24 @@ param(
 
     [switch]$JSONOnly,
     [switch]$CSV,
+    [switch]$TXT,
+    [switch]$MD,
     [switch]$Zip = $true,
+    [switch]$NoZip,
     [switch]$NoEmoji,
     [switch]$NoElevate,
     [switch]$NoPause,
     [switch]$NoOpenFolder,
     [switch]$SkipElevation,
+    [switch]$SkipPublicIP,
+    [switch]$SkipGeoIP,
+    [switch]$Offline,
+    [switch]$Strict,
+    [switch]$Sanitize,
+    [ValidateSet('Basic','Strict')]
+    [string]$SanitizeLevel = 'Basic',
 
     [int]$EventLogDays = 0,
-
-    [switch]$SkipPublicIPLookup,
 
     [switch]$SkipUpdateSearch,
     [int]$UpdateSearchTimeoutSec = 180,
@@ -29,5 +37,7 @@ param(
     [string]$SmtpServer = '',
     [int]$SmtpPort = 0,
     [switch]$EmailUseSsl,
-    [System.Management.Automation.PSCredential]$EmailCredential
+    [System.Management.Automation.PSCredential]$EmailCredential,
+
+    [switch]$ExportPdf
 )

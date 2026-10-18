@@ -17,13 +17,22 @@
 
 - Не комітити сформовані звіти в Git.
 - Не публікувати HTML/JSON-звіти у відкритому доступі.
-- Для передачі третім сторонам використовувати майбутній параметр `-Sanitize`.
+- Для передачі третім сторонам використовувати параметр `-Sanitize` (`-SanitizeLevel Basic|Strict`) — маскує computer name, user name, domain/DNS suffix, public IPv4, MAC-адреси, серійні номери, локальних адміністраторів, install paths; `Strict` додатково маскує приватні IPv4/gateway/DNS. Деталі: `CHANGELOG.md` P1/v0.4.3, `src/45-Sanitize.ps1`.
 - Не збирати паролі, токени, private keys, cookies або browser credentials.
 - Не експортувати секретні registry-гілки без явної потреби.
 
 ## Рекомендований режим GitHub
 
-Для цього проекту рекомендовано приватний репозиторій.
+Репозиторій публічний (`ekucher/BRAVO_SYSTEM_REPORT`). Threat model нижче свідомо
+розрахована саме на цей режим — pull request може прийти від будь-кого, включно з
+fork без попередньої довіри, тому CI trust boundary (self-hosted runner ізольований
+від `pull_request`/`pull_request_target`, PR-код лише статично аналізується на
+ephemeral GitHub-hosted runner) і обов'язкове налаштування
+**Require approval for all external contributors** нижче — не опціональні
+рекомендації, а необхідна умова безпечної роботи саме публічного репозиторію.
+Якщо репозиторій колись стане приватним, більшість цих обмежень (crypto-hardened
+trust boundary) можна буде послабити, але сама можливість fork PR з довільним
+кодом зникне лише разом із приватністю.
 
 ## CI trust model
 
@@ -48,8 +57,9 @@ execution на локальній Windows-машині. Відсутність G
 Тому `.github/workflows/local-windows-validation.yml`:
 
 - **не має** тригерів `pull_request` і `pull_request_target`;
-- запускається лише на `push` у `main` / `bravo/integration/modular-build` та на
-  `workflow_dispatch` — тобто на подіях, які вимагають write-доступу до репозиторію;
+- запускається лише на `push` у `main` / `developer` / `bravo/integration/modular-build` /
+  `release/**` та на `workflow_dispatch` — тобто на подіях, які вимагають write-доступу до
+  репозиторію;
 - має job-level gate `if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'`,
   тож job взагалі не потрапляє в чергу runner-а для іншої події;
 - перед checkout виконує крок `Trust gate`, який ще раз перевіряє provenance події,
@@ -65,7 +75,9 @@ execution на локальній Windows-машині. Відсутність G
 | Подія | Windows validation |
 |---|---|
 | `push` у `main` | так |
+| `push` у `developer` | так |
 | `push` у `bravo/integration/modular-build` | так |
+| `push` у `release/**` | так |
 | `workflow_dispatch` | так, на ревізії, яку обрав maintainer |
 | `push` тега `v*` | так, через `release.yml` |
 | будь-який `pull_request` | ні |

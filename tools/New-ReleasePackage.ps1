@@ -91,9 +91,16 @@ function Resolve-PackageRelativePath {
     return (Join-Path $RepoPath $normalized)
 }
 
-$RuntimeScript = Resolve-PackageRelativePath -RepoPath $RepoPath -RelativePath "dist/Get-BravoSystemReport.ps1"
-if (-not (Test-Path -LiteralPath $RuntimeScript)) {
-    throw "Runtime script not found: $RuntimeScript. Спочатку виконайте Build-BRAVO-SystemReport.ps1."
+$DistScript = Resolve-PackageRelativePath -RepoPath $RepoPath -RelativePath "dist/Get-BravoSystemReport.ps1"
+$DistSha512 = "$DistScript.sha512"
+if (-not (Test-Path -LiteralPath $DistScript) -or -not (Test-Path -LiteralPath $DistSha512)) {
+    throw "dist\Get-BravoSystemReport.ps1 (+ .sha512) не знайдено. Спершу виконайте: .\Build-BRAVO-SystemReport.ps1 -CreateSha512"
+}
+
+$ActualHash = (Get-FileHash -LiteralPath $DistScript -Algorithm SHA512).Hash.Trim()
+$RecordedHash = (Get-Content -LiteralPath $DistSha512 -Raw).Trim()
+if ($ActualHash -ne $RecordedHash) {
+    throw "dist\Get-BravoSystemReport.ps1.sha512 не відповідає dist\Get-BravoSystemReport.ps1. Перезберіть через .\Build-BRAVO-SystemReport.ps1 -CreateSha512"
 }
 
 $ConsistentVersion = Assert-PackageVersionConsistency -RepoPath $RepoPath
@@ -135,6 +142,7 @@ $IncludeFiles = @(
     "README.md",
     "CHANGELOG.md",
     "LICENSE.md",
+    "docs/AI_RULES.md",
     "docs/ARCHITECTURE.md",
     "docs/PROJECT_RULES.md",
     "docs/ROADMAP.md",
@@ -216,12 +224,29 @@ $ZipStream = New-Object System.IO.FileStream($ZipPath, [System.IO.FileMode]::Cre
 $ZipArchive = New-Object System.IO.Compression.ZipArchive($ZipStream, [System.IO.Compression.ZipArchiveMode]::Create)
 
 try {
-    Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
-        Sort-Object FullName |
-        ForEach-Object {
-            $EntryName = $_.FullName.Substring($StagingRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\')
-            Add-ZipEntry -Archive $ZipArchive -SourcePath $_.FullName -EntryName $EntryName
-        }
+    # Push-Location + Resolve-Path -Relative замість ручного
+    # .Substring($StagingRoot.Length): на машинах, де $OutputPath (напр.
+    # побудований з $env:TEMP) резолвиться у 8.3 коротку форму (типу
+    # "BRAVOR~1"), а Get-ChildItem повертає .FullName у довгій формі,
+    # наївна арифметика по довжині рядка з'їжджає — файли пакувались із
+    # "хвостом" шляху замість чистого відносного імені (напр.
+    # "5.1/BRAVO-SystemReport-Quick.bat" замість "BRAVO-SystemReport-Quick.bat",
+    # спостережено на self-hosted CI runner). Resolve-Path -Relative рахує
+    # відносний шлях через провайдер PowerShell від поточної локації —
+    # коректно незалежно від того, в якій формі (коротка/довга) виражені
+    # проміжні сегменти шляху.
+    Push-Location -LiteralPath $StagingRoot
+    try {
+        Get-ChildItem -LiteralPath $StagingRoot -Recurse -File |
+            Sort-Object FullName |
+            ForEach-Object {
+                $EntryName = (Resolve-Path -LiteralPath $_.FullName -Relative) -replace '^\.[\\/]', '' -replace '\\', '/'
+                Add-ZipEntry -Archive $ZipArchive -SourcePath $_.FullName -EntryName $EntryName
+            }
+    }
+    finally {
+        Pop-Location
+    }
 }
 finally {
     $ZipArchive.Dispose()
