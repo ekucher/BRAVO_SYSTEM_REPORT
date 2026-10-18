@@ -1,4 +1,18 @@
-﻿## Unreleased — v0.6.1 Stabilization continuation (гілка `integration/v0.6.1-secure`)
+﻿## Unreleased — post-v0.6.1 follow-ups
+
+`ScriptVersion`/`SchemaVersion` без змін.
+
+- **P2 (Issue #103): `.NET Framework 4.8.1` allowlist не покривав Windows 10 20H2/21H1/21H2**
+  (`src/39b-Collectors-Runtime.ps1`) — `$dotNet481SupportedBuilds` визнавав лише build 19045
+  (22H2) і 20348 (Server 2022 RTM), хоча офіційна таблиця системних вимог .NET Framework
+  (learn.microsoft.com/dotnet/framework/get-started/system-requirements, перевірено 2026-10-18)
+  підтверджує 4.8.1 як "Installable separately" і для build 19042 (20H2), 19043 (21H1), 19044
+  (21H2, те саме build number і для Windows 10 Enterprise LTSC 2021) — такі машини помилково
+  отримували рекомендацію "максимум 4.8". Знайдено незалежним review-ботом на PR #102.
+  Регресійне покриття: `tests/RuntimeCollectors.Tests.ps1` (3 нові It для 19042/19043/19044,
+  виправлено помилковий негативний тест, який раніше фіксував саме цю поведінку як очікувану).
+
+## Unreleased — v0.6.1 Stabilization continuation (гілка `integration/v0.6.1-secure`)
 
 Продовження стабілізаційного циклу поверх `release/v0.6.1-stable` (PR #85). `ScriptVersion`
 лишається `0.6.1`; `SchemaVersion` без змін.

@@ -59,6 +59,24 @@ Describe 'Get-BravoRuntimeAudit — .NET Framework 4.8.1 build matrix' {
         $script:Report.DotNet.LatestKnownVersion | Should -Be '4.8.1'
     }
 
+    It 'Win10 21H2 (build 19044, і Enterprise LTSC 2021) — 4.8.1 сумісна версія (Issue #103, підтверджено learn.microsoft.com)' {
+        $script:Report = New-BravoFakeRuntimeReport -OsBuild '19044'
+        Get-BravoRuntimeAudit
+        $script:Report.DotNet.LatestKnownVersion | Should -Be '4.8.1'
+    }
+
+    It 'Win10 21H1 (build 19043) — 4.8.1 сумісна версія (Issue #103, підтверджено learn.microsoft.com)' {
+        $script:Report = New-BravoFakeRuntimeReport -OsBuild '19043'
+        Get-BravoRuntimeAudit
+        $script:Report.DotNet.LatestKnownVersion | Should -Be '4.8.1'
+    }
+
+    It 'Win10 20H2 (build 19042) — 4.8.1 сумісна версія (Issue #103, підтверджено learn.microsoft.com)' {
+        $script:Report = New-BravoFakeRuntimeReport -OsBuild '19042'
+        Get-BravoRuntimeAudit
+        $script:Report.DotNet.LatestKnownVersion | Should -Be '4.8.1'
+    }
+
     It 'Server 2022 RTM (build 20348) — 4.8.1 сумісна версія (bekported build, Release Blocker Fixes v0.6.1)' {
         $script:Report = New-BravoFakeRuntimeReport -OsBuild '20348'
         Get-BravoRuntimeAudit
@@ -77,8 +95,8 @@ Describe 'Get-BravoRuntimeAudit — .NET Framework 4.8.1 build matrix' {
         $script:Report.DotNet.LatestKnownVersion | Should -Be '4.8.1'
     }
 
-    It 'старіший build (19044, Windows 10 21H2) — максимум 4.8, НЕ 4.8.1' {
-        $script:Report = New-BravoFakeRuntimeReport -OsBuild '19044'
+    It 'старіший build (19041, Windows 10 2004) — максимум 4.8, НЕ 4.8.1 (Issue #103: 19042/19043/19044 вже в allowlist, 19041 — ні)' {
+        $script:Report = New-BravoFakeRuntimeReport -OsBuild '19041'
         Get-BravoRuntimeAudit
         $script:Report.DotNet.LatestKnownVersion | Should -Be '4.8'
     }
