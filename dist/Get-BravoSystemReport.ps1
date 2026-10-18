@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-09-25 22:54:26
+    GeneratedAt: 2026-10-18 13:15:59
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -57,6 +57,9 @@ param(
     [string]$EmailTo,
     [string]$EmailFrom = "systemaudit@$($env:COMPUTERNAME).local",
     [string]$SmtpServer = '',
+    [int]$SmtpPort = 0,
+    [switch]$EmailUseSsl,
+    [System.Management.Automation.PSCredential]$EmailCredential,
 
     [switch]$ExportPdf
 )
@@ -723,7 +726,8 @@ function Get-BravoOperatingSystemAudit {
     [CmdletBinding()]
     param()
 
-    # --- ОС ---
+    # --- ОС: базові поля ---
+    $osInfo = $null
     try {
         $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
         $script:Report.OS.Caption = $osInfo.Caption
@@ -731,31 +735,38 @@ function Get-BravoOperatingSystemAudit {
         $script:Report.OS.Build = $osInfo.BuildNumber
         $script:Report.OS.Architecture = $osInfo.OSArchitecture
 
-        $installDate = Convert-AuditDateTime -Value $osInfo.InstallDate -UseCim:$script:UseCim
-        if ($installDate) { $script:Report.OS.InstallDate = $installDate.ToString('yyyy-MM-dd') }
-
-        $lastBoot = Convert-AuditDateTime -Value $osInfo.LastBootUpTime -UseCim:$script:UseCim
-        if ($lastBoot) {
-            $uptime = (Get-Date) - $lastBoot
-            $script:Report.OS.LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
-            $script:Report.OS.UptimeDays = $uptime.Days
-            $script:Report.OS.UptimeHours = [Math]::Round($uptime.TotalHours, 1)
-            $script:Report.Dashboard.Header.UptimeText = "$($script:Report.OS.UptimeDays) дн. / $($script:Report.OS.UptimeHours) год."
-        }
-
         $script:Report.Dashboard.Metrics.OS.Value = $script:Report.OS.Caption
         $script:Report.Dashboard.Metrics.OS.Details = "Build $($script:Report.OS.Build), $($script:Report.OS.Architecture)"
         $script:Report.Dashboard.Metrics.OS.Status = 'OK'
-
-        if ($script:Report.OS.UptimeDays -gt 90) {
-            Add-AuditFinding -Severity 'WARNING' -Category 'OS' -Message "Uptime більше 90 днів: $($script:Report.OS.UptimeDays)" -Recommendation 'Заплануйте контрольоване перезавантаження після перевірки критичних служб.'
-            $script:Report.Dashboard.Metrics.OS.Status = 'WARNING'
-        }
 
         Write-Host "  $IconOk ОС: $($script:Report.OS.Caption)" -ForegroundColor Green
     } catch {
         Add-AuditError -Section 'OS' -Message $_.Exception.Message
         Write-Host "  $IconError Помилка збору даних ОС: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # --- ОС: uptime (окремо, щоб збій тут не ламав базові поля вище) ---
+    if ($osInfo) {
+        try {
+            $installDate = Convert-AuditDateTime -Value $osInfo.InstallDate -UseCim:$script:UseCim
+            if ($installDate) { $script:Report.OS.InstallDate = $installDate.ToString('yyyy-MM-dd') }
+
+            $lastBoot = Convert-AuditDateTime -Value $osInfo.LastBootUpTime -UseCim:$script:UseCim
+            if ($lastBoot) {
+                $uptime = (Get-Date) - $lastBoot
+                $script:Report.OS.LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
+                $script:Report.OS.UptimeDays = $uptime.Days
+                $script:Report.OS.UptimeHours = [Math]::Round($uptime.TotalHours, 1)
+                $script:Report.Dashboard.Header.UptimeText = "$($script:Report.OS.UptimeDays) дн. / $($script:Report.OS.UptimeHours) год."
+
+                if ($script:Report.OS.UptimeDays -gt 90) {
+                    Add-AuditFinding -Severity 'WARNING' -Category 'OS' -Message "Uptime більше 90 днів: $($script:Report.OS.UptimeDays)" -Recommendation 'Заплануйте контрольоване перезавантаження після перевірки критичних служб.'
+                    $script:Report.Dashboard.Metrics.OS.Status = 'WARNING'
+                }
+            }
+        } catch {
+            Add-AuditError -Section 'OS.Uptime' -Message $_.Exception.Message
+        }
     }
 }
 
@@ -834,11 +845,10 @@ function Get-BravoHardwareAudit {
     [CmdletBinding()]
     param()
 
-    # --- Апаратне забезпечення ---
+    # --- Апаратне забезпечення: ComputerSystem + CPU ---
     try {
         $cpuInfo = Get-AuditObject -ClassName 'Win32_Processor' -First
         $computerSystemInfo = Get-AuditObject -ClassName 'Win32_ComputerSystem' -First
-        $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
 
         $script:Report.Hardware.ComputerSystem.Manufacturer = $computerSystemInfo.Manufacturer
         $script:Report.Hardware.ComputerSystem.Model = $computerSystemInfo.Model
@@ -861,6 +871,21 @@ function Get-BravoHardwareAudit {
         if ($null -ne $cpuLoadAverage) {
             $script:Report.Hardware.CPU.LoadPercent = [Math]::Round($cpuLoadAverage)
         }
+
+        $script:Report.Dashboard.Metrics.CPU.Value = "$($script:Report.Hardware.CPU.LoadPercent)%"
+        $script:Report.Dashboard.Metrics.CPU.Details = "$($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків"
+        $script:Report.Dashboard.Metrics.CPU.Status = if ($script:Report.Hardware.CPU.LoadPercent -ge 90) { 'CRITICAL' } elseif ($script:Report.Hardware.CPU.LoadPercent -ge 75) { 'WARNING' } else { 'OK' }
+
+        Write-Host "  $IconCpu CPU: $($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків ($($script:Report.Hardware.CPU.LoadPercent)%)" -ForegroundColor Green
+    } catch {
+        Add-AuditError -Section 'Hardware.CPU' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка апаратних даних (CPU): $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # --- Апаратне забезпечення: RAM (окремо, щоб збій тут не ламав CPU-дані вище) ---
+    try {
+        $computerSystemInfo = Get-AuditObject -ClassName 'Win32_ComputerSystem' -First
+        $osInfo = Get-AuditObject -ClassName 'Win32_OperatingSystem' -First
 
         $totalPhysicalMemoryGB = [Math]::Round($computerSystemInfo.TotalPhysicalMemory / 1GB, 2)
         $script:Report.Hardware.RAM.TotalGB = $totalPhysicalMemoryGB
@@ -1011,11 +1036,10 @@ function Get-BravoHardwareAudit {
             }
         }
 
-        Write-Host "  $IconCpu CPU: $($script:Report.Hardware.CPU.Cores) ядер / $($script:Report.Hardware.CPU.LogicalProcessors) потоків ($($script:Report.Hardware.CPU.LoadPercent)%)" -ForegroundColor Green
         Write-Host "  $IconRam RAM: $($script:Report.Hardware.RAM.TotalGB) GB ($($script:Report.Hardware.RAM.UsedPercent)% використано)" -ForegroundColor Green
     } catch {
-        Add-AuditError -Section 'Hardware' -Message $_.Exception.Message
-        Write-Host "  $IconError Помилка апаратних даних: $($_.Exception.Message)" -ForegroundColor Red
+        Add-AuditError -Section 'Hardware.RAM' -Message $_.Exception.Message
+        Write-Host "  $IconError Помилка апаратних даних (RAM): $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
@@ -3212,32 +3236,30 @@ function Get-BravoProcessesServicesAudit {
         $script:Report.Services.Total = $serviceInfo.Count
         $script:Report.Services.Running = @($serviceInfo | Where-Object { $_.Status -eq 'Running' }).Count
 
-        if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
-            try {
-                # Відомі trigger-start/опціональні служби Windows: WMI показує їх як
-                # StartMode='Auto', але вони штатно стоять Stopped, поки їх не розбудить
-                # тригер (подія/пристрій/попит) — це не ознака проблеми на машині.
-                # RemoteRegistry особливо: зупинена = добре (security best practice).
-                $bravoKnownTriggerStartServices = @(
-                    'edgeupdate', 'edgeupdatem', 'gupdate', 'gupdatem',
-                    'MapsBroker', 'sppsvc', 'WbioSrvc', 'RemoteRegistry'
-                )
+        try {
+            # Відомі trigger-start/опціональні служби Windows: WMI показує їх як
+            # StartMode='Auto', але вони штатно стоять Stopped, поки їх не розбудить
+            # тригер (подія/пристрій/попит) — це не ознака проблеми на машині.
+            # RemoteRegistry особливо: зупинена = добре (security best practice).
+            $bravoKnownTriggerStartServices = @(
+                'edgeupdate', 'edgeupdatem', 'gupdate', 'gupdatem',
+                'MapsBroker', 'sppsvc', 'WbioSrvc', 'RemoteRegistry'
+            )
 
-                $autoStopped = Get-CimInstance Win32_Service -Filter "StartMode='Auto' AND State<>'Running'" -ErrorAction Stop
-                $script:Report.Services.AutomaticStopped = @($autoStopped | Select-Object Name, DisplayName, State, StartMode, StartName)
+            $autoStopped = Get-AuditObject -ClassName 'Win32_Service' -Filter "StartMode='Auto' AND State<>'Running'"
+            $script:Report.Services.AutomaticStopped = @($autoStopped | Select-Object Name, DisplayName, State, StartMode, StartName)
 
-                $noteworthyStopped = @($script:Report.Services.AutomaticStopped | Where-Object { $_.Name -notin $bravoKnownTriggerStartServices })
+            $noteworthyStopped = @($script:Report.Services.AutomaticStopped | Where-Object { $_.Name -notin $bravoKnownTriggerStartServices })
 
-                if ($noteworthyStopped.Count -gt 0) {
-                    $totalStoppedCount = $script:Report.Services.AutomaticStopped.Count
-                    $noiseCount = $totalStoppedCount - $noteworthyStopped.Count
-                    $noiseNote = if ($noiseCount -gt 0) { " (ще $noiseCount — відомі trigger-start/опціональні служби, не є ризиком)" } else { '' }
+            if ($noteworthyStopped.Count -gt 0) {
+                $totalStoppedCount = $script:Report.Services.AutomaticStopped.Count
+                $noiseCount = $totalStoppedCount - $noteworthyStopped.Count
+                $noiseNote = if ($noiseCount -gt 0) { " (ще $noiseCount — відомі trigger-start/опціональні служби, не є ризиком)" } else { '' }
 
-                    Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($noteworthyStopped.Count)$noiseNote." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
-                }
-            } catch {
-                Add-AuditError -Section 'Services.AutomaticStopped' -Message $_.Exception.Message
+                Add-AuditFinding -Severity 'WARNING' -Category 'Services' -Message "Автоматичних служб не запущено: $($noteworthyStopped.Count)$noiseNote." -Recommendation 'Перевірте, чи ці служби мають бути запущені.'
             }
+        } catch {
+            Add-AuditError -Section 'Services.AutomaticStopped' -Message $_.Exception.Message
         }
     } catch {
         Add-AuditError -Section 'Services' -Message $_.Exception.Message
@@ -3293,61 +3315,101 @@ function ConvertTo-BravoEventLogSummary {
     }
 }
 
+function Get-BravoWinEventCount {
+    # Get-WinEvent -FilterHashtable виконує запит на рівні Win32 Event Log API
+    # (індексований пошук по EVTX), тож на великому System log він у рази
+    # швидший за застарілий Get-EventLog, який послідовно перебирає записи.
+    # "Нуль відповідних подій" у Get-WinEvent — це не збій, а окрема
+    # нетерміновна помилка з FullyQualifiedErrorId NoMatchingEventsFound;
+    # її явно відрізняємо від реального збою (журнал недоступний тощо),
+    # щоб не повторити помилку "справжня помилка ковтається мовчки".
+    param(
+        [Parameter(Mandatory)][string]$LogName,
+        [Parameter(Mandatory)][int[]]$Level,
+        [Parameter(Mandatory)][datetime]$StartTime
+    )
+
+    try {
+        return @(Get-WinEvent -FilterHashtable @{ LogName = $LogName; Level = $Level; StartTime = $StartTime } -ErrorAction Stop).Count
+    } catch {
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound,*') {
+            return 0
+        }
+        throw
+    }
+}
+
 function Get-BravoEventLogsAudit {
     [CmdletBinding()]
     param()
 
     # --- Журнали подій ---
+    # Кожен запит до журналу виконується з власним try/catch: збій одного
+    # запиту (журнал недоступний, відмовлено в доступі тощо) фіксується через
+    # Add-AuditError, а не "ковтається" мовчки, і не блокує виконання решти
+    # запитів цієї функції.
+    $lastDay = (Get-Date).AddDays(-1)
+    $eventLogStart = (Get-Date).AddDays(-1 * $EventLogDays)
+
+    $systemErrors24h = 0
+    $systemWarnings24h = 0
+    $systemErrors = 0
+    $systemWarnings = 0
+    $topErrorSources = @()
+
     try {
-        $lastDay = (Get-Date).AddDays(-1)
-        $eventLogStart = (Get-Date).AddDays(-1 * $EventLogDays)
+        $systemErrors24h = Get-BravoWinEventCount -LogName 'System' -Level 2 -StartTime $lastDay
+    } catch {
+        Add-AuditError -Section 'EventLogs' -Message "SystemErrors24h: $($_.Exception.Message)"
+    }
 
-        # -ErrorAction SilentlyContinue сам собою нічого не пише в CollectionErrors.
-        # "No matches found" — очікуваний benign-результат, коли за період справді
-        # немає жодного запису (не помилка збору). Будь-яка ІНША помилка
-        # (лог очищено/недоступний, немає прав) реєструється явно, щоб
-        # SystemErrors=0 не видавали себе за "перевірено й чисто", коли збір
-        # насправді провалився.
-        $eventLogErrors = @()
-        $systemErrors24h = Get-EventLog -LogName System -EntryType Error -After $lastDay -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
-        $systemWarnings24h = Get-EventLog -LogName System -EntryType Warning -After $lastDay -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
-        $systemErrors = Get-EventLog -LogName System -EntryType Error -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
-        $systemWarnings = Get-EventLog -LogName System -EntryType Warning -After $eventLogStart -ErrorAction SilentlyContinue -ErrorVariable +eventLogErrors
+    try {
+        $systemWarnings24h = Get-BravoWinEventCount -LogName 'System' -Level 3 -StartTime $lastDay
+    } catch {
+        Add-AuditError -Section 'EventLogs' -Message "SystemWarnings24h: $($_.Exception.Message)"
+    }
 
-        # Звіряємо FullyQualifiedErrorId, а не текст Exception.Message: повідомлення
-        # локалізується разом з MUI-пакетом Windows (напр. на uk-UA/ru-UA системах
-        # текст буде не англійським), тоді як FullyQualifiedErrorId — стабільний
-        # ідентифікатор, незалежний від локалі.
-        foreach ($eventLogError in $eventLogErrors) {
-            if ($eventLogError.FullyQualifiedErrorId -notmatch 'GetEventLogNoEntriesFound') {
-                Add-AuditError -Section 'EventLogs.System' -Message $eventLogError.Exception.Message
-            }
-        }
+    try {
+        # Повний набір подій (не лише Count), бо знахідка нижче публікує
+        # топ джерел помилок — той самий індексований Get-WinEvent API, що й
+        # Get-BravoWinEventCount, лише без відкидання самих об'єктів.
+        $systemErrorEvents = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Level = 2; StartTime = $eventLogStart } -ErrorAction Stop)
+        $systemErrors = $systemErrorEvents.Count
 
-        $script:Report.EventLogs.SystemErrors24h = @($systemErrors24h).Count
-        $script:Report.EventLogs.SystemWarnings24h = @($systemWarnings24h).Count
-        $script:Report.EventLogs.SystemErrors = @($systemErrors).Count
-        $script:Report.EventLogs.SystemWarnings = @($systemWarnings).Count
-
-        # Топ джерел помилок — щоб знахідка була дієвою, а не просто цифрою.
         $topErrorSources = @(
-            $systemErrors |
-                Group-Object -Property Source |
+            $systemErrorEvents |
+                Group-Object -Property ProviderName |
                 Sort-Object -Property Count -Descending |
                 Select-Object -First 10 -Property @{Name='Source'; Expression={$_.Name}}, Count, @{Name='LastMessage'; Expression={($_.Group | Select-Object -First 1).Message}}
         )
-        $script:Report.EventLogs.TopErrorSources = $topErrorSources
-
-        if ($script:Report.EventLogs.SystemErrors -gt 0) {
-            $topSourcesText = ($topErrorSources | Select-Object -First 3 | ForEach-Object { "$($_.Source) ($($_.Count))" }) -join ', '
-            $topSourcesNote = if ($topSourcesText) { " Топ джерел: $topSourcesText." } else { '' }
-            Add-AuditFinding -Severity 'WARNING' -Category 'EventLogs' -Message "За $EventLogDays днів знайдено системних помилок: $($script:Report.EventLogs.SystemErrors).$topSourcesNote" -Recommendation 'Перегляньте System log і визначте повторювані джерела помилок.'
-        }
-
-        Write-Host "  $IconEvent Події System: помилок=$($script:Report.EventLogs.SystemErrors), попереджень=$($script:Report.EventLogs.SystemWarnings) за $EventLogDays дн." -ForegroundColor Green
     } catch {
-        Add-AuditError -Section 'EventLogs' -Message $_.Exception.Message
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound,*') {
+            $systemErrors = 0
+            $topErrorSources = @()
+        } else {
+            Add-AuditError -Section 'EventLogs' -Message "SystemErrors: $($_.Exception.Message)"
+        }
     }
+
+    try {
+        $systemWarnings = Get-BravoWinEventCount -LogName 'System' -Level 3 -StartTime $eventLogStart
+    } catch {
+        Add-AuditError -Section 'EventLogs' -Message "SystemWarnings: $($_.Exception.Message)"
+    }
+
+    $script:Report.EventLogs.SystemErrors24h = $systemErrors24h
+    $script:Report.EventLogs.SystemWarnings24h = $systemWarnings24h
+    $script:Report.EventLogs.SystemErrors = $systemErrors
+    $script:Report.EventLogs.SystemWarnings = $systemWarnings
+    $script:Report.EventLogs.TopErrorSources = $topErrorSources
+
+    if ($script:Report.EventLogs.SystemErrors -gt 0) {
+        $topSourcesText = ($topErrorSources | Select-Object -First 3 | ForEach-Object { "$($_.Source) ($($_.Count))" }) -join ', '
+        $topSourcesNote = if ($topSourcesText) { " Топ джерел: $topSourcesText." } else { '' }
+        Add-AuditFinding -Severity 'WARNING' -Category 'EventLogs' -Message "За $EventLogDays днів знайдено системних помилок: $($script:Report.EventLogs.SystemErrors).$topSourcesNote" -Recommendation 'Перегляньте System log і визначте повторювані джерела помилок.'
+    }
+
+    Write-Host "  $IconEvent Події System: помилок=$($script:Report.EventLogs.SystemErrors), попереджень=$($script:Report.EventLogs.SystemWarnings) за $EventLogDays дн." -ForegroundColor Green
 
     # --- Per-log summary (System/Application/Setup/Security): Critical/Error/
     # Warning-лічильники + топ-10 провайдерів, через Get-WinEvent (докладніший
@@ -3501,7 +3563,7 @@ function Get-BravoSoftwareAudit {
 
         $softwareInfo = Get-ItemProperty $softwareRegistryPaths -ErrorAction SilentlyContinue |
             Where-Object { $_.DisplayName -and $_.DisplayName -notlike '*Update*' } |
-            Sort-Object DisplayName -Unique
+            Sort-Object DisplayName, DisplayVersion, Publisher -Unique
 
         foreach ($softwareItem in $softwareInfo) {
             if ($Profile -eq 'Quick') {
@@ -3872,6 +3934,8 @@ function Get-BravoInstalledUpdatesInfo {
         DaysSinceLastUpdate = $null
         InstalledLast30Days = 0
         Recent = @()
+        PossiblyIncomplete = $false
+        IncompleteReason = ''
     }
 
     $hotfixes = @()
@@ -3887,6 +3951,20 @@ function Get-BravoInstalledUpdatesInfo {
     }
 
     $installed.Total = @($hotfixes).Count
+
+    # Get-HotFix/Win32_QuickFixEngineering не реєструють більшість кумулятивних
+    # (CBS-based) оновлень на Windows 10/11/Server 2016+ (build >= 10240): на
+    # повністю пропатченому хості цей шлях часто повертає Total=0, через що
+    # DaysSinceLastUpdate лишається $null і попередження про застарілість
+    # оновлень нижче ніколи не спрацьовує, хоча хост може бути актуальним.
+    # Явно позначаємо цей випадок, а не мовчки показуємо "чисто".
+    $osBuildNumber = 0
+    [void][int]::TryParse((([string]$script:Report.OS.Build) -split '\.')[0], [ref]$osBuildNumber)
+    if ($osBuildNumber -ge 10240 -and $installed.Total -eq 0) {
+        $installed.PossiblyIncomplete = $true
+        $installed.IncompleteReason = 'Get-HotFix/Win32_QuickFixEngineering не реєструє більшість кумулятивних оновлень на цій версії Windows: Total=0 не означає відсутність встановлених оновлень.'
+    }
+
     if ($installed.Total -eq 0) { return $installed }
 
     $normalized = foreach ($hotfix in $hotfixes) {
@@ -4022,14 +4100,18 @@ function Invoke-BravoPendingUpdatesSearch {
     $canUseJob = ((Get-Command -Name 'Start-Job' -ErrorAction SilentlyContinue) -ne $null)
 
     if (-not $canUseJob) {
-        $inlineResult = & $searchBlock $MaxItems
+        # Без Start-Job немає способу безпечно обмежити час синхронного COM-викли-
+        # ку $updateSearcher.Search(): він не підтримує скасування, а без ізоляції
+        # в job/process його неможливо перервати, якщо WSUS/update-сервер недо-
+        # ступний. Краще явно повідомити про непідтримуване середовище, ніж
+        # запускати потенційно нескінченний виклик без жодного таймауту.
         return [ordered]@{
-            Status  = [string]$inlineResult.Status
-            Method  = [string]$inlineResult.Method
-            Error   = [string]$inlineResult.Error
-            Updates = @($inlineResult.Updates)
-            TotalFound = [int]$inlineResult.TotalFound
-            IsTruncated = [bool]$inlineResult.IsTruncated
+            Status  = 'Unsupported'
+            Method  = 'Microsoft.Update.Session (COM)'
+            Error   = 'Start-Job недоступний у цьому середовищі (можливо, Constrained Language Mode або WDAC): синхронний пошук оновлень без ізоляції job не можна безпечно обмежити таймаутом, тож пошук не виконувався.'
+            Updates = @()
+            TotalFound = 0
+            IsTruncated = $false
             DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
         }
     }
@@ -4041,6 +4123,14 @@ function Invoke-BravoPendingUpdatesSearch {
 
         if (-not $completedJob) {
             try { Stop-Job -Job $searchJob -ErrorAction SilentlyContinue } catch {}
+            try { Wait-Job -Job $searchJob -Timeout 5 | Out-Null } catch {}
+
+            $cleanupError = $null
+            if ($searchJob.State -eq 'Running') {
+                $cleanupError = "Фоновий job пошуку оновлень не підтвердив зупинку після Stop-Job (State=$($searchJob.State)); можливий осиротілий дочірній процес."
+                Add-AuditError -Section 'Updates.PendingSearch.Cleanup' -Message $cleanupError
+            }
+
             return [ordered]@{
                 Status  = 'Timeout'
                 Method  = 'Microsoft.Update.Session (COM)'
@@ -4049,6 +4139,7 @@ function Invoke-BravoPendingUpdatesSearch {
                 TotalFound = 0
                 IsTruncated = $false
                 DurationSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+                CleanupWarning = $cleanupError
             }
         }
 
@@ -4180,6 +4271,8 @@ function Get-BravoUpdatesAudit {
 
         if ($null -ne $installedInfo.DaysSinceLastUpdate -and $installedInfo.DaysSinceLastUpdate -gt 60) {
             Add-AuditFinding -Severity 'WARNING' -Category 'Updates' -Message "Останнє оновлення встановлено $($installedInfo.DaysSinceLastUpdate) дн. тому ($($installedInfo.LastInstalledOn))" -Recommendation 'Перевірте, чи працює цикл оновлень Windows Update або WSUS.'
+        } elseif ($installedInfo.PossiblyIncomplete) {
+            Add-AuditFinding -Severity 'INFO' -Category 'Updates' -Message $installedInfo.IncompleteReason -Recommendation 'Перевірте історію оновлень через Параметри > Windows Update > Журнал оновлень або DISM /Get-Packages для повної картини.'
         }
     } catch {
         Add-AuditError -Section 'Updates.Installed' -Message $_.Exception.Message
@@ -6170,7 +6263,14 @@ function Send-BravoEmailReport {
 
         [AllowNull()]
         [AllowEmptyString()]
-        [string]$SmtpServer
+        [string]$SmtpServer,
+
+        [int]$SmtpPort = 0,
+
+        [switch]$EmailUseSsl,
+
+        [AllowNull()]
+        [System.Management.Automation.PSCredential]$EmailCredential
     )
 
     # Email
@@ -6180,8 +6280,21 @@ function Send-BravoEmailReport {
             $mailBody = "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)`n`nOS: $($script:Report.OS.Caption)`nHealth: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))`nCPU: $($script:Report.Hardware.CPU.LoadPercent)%`nRAM: $($script:Report.Hardware.RAM.TotalGB) GB ($($script:Report.Hardware.RAM.UsedPercent)%)`nDisk Free: $($script:Report.Hardware.Disks.FreePercent)%`nUptime: $($script:Report.OS.UptimeDays) days"
             $attachments = @($script:Report.GeneratedFiles | Where-Object { $_ -and (Test-Path -LiteralPath $_) -and ($_ -notlike '*.zip') })
 
-            Send-MailMessage -To $EmailTo -From $EmailFrom -Subject "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)" -Body $mailBody -SmtpServer $smtpToUse -Attachments $attachments -ErrorAction Stop
-            Write-Host "  $IconEmail Email відправлено на $EmailTo" -ForegroundColor Green
+            $mailParams = @{
+                To          = $EmailTo
+                From        = $EmailFrom
+                Subject     = "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)"
+                Body        = $mailBody
+                SmtpServer  = $smtpToUse
+                Attachments = $attachments
+                ErrorAction = 'Stop'
+            }
+            if ($SmtpPort -gt 0) { $mailParams.Port = $SmtpPort }
+            if ($EmailUseSsl) { $mailParams.UseSsl = $true }
+            if ($EmailCredential) { $mailParams.Credential = $EmailCredential }
+
+            Send-MailMessage @mailParams
+            Write-Host "  $IconEmail Email відправлено на $EmailTo $(if ($EmailUseSsl) { '(TLS)' } else { '(plaintext SMTP — вкажіть -EmailUseSsl для шифрування)' })" -ForegroundColor Green
         } catch {
             Add-ExportError -Section 'Export.Email' -Message $_.Exception.Message
             Write-Host "  $IconError Помилка відправки Email: $($_.Exception.Message)" -ForegroundColor Red
@@ -6968,7 +7081,7 @@ if ($script:SanitizeFailed) {
     # момент відправки (Health Score вже фінальний; JSON-вкладення може не
     # містити ExportErrors від самого Email — лист не може повідомити про власну
     # невдалу відправку заднім числом, це очікуване обмеження).
-    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer -SmtpPort $SmtpPort -EmailUseSsl:$EmailUseSsl -EmailCredential $EmailCredential
 
     # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
     # (не вкладення вже відправленого листа) відображає це.

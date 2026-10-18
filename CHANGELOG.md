@@ -765,6 +765,7 @@
 - Додано вкладення `BRAVO_SYSTEM_REPORT_v<version>.zip` і `.zip.sha256` у GitHub Release.
 - Додано ручний dry run через `workflow_dispatch` без публікації релізу.
 - Виправлено кодування у кроках workflow: не-ASCII текст усередині `run:` ламав консольний вивід, бо Windows PowerShell 5.1 читає тіло кроку як ANSI.
+- Захищено persistent self-hosted Windows runner від виконання коду з недовіреного pull request: `local-windows-validation.yml` переведено з тригера `pull_request` на `push`/`workflow_dispatch`, додано job-level trust-gate, `permissions: contents: read` і `persist-credentials: false`; додано `pr-validation.yml` для статичної перевірки PR на ephemeral GitHub-hosted runner і `docs/SECURITY.md` з описом CI trust model (closes #89).
 
 ## v0.5.0 — аналіз ОС і оновлень Windows
 

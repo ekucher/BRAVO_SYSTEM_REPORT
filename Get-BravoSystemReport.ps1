@@ -52,6 +52,9 @@ param(
     [string]$EmailTo,
     [string]$EmailFrom,
     [string]$SmtpServer,
+    [int]$SmtpPort,
+    [switch]$EmailUseSsl,
+    [System.Management.Automation.PSCredential]$EmailCredential,
 
     [switch]$ExportPdf
 )

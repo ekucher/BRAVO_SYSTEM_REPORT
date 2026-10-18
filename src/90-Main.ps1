@@ -591,7 +591,7 @@ if ($script:SanitizeFailed) {
     # момент відправки (Health Score вже фінальний; JSON-вкладення може не
     # містити ExportErrors від самого Email — лист не може повідомити про власну
     # невдалу відправку заднім числом, це очікуване обмеження).
-    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer
+    Send-BravoEmailReport -EmailTo $EmailTo -EmailFrom $EmailFrom -SmtpServer $SmtpServer -SmtpPort $SmtpPort -EmailUseSsl:$EmailUseSsl -EmailCredential $EmailCredential
 
     # Фінальна синхронізація — якщо Email додав ExportError, файл на диску
     # (не вкладення вже відправленого листа) відображає це.
