@@ -265,6 +265,8 @@ Describe 'Export-BravoZipReport result contract' {
 
     It 'Реальна помилка додавання запису (вихідний файл заблоковано) -> Success=$false, потік закрито, недописаний ZIP видалено' {
         # Справжні FileStream і ZipArchive; CreateEntryFromFile падає, бо вихідний файл відкрито з FileShare.None.
+        # Контрактна перевірка реального шляху помилки (не регресійна: Dispose порожнього архіву у finally не падає,
+        # тож цей тест проходив і до виправлення finally). Регресію finally ловить наступний тест.
         $script:errSections = @()
         $script:capturedStream = $null
         Mock Add-ExportError { $script:errSections += $Section }
@@ -318,6 +320,7 @@ Describe 'Export-BravoZipReport result contract' {
         @($script:errSections | Where-Object { $_ -eq 'Export.Zip' }).Count | Should -BeGreaterOrEqual 2
         $script:Report.GeneratedFiles | Should -Not -Contain $zipPath
         Test-Path -LiteralPath $zipPath | Should -BeFalse
+        $script:capturedStream | Should -Not -BeNullOrEmpty
         $script:capturedStream.CanWrite | Should -BeFalse
     }
 }
