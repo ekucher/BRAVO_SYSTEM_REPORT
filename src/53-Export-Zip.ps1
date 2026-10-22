@@ -76,6 +76,14 @@ function Export-BravoZipReport {
                 }
             }
 
+            # Dispose дописує central directory: фіналізуємо до Success, змінні обнуляємо, щоб finally не дублював
+            $archiveToClose = $zipArchive
+            $zipArchive = $null
+            $archiveToClose.Dispose()
+            $streamToClose = $zipStream
+            $zipStream = $null
+            $streamToClose.Dispose()
+
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
             return New-BravoExportResult -Type 'Zip' -Success $true -Path $zipPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds

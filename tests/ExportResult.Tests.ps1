@@ -183,6 +183,39 @@ Describe 'Export-BravoZipReport result contract' {
         $result.Path | Should -Be (Join-Path $script:outDir 'report.zip')
         Test-Path -LiteralPath $result.Path | Should -BeTrue
     }
+
+    It 'Success повертається лише для валідного ZIP (відкривається ZipFile::OpenRead), zipPath у GeneratedFiles' {
+        $src = Join-Path $script:outDir 'a.txt'
+        Set-Content -LiteralPath $src -Value 'hello'
+        $script:Report.GeneratedFiles = @($src)
+
+        $result = Export-BravoZipReport -OutputDir $script:outDir -BaseFileName 'report' -Zip $true
+        $result.Success | Should -BeTrue
+        $script:Report.GeneratedFiles | Should -Contain $result.Path
+
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($result.Path)
+        try {
+            @($zip.Entries | ForEach-Object { $_.Name }) | Should -Contain 'a.txt'
+        } finally {
+            $zip.Dispose()
+        }
+    }
+
+    It 'Виняток під час фіналізації (Dispose) -> Success=$false, ExportError Export.Zip, zipPath не в GeneratedFiles' {
+        $script:errSections = @()
+        Mock Add-ExportError { $script:errSections += $Section }
+        Mock New-Object {
+            $fake = [pscustomobject]@{}
+            $fake | Add-Member -MemberType ScriptMethod -Name Dispose -Value { throw 'finalize boom' }
+            $fake
+        } -ParameterFilter { $TypeName -eq 'System.IO.Compression.ZipArchive' }
+
+        $result = Export-BravoZipReport -OutputDir $script:outDir -BaseFileName 'report' -Zip $true
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'finalize boom'
+        $script:errSections | Should -Contain 'Export.Zip'
+        $script:Report.GeneratedFiles | Should -Not -Contain (Join-Path $script:outDir 'report.zip')
+    }
 }
 
 Describe 'Export-BravoTxtReport / Export-BravoMdReport result contract' {
