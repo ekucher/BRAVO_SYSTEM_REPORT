@@ -2,6 +2,24 @@
 
 `ScriptVersion`/`SchemaVersion` без змін (структура не персистується в report model).
 
+- **P2: ZIP-експорт повертав Success до фіналізації архіву** (`src/53-Export-Zip.ps1`) —
+  `Export-BravoZipReport` повертав результат із `try`, а `ZipArchive.Dispose()`, що дописує
+  central directory, виконувався пізніше у `finally`. Помилка фіналізації (напр. I/O або нестача
+  місця) давала хибний Success або неперехоплений виняток без `ExportError`. Тепер архів і потік
+  закриваються в `try`, помилка йде в `catch` (`ExportError` `Export.Zip`, `Success=$false`),
+  шлях потрапляє в `GeneratedFiles` лише після успішної фіналізації, а недописаний архів
+  видаляється, щоб фінальний підсумок не показував пошкоджений ZIP як створений.
+  Регресійне покриття: `tests/ExportResult.Tests.ps1` (виняток у `Dispose`; успішний шлях з
+  перевіркою `ZipFile::OpenRead`).
+- **P3: Email-експорт без `-SmtpServer` на хості поза доменом** (`src/54-Export-Email.ps1`) —
+  `$env:USERDNSDOMAIN.ToLower()` падав з null-method помилкою, і причина ховалась під загальною
+  "помилкою Email". Тепер лист не надсилається, записується `ExportError` `Export.Email` з
+  проханням вказати `-SmtpServer`, результат `Success=$false`. Поведінка з `-SmtpServer` і на
+  доменних хостах не змінилась. Регресійне покриття: `tests/ExportResult.Tests.ps1`.
+- **P3: UTF-8 BOM у `src/30-Collectors-OS.ps1` і `src/49-Export-Result.ps1`** — файли були
+  збережені без BOM всупереч `docs/AI_RULES.md` п.5 (Windows PowerShell 5.1 читав би кирилицю
+  як ANSI). Вміст і кінці рядків не змінено.
+
 - **P2 (Issue #99): structured result contract для exporters** — жоден з 8 export-шляхів
   (JSON/HTML/PDF/CSV/ZIP/Email/TXT/MD) нічого не повертав; Main (`src/90-Main.ps1`) визначав
   success/failure лише опосередковано, діфом `ExportErrors.Count`/`GeneratedFiles.Count` "до" й
