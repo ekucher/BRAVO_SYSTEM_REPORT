@@ -184,7 +184,9 @@ Describe 'Export-BravoZipReport result contract' {
         Test-Path -LiteralPath $result.Path | Should -BeTrue
     }
 
-    It 'Success повертається лише для валідного ZIP (відкривається ZipFile::OpenRead), zipPath у GeneratedFiles' {
+    # Загальне покриття успішного шляху: цей тест проходив би й до виправлення (finally виконувався до повернення).
+    # Регресію фіналізації ловить наступний тест (виняток у Dispose).
+    It 'Success-шлях: ZIP валідний (відкривається ZipFile::OpenRead) і містить файли, zipPath у GeneratedFiles' {
         $src = Join-Path $script:outDir 'a.txt'
         Set-Content -LiteralPath $src -Value 'hello'
         $script:Report.GeneratedFiles = @($src)
@@ -201,7 +203,10 @@ Describe 'Export-BravoZipReport result contract' {
         }
     }
 
-    It 'Виняток під час фіналізації (Dispose) -> Success=$false, ExportError Export.Zip, zipPath не в GeneratedFiles' {
+    It 'Виняток під час фіналізації (Dispose) -> Success=$false, ExportError Export.Zip, zipPath не в GeneratedFiles, недописаний ZIP видалено' {
+        # Fake ZipArchive не підтримує CreateEntryFromFile, тож список файлів має бути порожнім:
+        # тест перевіряє саме фіналізацію (Dispose), а не додавання записів.
+        $script:Report.GeneratedFiles = @()
         $script:errSections = @()
         Mock Add-ExportError { $script:errSections += $Section }
         Mock New-Object {
@@ -215,6 +220,7 @@ Describe 'Export-BravoZipReport result contract' {
         $result.Error | Should -Match 'finalize boom'
         $script:errSections | Should -Contain 'Export.Zip'
         $script:Report.GeneratedFiles | Should -Not -Contain (Join-Path $script:outDir 'report.zip')
+        Test-Path -LiteralPath (Join-Path $script:outDir 'report.zip') | Should -BeFalse
     }
 }
 

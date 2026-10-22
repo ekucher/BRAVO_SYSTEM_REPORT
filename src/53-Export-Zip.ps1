@@ -52,6 +52,8 @@ function Export-BravoZipReport {
     if ($Zip) {
         $zipArchive = $null
         $zipStream = $null
+        $zipPath = $null
+        $zipFinalized = $false
 
         try {
             Import-BravoZipAssemblies
@@ -83,6 +85,7 @@ function Export-BravoZipReport {
             $streamToClose = $zipStream
             $zipStream = $null
             $streamToClose.Dispose()
+            $zipFinalized = $true
 
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
@@ -94,6 +97,11 @@ function Export-BravoZipReport {
         } finally {
             if ($null -ne $zipArchive) { $zipArchive.Dispose() }
             if ($null -ne $zipStream) { $zipStream.Dispose() }
+            # Недописаний архів без central directory не лишаємо на диску: інакше фінальний підсумок Main
+            # (Test-Path $zipPath) показав би пошкоджений ZIP як створений.
+            if (-not $zipFinalized -and $zipPath -and (Test-Path -LiteralPath $zipPath)) {
+                Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 
