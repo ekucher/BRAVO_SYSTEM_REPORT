@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-18 15:50:30
+    GeneratedAt: 2026-10-23 00:29:40
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -6294,6 +6294,8 @@ function Export-BravoZipReport {
     if ($Zip) {
         $zipArchive = $null
         $zipStream = $null
+        $zipPath = $null
+        $zipFinalized = $false
 
         try {
             Import-BravoZipAssemblies
@@ -6318,6 +6320,15 @@ function Export-BravoZipReport {
                 }
             }
 
+            # Dispose дописує central directory: фіналізуємо до Success, змінні обнуляємо, щоб finally не дублював
+            $archiveToClose = $zipArchive
+            $zipArchive = $null
+            $archiveToClose.Dispose()
+            $streamToClose = $zipStream
+            $zipStream = $null
+            $streamToClose.Dispose()
+            $zipFinalized = $true
+
             $script:Report.GeneratedFiles += $zipPath
             Write-Host "  $IconZip ZIP: $BaseFileName.zip" -ForegroundColor Green
             return New-BravoExportResult -Type 'Zip' -Success $true -Path $zipPath -DurationSeconds $stopwatch.Elapsed.TotalSeconds
@@ -6328,6 +6339,11 @@ function Export-BravoZipReport {
         } finally {
             if ($null -ne $zipArchive) { $zipArchive.Dispose() }
             if ($null -ne $zipStream) { $zipStream.Dispose() }
+            # Недописаний архів без central directory не лишаємо на диску: інакше фінальний підсумок Main
+            # (Test-Path $zipPath) показав би пошкоджений ZIP як створений.
+            if (-not $zipFinalized -and $zipPath -and (Test-Path -LiteralPath $zipPath)) {
+                Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 
@@ -6370,7 +6386,17 @@ function Send-BravoEmailReport {
 
     if ($EmailTo) {
         try {
-            $smtpToUse = if ($SmtpServer) { $SmtpServer } else { "smtp.$($env:USERDNSDOMAIN.ToLower())" }
+            $smtpToUse = $SmtpServer
+            if (-not $smtpToUse) {
+                # Workgroup-хост: USERDNSDOMAIN порожній, автовизначити SMTP неможливо.
+                if (-not $env:USERDNSDOMAIN) {
+                    $noSmtpMessage = 'SMTP-сервер не визначено (хост поза доменом): вкажіть -SmtpServer'
+                    Add-ExportError -Section 'Export.Email' -Message $noSmtpMessage
+                    Write-Host "  $IconError Помилка відправки Email: $noSmtpMessage" -ForegroundColor Red
+                    return New-BravoExportResult -Type 'Email' -Success $false -ErrorMessage $noSmtpMessage -DurationSeconds $stopwatch.Elapsed.TotalSeconds
+                }
+                $smtpToUse = "smtp.$($env:USERDNSDOMAIN.ToLower())"
+            }
             $mailBody = "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)`n`nOS: $($script:Report.OS.Caption)`nHealth: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))`nCPU: $($script:Report.Hardware.CPU.LoadPercent)%`nRAM: $($script:Report.Hardware.RAM.TotalGB) GB ($($script:Report.Hardware.RAM.UsedPercent)%)`nDisk Free: $($script:Report.Hardware.Disks.FreePercent)%`nUptime: $($script:Report.OS.UptimeDays) days"
             $attachments = @($script:Report.GeneratedFiles | Where-Object { $_ -and (Test-Path -LiteralPath $_) -and ($_ -notlike '*.zip') })
 
