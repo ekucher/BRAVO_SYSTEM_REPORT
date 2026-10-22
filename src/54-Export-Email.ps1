@@ -29,7 +29,17 @@ function Send-BravoEmailReport {
 
     if ($EmailTo) {
         try {
-            $smtpToUse = if ($SmtpServer) { $SmtpServer } else { "smtp.$($env:USERDNSDOMAIN.ToLower())" }
+            $smtpToUse = $SmtpServer
+            if (-not $smtpToUse) {
+                # Workgroup-хост: USERDNSDOMAIN порожній, автовизначити SMTP неможливо.
+                if (-not $env:USERDNSDOMAIN) {
+                    $noSmtpMessage = 'SMTP-сервер не визначено (хост поза доменом): вкажіть -SmtpServer'
+                    Add-ExportError -Section 'Export.Email' -Message $noSmtpMessage
+                    Write-Host "  $IconError Помилка відправки Email: $noSmtpMessage" -ForegroundColor Red
+                    return New-BravoExportResult -Type 'Email' -Success $false -ErrorMessage $noSmtpMessage -DurationSeconds $stopwatch.Elapsed.TotalSeconds
+                }
+                $smtpToUse = "smtp.$($env:USERDNSDOMAIN.ToLower())"
+            }
             $mailBody = "BRAVO SYSTEM REPORT - $($script:Report.ComputerName)`n`nOS: $($script:Report.OS.Caption)`nHealth: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))`nCPU: $($script:Report.Hardware.CPU.LoadPercent)%`nRAM: $($script:Report.Hardware.RAM.TotalGB) GB ($($script:Report.Hardware.RAM.UsedPercent)%)`nDisk Free: $($script:Report.Hardware.Disks.FreePercent)%`nUptime: $($script:Report.OS.UptimeDays) days"
             $attachments = @($script:Report.GeneratedFiles | Where-Object { $_ -and (Test-Path -LiteralPath $_) -and ($_ -notlike '*.zip') })
 

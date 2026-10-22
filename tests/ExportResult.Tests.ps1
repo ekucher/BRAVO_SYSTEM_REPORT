@@ -287,6 +287,21 @@ Describe 'Send-BravoEmailReport result contract' {
         Should -Invoke Send-MailMessage -Times 1 -ParameterFilter { -not $PSBoundParameters.ContainsKey('Attachments') }
     }
 
+    It 'без -SmtpServer і з порожнім USERDNSDOMAIN -> Success=$false, повідомлення про SMTP, Send-MailMessage не викликається' {
+        Mock Send-MailMessage { }
+        $savedDnsDomain = $env:USERDNSDOMAIN
+        try {
+            $env:USERDNSDOMAIN = $null
+            $result = Send-BravoEmailReport -EmailTo 'to@example.com' -EmailFrom 'from@example.com'
+        } finally {
+            $env:USERDNSDOMAIN = $savedDnsDomain
+        }
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'SMTP'
+        $result.Error | Should -Match '-SmtpServer'
+        Should -Invoke Send-MailMessage -Times 0
+    }
+
     It 'успішна відправка -> Success=$true, без Path (Email не генерує файл)' {
         Mock Send-MailMessage { }
         $result = Send-BravoEmailReport -EmailTo 'to@example.com' -EmailFrom 'from@example.com' -SmtpServer 'smtp.example.com'
