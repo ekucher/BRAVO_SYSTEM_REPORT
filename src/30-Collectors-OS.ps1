@@ -1,4 +1,4 @@
-# MODULE: 30-Collectors-OS.ps1
+﻿# MODULE: 30-Collectors-OS.ps1
 # Збір інформації про операційну систему.
 
 function Get-BravoOperatingSystemAudit {

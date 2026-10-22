@@ -1,4 +1,4 @@
-# MODULE: 49-Export-Result.ps1
+﻿# MODULE: 49-Export-Result.ps1
 # Уніфікований структурований результат export-функцій (Issue #99).
 #
 # До цього фіксу кожен Export-Bravo*Report/Send-BravoEmailReport нічого не
