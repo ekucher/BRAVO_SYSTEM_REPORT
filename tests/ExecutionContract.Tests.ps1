@@ -404,7 +404,9 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
         # Report.Network.Adapters збирається лише для адаптерів з IPEnabled=True,
         # тож на реальній машині принаймні один має бути активним і мати
         # непорожній Status після збагачення через Get-NetAdapter.
-        ($adapters | Where-Object { $_.Status }).Count | Should -BeGreaterThan 0
+        # @(): у Windows PowerShell 5.1 один PSCustomObject не має .Count ($null) —
+        # без обгортки тест падав на машинах з одним мережевим адаптером.
+        @($adapters | Where-Object { $_.Status }).Count | Should -BeGreaterThan 0
     }
 
     It 'Security.SMBv1.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Deep-профілі' {
@@ -646,7 +648,7 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
             $task.IsMicrosoftDefault | Should -BeIn @($true, $false)
         }
 
-        ($tasks | Where-Object { $_.IsMicrosoftDefault }).Count | Should -BeGreaterThan 0
+        @($tasks | Where-Object { $_.IsMicrosoftDefault }).Count | Should -BeGreaterThan 0
     }
 }
 
