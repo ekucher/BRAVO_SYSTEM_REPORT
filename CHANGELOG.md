@@ -1,6 +1,20 @@
 ﻿## Unreleased — post-v0.6.1 follow-ups
 
-`ScriptVersion`/`SchemaVersion` без змін (структура не персистується в report model).
+`SchemaVersion` `0.6.20` → `0.6.21` (нове верхньорівневе поле `SkippedChecks`); `ScriptVersion` без змін.
+
+- **Запуск на робочих станціях з обмеженими привілеями** — без прав адміністратора Full/Deep
+  завершувались з exit code 1: WSMan-провайдер (`Security.WinRM`), `Win32_ShadowCopy`
+  (`StorageDeep.ShadowCopies`) і `Win32_EncryptableVolume` (`StorageDeep.BitLocker`) звичайному
+  користувачу недоступні, і їхні відмови потрапляли в `CollectionErrors` (exit 1, мінус до Health
+  Score) — хоча це властивість контексту запуску, а не збій збору чи стан машини. Тепер при
+  `Elevated=false` ці розділи й будь-яка відмова в доступі (`Test-BravoElevationSkip`,
+  `src/10-Core.ps1`) записуються в нове поле `SkippedChecks` (`Reason=RequiresElevation`), так само
+  як уже наявні `Unavailable`-статуси Secure Boot/TPM/Audit policy. Пропущені перевірки не впливають
+  на Health Score і exit code, але явно видні в HTML (вкладка Findings), TXT, Markdown, CSV і в
+  консольному підсумку; `-Sanitize` маскує їхні повідомлення. З правами адміністратора поведінка
+  не змінилась. Для запуску без UAC-запиту — `-NoElevate` (README, «Робоча станція з обмеженими
+  привілеями»). Регресійне покриття: `tests/Core.Tests.ps1` (класифікація помилок),
+  `tests/ExecutionContract.Tests.ps1` (Deep без прав адміністратора; TPM/WinRM-статуси).
 
 - **P1: Local Windows Validation після #124 падав на тесті фіналізації ZIP** (run 39861170855) —
   CI ставить найновіший Pester (`Install-Module -MinimumVersion 5.0.0`, тепер 6.2.0), а Pester 6 не

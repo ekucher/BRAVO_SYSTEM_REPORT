@@ -104,6 +104,7 @@ BeforeAll {
             }
             CollectionErrors = @([PSCustomObject]@{ Time = '2026-01-01 00:00:00'; Section = 'Security.RemoteAccess'; Message = "Access to the path 'C:\Users\jdoe\Reports' is denied." })
             ExportErrors = @([PSCustomObject]@{ Time = '2026-01-01 00:00:00'; Section = 'Export.Zip'; Message = "Could not find a part of the path 'C:\Users\jdoe\Reports\report.zip'." })
+            SkippedChecks = @([PSCustomObject]@{ Time = '2026-01-01 00:00:00'; Section = 'Security.TPM'; Reason = 'RequiresElevation'; Message = "Access to the path 'C:\Users\jdoe\AppData' is denied." })
         }
     }
 }
@@ -236,6 +237,12 @@ Describe 'Invoke-BravoReportSanitization -Level Basic' {
     It 'редагує CollectionErrors[].Message і ExportErrors[].Message навіть у Basic (P1, fresh-review Phase 10 — $_.Exception.Message може містити реальний шлях/hostname/обліковий запис)' {
         $script:report.CollectionErrors[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
         $script:report.ExportErrors[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
+    }
+
+    It 'редагує SkippedChecks[].Message (відмова доступу може містити шлях/обліковий запис), Section і Reason лишаються' {
+        $script:report.SkippedChecks[0].Message | Should -Be 'REDACTED-ERROR-MESSAGE'
+        $script:report.SkippedChecks[0].Section | Should -Be 'Security.TPM'
+        $script:report.SkippedChecks[0].Reason | Should -Be 'RequiresElevation'
     }
 
     It 'редагує Network.WinHttpProxy.Error навіть у Basic (той самий ризик-підклас, fresh-review Phase 10)' {

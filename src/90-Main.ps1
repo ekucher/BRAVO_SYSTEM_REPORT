@@ -81,10 +81,63 @@ function Add-AuditError {
 
     if (-not $script:Report) { return }
 
+    # Запуск без прав адміністратора (робоча станція з обмеженими привілеями): відмова
+    # доступу або admin-only розділ - пропущена перевірка, а не помилка збору
+    # (Test-BravoElevationSkip, src/10-Core.ps1). З правами адміністратора - як раніше.
+    if (Test-BravoElevationSkip -Elevated ([bool]$script:Report.Elevated) -Section $Section -Message $Message) {
+        Add-AuditSkipped -Section $Section -Message $Message
+        return
+    }
+
     $script:Report.CollectionErrors += [PSCustomObject]@{
         Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         Section = $Section
         Message = $Message
+    }
+}
+
+function Add-AuditSkipped {
+    # Перевірка, недоступна без прав адміністратора. Не впливає на Health Score і exit
+    # code, але явно видна в усіх форматах звіту. Один запис на розділ.
+    param(
+        [string]$Section,
+        [string]$Message
+    )
+
+    if (-not $script:Report) { return }
+    if (@($script:Report.SkippedChecks | Where-Object { $_.Section -eq $Section }).Count -gt 0) { return }
+
+    $script:Report.SkippedChecks += [PSCustomObject]@{
+        Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Section = $Section
+        Reason  = 'RequiresElevation'
+        Message = $Message
+    }
+}
+
+function Register-BravoElevationSkippedStatus {
+    # Розділи, що вже позначають брак прав статусом Unavailable (Secure Boot, TPM,
+    # Audit policy тощо), реєструються в SkippedChecks, щоб пропуски були видні
+    # в одному місці. Статуси розділів не змінюються.
+    if (-not $script:Report -or [bool]$script:Report.Elevated) { return }
+
+    $candidates = @(
+        @{ Section = 'Security.SecureBoot'; Node = $script:Report.Security.SecureBoot },
+        @{ Section = 'Security.TPM'; Node = $script:Report.Security.TPM },
+        @{ Section = 'Security.AuditPolicy'; Node = $script:Report.Security.AuditPolicy },
+        @{ Section = 'Security.Defender'; Node = $script:Report.Security.Defender },
+        @{ Section = 'Security.PasswordPolicy'; Node = $script:Report.Security.PasswordPolicy }
+    )
+    foreach ($candidate in $candidates) {
+        $node = $candidate.Node
+        if (-not $node -or [string]$node.Status -ne 'Unavailable') { continue }
+        $errorText = if ($node.Contains('Error')) { [string]$node.Error } else { '' }
+        # AuditPolicy (auditpol) без прав адміністратора не повертає деталей помилки -
+        # для неї Unavailable без тексту теж означає брак прав.
+        if ((Test-BravoAccessDeniedMessage -Message $errorText) -or ($candidate.Section -eq 'Security.AuditPolicy' -and -not $errorText)) {
+            $message = if ($errorText) { $errorText } else { 'Недоступно без прав адміністратора.' }
+            Add-AuditSkipped -Section $candidate.Section -Message $message
+        }
     }
 }
 
@@ -411,6 +464,7 @@ Get-BravoUpdatesAudit
 # + Findings), export-етапи більше не можуть його змінити заднім числом,
 # тож повторний перерахунок і пов'язаний з ним ризик (self-zip race з
 # попередніх версій) став непотрібним.
+Register-BravoElevationSkippedStatus
 Update-BravoHealthScore
 
 # ============================================================
@@ -642,6 +696,9 @@ if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
 }
 Write-Host "Оцінка стану: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))" -ForegroundColor Cyan
 Write-Host "Знахідки: $($script:Report.Health.Findings.Count); помилки збору: $($script:Report.CollectionErrors.Count); помилки експорту: $($script:Report.ExportErrors.Count)" -ForegroundColor Cyan
+if (@($script:Report.SkippedChecks).Count -gt 0) {
+    Write-Host "Обмежені права: пропущено перевірок без прав адміністратора: $(@($script:Report.SkippedChecks).Count) ($((@($script:Report.SkippedChecks) | ForEach-Object { $_.Section }) -join ', '))" -ForegroundColor Yellow
+}
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
 Write-Host ''
 
@@ -649,6 +706,8 @@ Write-Host ''
 # 0 = аудит успішно завершено, без помилок збору/експорту (і, у -Strict
 #     режимі, без CRITICAL Health.Status);
 # 1 = аудит завершено, але були CollectionErrors і/або ExportErrors;
+#     SkippedChecks (перевірки, недоступні без прав адміністратора) на exit code
+#     не впливають - вони видні у звіті, але не є збоєм збору;
 # 2 = фатальна неопрацьована помилка виконання (top-level trap, вище в файлі);
 # 3 = обов'язковий вихідний файл (JSON) не згенеровано;
 # 4 = лише у -Strict режимі: аудит завершено без CollectionErrors/ExportErrors,

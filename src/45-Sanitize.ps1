@@ -454,6 +454,13 @@ function Invoke-BravoReportSanitization {
             if ($errorEntry.Message) { $errorEntry.Message = 'REDACTED-ERROR-MESSAGE' }
         }
     }
+    # SkippedChecks.Message - той самий $_.Exception.Message (відмова доступу може
+    # містити шлях/обліковий запис), той самий підхід. Section/Reason не маскуються.
+    if ($Report.Contains('SkippedChecks') -and $Report.SkippedChecks) {
+        foreach ($skipEntry in @($Report.SkippedChecks)) {
+            if ($skipEntry.Message) { $skipEntry.Message = 'REDACTED-ERROR-MESSAGE' }
+        }
+    }
 
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
     # (TopErrorSources, per-log LogSummaries.TopProviders, HardwareDiagnostics)

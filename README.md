@@ -392,6 +392,22 @@ git push origin v0.6.1
 - локальний доступ до WMI/CIM;
 - для частини security/network/storage-даних потрібні підвищені права.
 
+### Робоча станція з обмеженими привілеями
+
+Без прав адміністратора звіт теж формується повністю, але з позначкою, що саме не перевірено:
+
+```powershell
+.\Get-BravoSystemReport.ps1 -Profile Full -NoElevate
+```
+
+- `-NoElevate` не запитує підвищення прав (UAC), тож запуск не зупиняється на запиті пароля адміністратора.
+- Перевірки, які Windows не дозволяє звичайному користувачу (WinRM, тіньові копії VSS, BitLocker, TPM,
+  Secure Boot, audit policy тощо), записуються в `SkippedChecks` з причиною `RequiresElevation`, а не
+  в `CollectionErrors`. Вони не знижують Health Score і не дають exit code 1. Список видно в HTML
+  (вкладка Findings, «Пропущено: обмежені права»), TXT, Markdown і CSV, а також у консольному підсумку.
+- `Elevated` у JSON показує, з якими правами сформовано звіт. З правами адміністратора поведінка не
+  змінюється, а `SkippedChecks` порожній.
+
 ## Структура проєкту
 
 ```text

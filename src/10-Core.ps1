@@ -362,3 +362,42 @@ function Get-BravoPublicIPv4ProviderInfo {
         }
     }
 }
+
+# --- Запуск з обмеженими привілеями (робоча станція без прав адміністратора) ---
+# Розділи, які Windows для звичайного користувача не надає взагалі: WSMan-провайдер
+# (WSMan:\localhost\...), Win32_ShadowCopy (VSS), Win32_EncryptableVolume (BitLocker).
+# Без прав адміністратора їхня помилка - не збій збору, а перевірка, пропущена через права.
+function Get-BravoElevationOnlySections {
+    [CmdletBinding()]
+    param()
+
+    return @('Security.WinRM', 'StorageDeep.ShadowCopies', 'StorageDeep.BitLocker')
+}
+
+# Чиста функція: чи схоже повідомлення про помилку на відмову в доступі
+# (англійська, українська, російська локалізації Windows і код E_ACCESSDENIED).
+function Test-BravoAccessDeniedMessage {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Message
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $false }
+    return $Message -match '(?i)access\s+(is\s+|was\s+)?denied|unauthorizedaccess|0x80070005|requires\s+elevation|відмовлено\s+в\s+доступі|отказано\s+в\s+доступе|требуется\s+повышение'
+}
+
+# Чиста функція: помилку розділу слід записати як пропущену перевірку (SkippedChecks),
+# а не як помилку збору (CollectionErrors). Лише для запуску без прав адміністратора:
+# з правами адміністратора поведінка не змінюється.
+function Test-BravoElevationSkip {
+    [CmdletBinding()]
+    param(
+        [bool]$Elevated,
+        [string]$Section,
+        [AllowNull()][AllowEmptyString()][string]$Message
+    )
+
+    if ($Elevated) { return $false }
+    if ((Get-BravoElevationOnlySections) -contains $Section) { return $true }
+    return (Test-BravoAccessDeniedMessage -Message $Message)
+}

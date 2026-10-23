@@ -73,3 +73,42 @@ Describe 'Move-BravoIPv4ToFront' {
         $result | Should -Be @('10.0.0.1')
     }
 }
+
+Describe 'Test-BravoAccessDeniedMessage' {
+    It 'розпізнає відмову в доступі різними мовами і за кодом E_ACCESSDENIED' {
+        foreach ($message in @(
+                'Access is denied.',
+                'Unable to set proper privileges. Access was denied.',
+                'Відмовлено в доступі',
+                'Отказано в доступе ',
+                'Exception from HRESULT: 0x80070005',
+                'Attempted to perform an unauthorized operation. (UnauthorizedAccessException)',
+                'The requested operation requires elevation.')) {
+            Test-BravoAccessDeniedMessage -Message $message | Should -BeTrue -Because $message
+        }
+    }
+
+    It 'не вважає відмовою в доступі інші помилки й порожнє повідомлення' {
+        foreach ($message in @('Invalid class', 'The RPC server is unavailable.', 'Not found', '', $null)) {
+            Test-BravoAccessDeniedMessage -Message $message | Should -BeFalse -Because "'$message'"
+        }
+    }
+}
+
+Describe 'Test-BravoElevationSkip' {
+    It 'з правами адміністратора ніколи не перетворює помилку збору на пропущену перевірку' {
+        Test-BravoElevationSkip -Elevated $true -Section 'Security.WinRM' -Message 'Access is denied.' | Should -BeFalse
+        Test-BravoElevationSkip -Elevated $true -Section 'StorageDeep.ShadowCopies' -Message 'Initialization failure' | Should -BeFalse
+    }
+
+    It 'без прав адміністратора: admin-only розділ пропускається за будь-якої помилки' {
+        foreach ($section in (Get-BravoElevationOnlySections)) {
+            Test-BravoElevationSkip -Elevated $false -Section $section -Message 'Cannot find path ''localhost\Listener'' because it does not exist.' | Should -BeTrue -Because $section
+        }
+    }
+
+    It 'без прав адміністратора: інший розділ пропускається лише при відмові в доступі' {
+        Test-BravoElevationSkip -Elevated $false -Section 'Security.Firewall' -Message 'Access is denied.' | Should -BeTrue
+        Test-BravoElevationSkip -Elevated $false -Section 'Security.Firewall' -Message 'The RPC server is unavailable.' | Should -BeFalse
+    }
+}

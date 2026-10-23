@@ -325,7 +325,16 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
     }
 
     It 'Security.TPM.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Full-профілі' {
-        $script:DeepSecurityReport.Security.TPM.Status | Should -BeIn @('Detected', 'NotPresent')
+        # Без прав адміністратора namespace MicrosoftTpm недоступний: 'Unavailable' допустимий
+        # лише тоді, коли TPM явно записано в SkippedChecks (не мовчазний пропуск).
+        if ($script:DeepSecurityReport.Elevated) {
+            $script:DeepSecurityReport.Security.TPM.Status | Should -BeIn @('Detected', 'NotPresent')
+        } else {
+            $script:DeepSecurityReport.Security.TPM.Status | Should -BeIn @('Detected', 'NotPresent', 'Unavailable')
+            if ($script:DeepSecurityReport.Security.TPM.Status -eq 'Unavailable') {
+                @($script:DeepSecurityReport.SkippedChecks | ForEach-Object { $_.Section }) | Should -Contain 'Security.TPM'
+            }
+        }
     }
 
     It 'якщо TPM.Status=Detected, то Present=true і Ready — визначений bool (не null)' {
@@ -437,7 +446,15 @@ Describe 'v0.5.0 Deep Inventory — Secure Boot / TPM / BitLocker / Hardware Inv
     }
 
     It 'Security.WinRM.Status — одне з очікуваних значень, ніколи не залишається NotChecked на Deep-профілі' {
-        $script:DeepSecurityReport.Security.WinRM.Status | Should -BeIn @('Detected', 'ServiceNotRunning', 'NotAvailable')
+        if ($script:DeepSecurityReport.Elevated) {
+            $script:DeepSecurityReport.Security.WinRM.Status | Should -BeIn @('Detected', 'ServiceNotRunning', 'NotAvailable')
+        } else {
+            # Без прав адміністратора WSMan-провайдер недоступний: 'Unavailable' + запис у SkippedChecks.
+            $script:DeepSecurityReport.Security.WinRM.Status | Should -BeIn @('Detected', 'ServiceNotRunning', 'NotAvailable', 'Unavailable')
+            if ($script:DeepSecurityReport.Security.WinRM.Status -eq 'Unavailable') {
+                @($script:DeepSecurityReport.SkippedChecks | ForEach-Object { $_.Section }) | Should -Contain 'Security.WinRM'
+            }
+        }
     }
 
     It 'Security.SMB.Status — одне з очікуваних значень, і якщо Detected, поля signing визначені' {
@@ -831,6 +848,63 @@ Describe 'v0.6.0 — Markdown summary (-MD)' -Skip:(-not (Test-Path (Join-Path $
         $mdFile | Should -BeNullOrEmpty
 
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Робоча станція з обмеженими привілеями: тест має сенс лише без прав адміністратора
+# (CI-runner з підвищеними правами його пропускає).
+Describe 'Обмежені привілеї — admin-only перевірки йдуть у SkippedChecks, а не в CollectionErrors' -Skip:((-not (Test-Path (Join-Path $PSScriptRoot '..\Get-BravoSystemReport.ps1'))) -or ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    BeforeAll {
+        $script:LimitedDir = New-BravoTestReportsDir -Name 'limited-privileges'
+        & $script:WrapperPath -Profile Deep -Offline -NoZip -NoElevate -TXT -MD -CSV -NoPause -NoOpenFolder -OutputPath $script:LimitedDir 2>&1 | Out-Null
+        $script:LimitedExitCode = $LASTEXITCODE
+        $jsonFile = Get-ChildItem -LiteralPath $script:LimitedDir -Filter '*.json' -Recurse | Select-Object -First 1
+        $script:LimitedReport = Get-Content -LiteralPath $jsonFile.FullName -Raw | ConvertFrom-Json
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:LimitedDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'звіт позначено як сформований без прав адміністратора' {
+        $script:LimitedReport.Elevated | Should -Be $false
+    }
+
+    It 'жоден admin-only розділ не потрапив у CollectionErrors' {
+        $errorSections = @($script:LimitedReport.CollectionErrors | ForEach-Object { $_.Section })
+        foreach ($section in @('Security.WinRM', 'StorageDeep.ShadowCopies', 'StorageDeep.BitLocker')) {
+            $errorSections | Should -Not -Contain $section
+        }
+    }
+
+    It 'кожен запис SkippedChecks має Section, Reason=RequiresElevation, і розділ не дублюється' {
+        $skipped = @($script:LimitedReport.SkippedChecks)
+        foreach ($entry in $skipped) {
+            $entry.Section | Should -Not -BeNullOrEmpty
+            $entry.Reason | Should -Be 'RequiresElevation'
+        }
+        @($skipped | ForEach-Object { $_.Section } | Select-Object -Unique).Count | Should -Be $skipped.Count
+    }
+
+    It 'exit code не залежить від SkippedChecks: без CollectionErrors/ExportErrors -> 0' {
+        if (@($script:LimitedReport.CollectionErrors).Count -eq 0 -and @($script:LimitedReport.ExportErrors).Count -eq 0) {
+            $script:LimitedExitCode | Should -Be 0
+        } else {
+            $script:LimitedExitCode | Should -Be 1
+        }
+    }
+
+    It 'пропущені перевірки видно в HTML, TXT, Markdown і CSV' {
+        if (@($script:LimitedReport.SkippedChecks).Count -gt 0) {
+            $html = Get-Content -LiteralPath (Get-ChildItem -LiteralPath $script:LimitedDir -Filter '*.html' -Recurse | Select-Object -First 1).FullName -Raw -Encoding UTF8
+            $html | Should -Match 'table-skipped-checks'
+            $txt = Get-Content -LiteralPath (Get-ChildItem -LiteralPath $script:LimitedDir -Filter '*.txt' -Recurse | Select-Object -First 1).FullName -Raw -Encoding UTF8
+            $txt | Should -Match 'Пропущено без прав адміністратора'
+            $md = Get-Content -LiteralPath (Get-ChildItem -LiteralPath $script:LimitedDir -Filter '*.md' -Recurse | Select-Object -First 1).FullName -Raw -Encoding UTF8
+            $md | Should -Match 'Пропущено без прав адміністратора'
+            $csv = Import-Csv -LiteralPath (Get-ChildItem -LiteralPath $script:LimitedDir -Filter '*.csv' -Recurse | Select-Object -First 1).FullName
+            [int](($csv | Where-Object { $_.Parameter -eq 'SkippedChecks' }).Value) | Should -Be @($script:LimitedReport.SkippedChecks).Count
+        }
     }
 }
 
