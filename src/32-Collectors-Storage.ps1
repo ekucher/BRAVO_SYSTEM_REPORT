@@ -389,7 +389,9 @@ function Get-BravoStorageDeepAudit {
     } catch {
         # Win32_ShadowCopy-провайдер може бути недоступний (служба VSS
         # вимкнена/недоступна) — фіксуємо як помилку збору, оскільки клас
-        # штатно присутній на всіх підтримуваних Windows.
+        # штатно присутній на всіх підтримуваних Windows. Без прав адміністратора
+        # клас недоступний ("Initialization failure") - Add-AuditError запише це як
+        # пропущену перевірку (SkippedChecks), а не помилку збору.
         Add-AuditError -Section 'StorageDeep.ShadowCopies' -Message $_.Exception.Message
     }
 

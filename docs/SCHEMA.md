@@ -9,7 +9,7 @@
 Поточне значення визначене в `src/20-ReportModel.ps1`:
 
 ```powershell
-SchemaVersion = '0.6.20'
+SchemaVersion = '0.6.21'
 ```
 
 **Правило**: будь-яка зміна форми моделі — новий верхньорівневий розділ, нове поле в наявному розділі, зміна типу поля — вимагає підняти `SchemaVersion` **в тому самому коміті**, що й сама зміна. Те саме стосується заповнення раніше завжди-порожнього поля новою об'єктною формою (напр. заглушка `@()`, яку колектор починає реально наповнювати, — це теж контрактна зміна для споживачів JSON). CI-крок "Contract change guard" (`local-windows-validation.yml`) перевіряє це автоматично для diff у `src/20-ReportModel.ps1`, але правило ширше — застосовується й тоді, коли модель не змінюється текстово, а змінюється семантика вже наявного поля.
@@ -27,11 +27,12 @@ SchemaVersion = '0.6.20'
 | `ComputerName` | string | ім'я аудитованої машини (маскується `-Sanitize`) |
 | `Elevated` | bool | чи запущено з правами адміністратора |
 | `Status` | string | підсумковий статус: `OK`/`WARNING`/`CRITICAL` (з `Health.Status`, після `Update-BravoHealthScore`) |
-| `StatusReason` | string | короткий текст-обґрунтування статусу (`critical=N; warning=N; collectionErrors=N`) |
+| `StatusReason` | string | короткий текст-обґрунтування статусу (`critical=N; warning=N; collectionErrors=N`); `SkippedChecks` у ньому не враховуються, формат не змінився |
 | `OutputPath` | string | директорія збереження звітів |
 | `GeneratedFiles` | array\<string\> | шляхи всіх фактично створених файлів (JSON/HTML/CSV/ZIP/PDF) — джерело для ZIP-пакування |
 | `CollectionErrors` | array | помилки **збору** даних (WMI/CIM/реєстр недоступні) — властивість аудитованої машини, впливає на Health Score |
 | `ExportErrors` | array | помилки **запису** звітів (JSON/HTML/CSV/ZIP/Email/PDF) — проблема інструмента, НЕ впливає на Health Score, впливає на exit code |
+| `SkippedChecks` | array | перевірки, пропущені через запуск без прав адміністратора (`Elevated=false`): `Time`, `Section`, `Reason` (`RequiresElevation`), `Message` (маскується `-Sanitize`). Один запис на розділ. НЕ впливають на Health Score і exit code; з правами адміністратора масив порожній (з 0.6.21) |
 
 ## Розділи моделі
 

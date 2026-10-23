@@ -24,7 +24,7 @@ BRAVO SYSTEM REPORT — PowerShell-інструмент для швидкого,
 
 ## Поточний статус
 
-Поточна стабільна версія: **ScriptVersion 0.6.1** (контракт JSON-звіту: **SchemaVersion 0.6.20**).
+Поточна стабільна версія: **ScriptVersion 0.6.1** (контракт JSON-звіту: **SchemaVersion 0.6.21**).
 
 `ScriptVersion` версіонує реліз інструмента (`src/90-Main.ps1`), `SchemaVersion` — структуру JSON-контракту (`src/20-ReportModel.ps1`); вони змінюються незалежно.
 
@@ -246,7 +246,7 @@ risk-unknown
 | Code | Значення |
 |------|----------|
 | `0` | Аудит успішно завершено, без помилок збору чи експорту (і, у `-Strict` режимі, без CRITICAL `Health.Status`) |
-| `1` | Аудит завершено, але були помилки збору (`CollectionErrors`) і/або запису звітів (`ExportErrors`) |
+| `1` | Аудит завершено, але були помилки збору (`CollectionErrors`) і/або запису звітів (`ExportErrors`). Перевірки, пропущені без прав адміністратора (`SkippedChecks`), exit code не змінюють |
 | `2` | Фатальна неопрацьована помилка виконання (баг/runtime-збій) |
 | `3` | Обов'язковий вихідний файл (JSON) не згенеровано |
 | `4` | Лише з `-Strict`: аудит завершено без `CollectionErrors`/`ExportErrors`, але `Health.Status` аудитованої машини = `CRITICAL` |
@@ -391,6 +391,22 @@ git push origin v0.6.1
 - Windows 10 / Windows 11 / Windows Server;
 - локальний доступ до WMI/CIM;
 - для частини security/network/storage-даних потрібні підвищені права.
+
+### Робоча станція з обмеженими привілеями
+
+Без прав адміністратора звіт теж формується повністю, але з позначкою, що саме не перевірено:
+
+```powershell
+.\Get-BravoSystemReport.ps1 -Profile Full -NoElevate
+```
+
+- `-NoElevate` не запитує підвищення прав (UAC), тож запуск не зупиняється на запиті пароля адміністратора.
+- Перевірки, які Windows не дозволяє звичайному користувачу (WinRM, тіньові копії VSS, BitLocker, TPM,
+  Secure Boot, audit policy тощо), записуються в `SkippedChecks` з причиною `RequiresElevation`, а не
+  в `CollectionErrors`. Вони не знижують Health Score і не дають exit code 1. Список видно в HTML
+  (вкладка Findings, «Пропущено: обмежені права»), TXT, Markdown і CSV, а також у консольному підсумку.
+- `Elevated` у JSON показує, з якими правами сформовано звіт. З правами адміністратора поведінка не
+  змінюється, а `SkippedChecks` порожній.
 
 ## Структура проєкту
 

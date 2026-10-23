@@ -1,7 +1,7 @@
 ﻿<#
     BRAVO SYSTEM REPORT
     Згенерований монолітний runtime-скрипт.
-    GeneratedAt: 2026-10-23 01:12:20
+    GeneratedAt: 2026-10-23 20:51:48
 
     УВАГА:
     Не редагуйте цей файл вручну.
@@ -434,6 +434,65 @@ function Get-BravoPublicIPv4ProviderInfo {
     }
 }
 
+# --- Запуск з обмеженими привілеями (робоча станція без прав адміністратора) ---
+# Розділи, які Windows звичайному користувачу не надає, і характерні для цього
+# повідомлення (окрім загальної відмови в доступі): WSMan-провайдер без прав не
+# монтує localhost\Listener, Win32_ShadowCopy/Win32_EncryptableVolume дають
+# WBEM "Initialization failure". Інші помилки цих розділів лишаються помилками збору.
+function Get-BravoElevationOnlySections {
+    [CmdletBinding()]
+    param()
+
+    $wbemInitFailure = 'initialization\s+failure|сбой\s+инициализации|помилка\s+ініціалізації|0x80041014'
+    return [ordered]@{
+        'Security.WinRM'           = "cannot\s+find\s+path\s+'localhost\\(listener|service)|wsman"
+        'StorageDeep.ShadowCopies' = $wbemInitFailure
+        'StorageDeep.BitLocker'    = "$wbemInitFailure|invalid\s+namespace|недопустимое\s+пространство\s+имен|0x8004100e"
+    }
+}
+
+# Чиста функція: чи схоже повідомлення про помилку на відмову в доступі
+# (англійська, українська, російська локалізації Windows; E_ACCESSDENIED і
+# WBEM_E_ACCESS_DENIED). Тексти - реальні Exception.Message .NET/WMI/реєстру.
+function Test-BravoAccessDeniedMessage {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Message
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $false }
+    $patterns = @(
+        'access\s+(is\s+|was\s+)?denied',                  # Access is denied. / Access was denied.
+        'access\s+to\s+the\s+(path|registry\s+key)\b.*\bis\s+denied',  # UnauthorizedAccessException (файл/реєстр)
+        'registry\s+access\s+is\s+not\s+allowed',          # SecurityException при читанні реєстру
+        'requires\s+elevation',
+        '0x80070005', '0x80041003',                        # E_ACCESSDENIED, WBEM_E_ACCESS_DENIED
+        'відмовлено\s+в\s+доступі', 'доступ\s+заборонено',
+        'отказано\s+в\s+доступе', 'доступ\s+запрещен', 'требуется\s+повышение'
+    )
+    return $Message -match ('(?i)' + ($patterns -join '|'))
+}
+
+# Чиста функція: помилку розділу слід записати як пропущену перевірку (SkippedChecks),
+# а не як помилку збору (CollectionErrors). Лише для запуску без прав адміністратора
+# і лише для відмови в доступі або відомої сигнатури admin-only розділу: інший збій
+# (напр. вимкнена служба VSS) лишається помилкою збору. З правами адміністратора -
+# завжди помилка збору, як раніше.
+function Test-BravoElevationSkip {
+    [CmdletBinding()]
+    param(
+        [bool]$Elevated,
+        [string]$Section,
+        [AllowNull()][AllowEmptyString()][string]$Message
+    )
+
+    if ($Elevated) { return $false }
+    if (Test-BravoAccessDeniedMessage -Message $Message) { return $true }
+    $sections = Get-BravoElevationOnlySections
+    if (-not $sections.Contains($Section) -or [string]::IsNullOrWhiteSpace($Message)) { return $false }
+    return $Message -match ('(?i)' + $sections[$Section])
+}
+
 
 # ============================================================
 # MODULE: src/20-ReportModel.ps1
@@ -447,7 +506,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.20'
+    SchemaVersion = '0.6.21'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -711,6 +770,10 @@ return [ordered]@{
     # самого інструмента, НЕ впливає на Health Score, але впливає на exit code.
     CollectionErrors = @()
     ExportErrors = @()
+    # SkippedChecks — перевірки, пропущені через запуск без прав адміністратора
+    # (Elevated=$false): Section/Reason='RequiresElevation'/Message. НЕ впливають на
+    # Health Score і exit code; з правами адміністратора масив завжди порожній.
+    SkippedChecks = @()
 }
 }
 
@@ -1438,7 +1501,9 @@ function Get-BravoStorageDeepAudit {
     } catch {
         # Win32_ShadowCopy-провайдер може бути недоступний (служба VSS
         # вимкнена/недоступна) — фіксуємо як помилку збору, оскільки клас
-        # штатно присутній на всіх підтримуваних Windows.
+        # штатно присутній на всіх підтримуваних Windows. Без прав адміністратора
+        # клас недоступний ("Initialization failure") - Add-AuditError запише це як
+        # пропущену перевірку (SkippedChecks), а не помилку збору.
         Add-AuditError -Section 'StorageDeep.ShadowCopies' -Message $_.Exception.Message
     }
 
@@ -2857,7 +2922,11 @@ function Get-BravoSecurityAudit {
                             Add-AuditFinding -Severity 'WARNING' -Category 'Security.WinRM' -Message 'WinRM CredSSP authentication увімкнено.' -Recommendation 'CredSSP дозволяє делегування креденшелів (ризик relay/pass-the-hash) — вимкніть, якщо не потрібен саме подвійний hop.'
                         }
                     } catch {
+                        # Без прав адміністратора WSMan-провайдер недоступний: Add-AuditError запише
+                        # це як SkippedChecks (не помилку збору), і тоді статус - Unavailable.
+                        # Інший збій лишається помилкою збору зі статусом як раніше.
                         Add-AuditError -Section 'Security.WinRM' -Message $_.Exception.Message
+                        if (@($script:Report.SkippedChecks | Where-Object { $_.Section -eq 'Security.WinRM' }).Count -gt 0) { $script:Report.Security.WinRM.Status = 'Unavailable' }
                     }
                 } else {
                     $script:Report.Security.WinRM.Status = 'ServiceNotRunning'
@@ -5089,6 +5158,13 @@ function Invoke-BravoReportSanitization {
             if ($errorEntry.Message) { $errorEntry.Message = 'REDACTED-ERROR-MESSAGE' }
         }
     }
+    # SkippedChecks.Message - той самий $_.Exception.Message (відмова доступу може
+    # містити шлях/обліковий запис), той самий підхід. Section/Reason не маскуються.
+    if ($Report.SkippedChecks) {
+        foreach ($skipEntry in @($Report.SkippedChecks)) {
+            if ($skipEntry.Message) { $skipEntry.Message = 'REDACTED-ERROR-MESSAGE' }
+        }
+    }
 
     # --- EventLogs: сирий текст подій (delta review v0.6.1) — LastMessage
     # (TopErrorSources, per-log LogSummaries.TopProviders, HardwareDiagnostics)
@@ -5509,6 +5585,17 @@ function Export-BravoHtmlReport {
                 }) -join "`n"
             } else {
                 '<tr><td colspan="3" class="muted">Помилок збору даних не зафіксовано.</td></tr>'
+            }
+
+            # Перевірки, пропущені через запуск без прав адміністратора - окремо від помилок збору.
+            $skippedChecks = @($script:Report.SkippedChecks)
+            $skippedHtml = if ($skippedChecks.Count -gt 0) {
+                $skippedRows = ($skippedChecks | ForEach-Object {
+                    "<tr><td>$(ConvertTo-BravoHtmlText $_.Section)</td><td>$(ConvertTo-BravoHtmlText $_.Reason)</td><td>$(ConvertTo-BravoHtmlText $_.Message)</td></tr>"
+                }) -join "`n"
+                "<h2 class=`"tab-panel-title`"><span class=`"section-icon`">🔒</span>Пропущено: обмежені права ($($skippedChecks.Count))</h2><p class=`"muted`">Звіт сформовано без прав адміністратора. Ці перевірки не виконано; для повного аудиту запустіть від імені адміністратора.</p><div class=`"table-scroll`"><table id=`"table-skipped-checks`" class=`"data-table`"><thead><tr><th>Section</th><th>Reason</th><th>Message</th></tr></thead><tbody>$skippedRows</tbody></table></div>"
+            } else {
+                ''
             }
 
             $softwareRows = if ($script:Report.Software.Installed.Count -gt 0) {
@@ -5945,7 +6032,7 @@ function Export-BravoHtmlReport {
     <button type="button" class="tab-button" data-tab-target="tab-findings" onclick="openTab(event, 'tab-findings')" aria-controls="tab-findings" aria-selected="false">Findings</button>
   </nav>
   <main class="content">
-    <section id="tab-general" class="tab-panel active"><h2 class="tab-panel-title"><span class="section-icon">📌</span>General Dashboard</h2><div class="metrics-grid">$metricCardsHtml</div><div class="grid"><div class="card"><h3>Підсумок</h3>$(New-BravoInfoRowHtml 'Health Score' "$($script:Report.Health.Score)/100")$(New-BravoInfoRowHtml 'Status' $script:Report.Status)$(New-BravoInfoRowHtml 'Status reason' $script:Report.StatusReason)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)$(New-BravoInfoRowHtml 'Collection errors' $script:Report.CollectionErrors.Count)</div><div class="card"><h3>Ключова мережа</h3>$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div></div></section>
+    <section id="tab-general" class="tab-panel active"><h2 class="tab-panel-title"><span class="section-icon">📌</span>General Dashboard</h2><div class="metrics-grid">$metricCardsHtml</div><div class="grid"><div class="card"><h3>Підсумок</h3>$(New-BravoInfoRowHtml 'Health Score' "$($script:Report.Health.Score)/100")$(New-BravoInfoRowHtml 'Status' $script:Report.Status)$(New-BravoInfoRowHtml 'Status reason' $script:Report.StatusReason)$(New-BravoInfoRowHtml 'Findings' $script:Report.Health.Findings.Count)$(New-BravoInfoRowHtml 'Collection errors' $script:Report.CollectionErrors.Count)$(if (@($script:Report.SkippedChecks).Count -gt 0) { New-BravoInfoRowHtml 'Пропущено (без прав адміністратора)' @($script:Report.SkippedChecks).Count })</div><div class="card"><h3>Ключова мережа</h3>$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div></div></section>
     <section id="tab-os" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🖥️</span>OS</h2><div class="grid"><div class="card"><h3>Операційна система</h3>$(New-BravoInfoRowHtml 'OS' $script:Report.OS.Caption)$(New-BravoInfoRowHtml 'Version' $script:Report.OS.Version)$(New-BravoInfoRowHtml 'Build' $script:Report.OS.Build)$(New-BravoInfoRowHtml 'Architecture' $script:Report.OS.Architecture)$(New-BravoInfoRowHtml 'Install date' $script:Report.OS.InstallDate)$(New-BravoInfoRowHtml 'Last boot' $script:Report.OS.LastBootUpTime)$(New-BravoInfoRowHtml 'Uptime' $script:Report.Dashboard.Header.UptimeText)</div><div class="card"><h3>Runtime</h3>$(New-BravoInfoRowHtml 'PowerShell' $script:Report.PowerShell.Version)$(New-BravoInfoRowHtml 'Edition' $script:Report.PowerShell.Edition)$(New-BravoInfoRowHtml 'ExecutionPolicy' $script:Report.PowerShell.ExecutionPolicy)$(New-BravoInfoRowHtml '.NET v4' $script:Report.DotNet.v4)$(New-BravoInfoRowHtml '.NET оновлення' $(if($script:Report.DotNet.UpdateAvailable){"Доступне (найновіша: $($script:Report.DotNet.LatestKnownVersion))"}else{'Немає'}))$(New-BravoInfoRowHtml 'PowerShell 7 (Core)' $(if($script:Report.PowerShell.Core7Installed){$script:Report.PowerShell.Core7Version}else{'Не встановлено'}))$(New-BravoInfoRowHtml 'PowerShell 7 оновлення' $(if($script:Report.PowerShell.Core7UpdateAvailable){"Доступне (найновіша: $($script:Report.PowerShell.Core7LatestKnown))"}else{'Немає'}))$(New-BravoInfoRowHtml 'Use CIM' $script:Report.Meta.UseCim)</div></div></section>
     <section id="tab-hardware" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🧠</span>Hardware</h2><div class="grid"><div class="card"><h3>CPU / RAM</h3>$(New-BravoInfoRowHtml 'CPU' $script:Report.Hardware.CPU.Name)$(New-BravoInfoRowHtml 'Cores / threads' "$($script:Report.Hardware.CPU.Cores)/$($script:Report.Hardware.CPU.LogicalProcessors)")<div class="info-row"><span class="info-label">CPU load</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.CPU.LoadPercent)%</div></div></span></div>$(New-BravoInfoRowHtml 'RAM total visible' "$($script:Report.Hardware.RAM.TotalVisibleMemoryGB) GB")$(New-BravoInfoRowHtml 'RAM used/free' "$($script:Report.Hardware.RAM.UsedGB) GB / $($script:Report.Hardware.RAM.FreeGB) GB")<div class="info-row"><span class="info-label">RAM used</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.RAM.UsedPercent)%</div></div></span></div></div><div class="card"><h3>Disk summary</h3>$(New-BravoInfoRowHtml 'Total' (Format-Size $script:Report.Hardware.Disks.TotalGB))$(New-BravoInfoRowHtml 'Free' (Format-Size $script:Report.Hardware.Disks.FreeGB))<div class="info-row"><span class="info-label">Free percent</span><span class="info-value"><div class="progress-bar"><div class="progress-fill" style="width:$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%">$(Get-BravoSafePercentText $script:Report.Hardware.Disks.FreePercent)%</div></div></span></div></div><div class="card"><h3>System / Motherboard</h3>$(New-BravoInfoRowHtml 'Manufacturer' $script:Report.Hardware.ComputerSystem.Manufacturer)$(New-BravoInfoRowHtml 'Model' $script:Report.Hardware.ComputerSystem.Model)$(New-BravoInfoRowHtml 'Chassis type' $script:Report.Hardware.ComputerSystem.ChassisType)$(New-BravoInfoRowHtml 'Motherboard' "$($script:Report.Hardware.Motherboard.Manufacturer) $($script:Report.Hardware.Motherboard.Product)")$(New-BravoInfoRowHtml 'Motherboard version' $script:Report.Hardware.Motherboard.Version)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical volumes</div><div class="storage-summary-value"><span class="risk risk-critical">$criticalCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning volumes</div><div class="storage-summary-value"><span class="risk risk-warning">$warningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System warnings</div><div class="storage-summary-value"><span class="risk risk-warning">$systemWarningCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Healthy volumes</div><div class="storage-summary-value"><span class="risk risk-ok">$healthyCount</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">System-reserved (без літери)</div><div class="storage-summary-value"><span class="risk risk-unknown">$reservedCount</span></div></div></div><h3>Storage Critical Findings</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-critical' -Placeholder 'Пошук по storage findings...')<div class="table-scroll"><table id="table-storage-critical" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageCriticalRows</tbody></table></div><h3>Storage Deep</h3>$(New-BravoTableToolbarHtml -TableId 'table-storage-deep' -Placeholder 'Пошук по дисках, FS, health, risk...')<div class="table-scroll"><table id="table-storage-deep" class="data-table"><thead><tr><th>Том</th><th>Мітка</th><th>FS</th><th>Тип</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Free GB</th><th>Free %</th><th>Risk</th><th>Причина</th></tr></thead><tbody>$storageDeepRows</tbody></table></div><h3>BitLocker</h3>$(New-BravoTableToolbarHtml -TableId 'table-bitlocker' -Placeholder 'Пошук по томах, статусу захисту...')<div class="table-scroll"><table id="table-bitlocker" class="data-table"><thead><tr><th>Том</th><th>Тип</th><th>Volume Status</th><th>Protection</th><th>Encryption %</th><th>Method</th><th>Lock Status</th></tr></thead><tbody>$bitlockerRows</tbody></table></div><h3>Shadow Copies (VSS)</h3>$(New-BravoTableToolbarHtml -TableId 'table-shadowcopies' -Placeholder 'Пошук по точках відновлення...')<div class="table-scroll"><table id="table-shadowcopies" class="data-table"><thead><tr><th>Volume</th><th>Install Date</th><th>Client Accessible</th><th>Persistent</th></tr></thead><tbody>$shadowCopyRows</tbody></table></div><h3>Storage Spaces</h3>$(New-BravoTableToolbarHtml -TableId 'table-storagepools' -Placeholder 'Пошук по пулах...')<div class="table-scroll"><table id="table-storagepools" class="data-table"><thead><tr><th>Name</th><th>Health</th><th>Operational</th><th>Size GB</th><th>Allocated GB</th></tr></thead><tbody>$storagePoolRows</tbody></table></div><h3>SMART / Reliability Counters</h3>$(New-BravoTableToolbarHtml -TableId 'table-reliability' -Placeholder 'Пошук по дисках...')<div class="table-scroll"><table id="table-reliability" class="data-table"><thead><tr><th>Disk</th><th>Media</th><th>Temp °C</th><th>Wear</th><th>Uncorrected errors</th><th>Power-on hours</th></tr></thead><tbody>$reliabilityRows</tbody></table></div><h3>SMART Predictive Failure</h3>$(New-BravoTableToolbarHtml -TableId 'table-smartpredict' -Placeholder 'Пошук по дисках...')<div class="table-scroll"><table id="table-smartpredict" class="data-table"><thead><tr><th>Instance</th><th>Predict Failure</th><th>Reason</th></tr></thead><tbody>$smartPredictRows</tbody></table></div><h3>GPU</h3>$(New-BravoTableToolbarHtml -TableId 'table-gpu' -Placeholder 'Пошук по відеокартах...')<div class="table-scroll"><table id="table-gpu" class="data-table"><thead><tr><th>Name</th><th>VRAM</th><th>Driver</th><th>Resolution</th><th>Status</th></tr></thead><tbody>$gpuRows</tbody></table></div><h3>Monitors</h3>$(New-BravoTableToolbarHtml -TableId 'table-monitors' -Placeholder 'Пошук по моніторах...')<div class="table-scroll"><table id="table-monitors" class="data-table"><thead><tr><th>Manufacturer</th><th>Model</th><th>Active</th><th>Size</th><th>Year</th></tr></thead><tbody>$monitorRows</tbody></table></div></section>
     <section id="tab-network" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🌐</span>Network</h2><div class="grid"><div class="card"><h3>Routing</h3>$(New-BravoInfoRowHtml 'Hostname' $script:Report.Network.General.Hostname)$(New-BravoInfoRowHtml 'Domain' $script:Report.Network.General.Domain)$(New-BravoInfoRowHtml 'IPv4' ((@($script:Report.Network.IP.IPv4) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Primary IPv4' $script:Report.Network.IP.PrimaryIPv4)$(New-BravoInfoRowHtml 'Gateway' ((@($script:Report.Network.Routing.DefaultGateways) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'DNS' ((@($script:Report.Network.Routing.DNSServers) | Where-Object { $_ }) -join ', '))$(New-BravoInfoRowHtml 'Public IPv4 status' $publicIpv4StatusForReport)</div><div class="card"><h3>Connections</h3>$(New-BravoInfoRowHtml 'Established' $script:Report.Network.Connections.Established)$(New-BravoInfoRowHtml 'Listening' $script:Report.Network.Connections.Listening)$(New-BravoInfoRowHtml 'ISP / Organization' $script:Report.Network.IP.PublicIPv4ISP)$(New-BravoInfoRowHtml 'ASN' $script:Report.Network.IP.PublicIPv4ASN)$(New-BravoInfoRowHtml 'Location' $publicIpv4LocationForReport)$(New-BravoInfoRowHtml 'IP lookup provider' $script:Report.Network.IP.PublicIPv4Provider)$(New-BravoInfoRowHtml 'ISP lookup provider' $script:Report.Network.IP.PublicIPv4LookupProvider)$(New-BravoInfoRowHtml 'Checked at' $script:Report.Network.IP.PublicIPv4CheckedAt)</div></div><h3>Adapters</h3>$(New-BravoTableToolbarHtml -TableId 'table-network-adapters' -Placeholder 'Пошук по adapter, MAC, IPv4, gateway, DNS, driver...')<div class="table-scroll"><table id="table-network-adapters" class="data-table"><thead><tr><th>Description</th><th>MAC</th><th>IPv4</th><th>Gateway</th><th>DNS</th><th>DHCP</th><th>Link Speed</th><th>Status</th><th>Driver</th></tr></thead><tbody>$adapterRows</tbody></table></div><div class="grid"><div class="card"><h3>WinHTTP Proxy</h3>$(New-BravoInfoRowHtml 'Status' $script:Report.Network.WinHttpProxy.Status)$(New-BravoInfoRowHtml 'Details' $winHttpProxyText)</div></div><h3>Routing Table</h3>$(New-BravoTableToolbarHtml -TableId 'table-routing' -Placeholder 'Пошук по маршрутах...')<div class="table-scroll"><table id="table-routing" class="data-table"><thead><tr><th>Destination</th><th>Next Hop</th><th>Metric</th><th>Interface</th></tr></thead><tbody>$routingTableRows</tbody></table></div><h3>ARP Cache</h3>$(New-BravoTableToolbarHtml -TableId 'table-arp' -Placeholder 'Пошук по ARP-кешу...')<div class="table-scroll"><table id="table-arp" class="data-table"><thead><tr><th>IP Address</th><th>MAC Address</th><th>State</th><th>Interface</th></tr></thead><tbody>$arpRows</tbody></table></div><h3>Listening Ports</h3>$(New-BravoTableToolbarHtml -TableId 'table-listening' -Placeholder 'Пошук по портах...')<div class="table-scroll"><table id="table-listening" class="data-table"><thead><tr><th>Local Address</th><th>Port</th><th>PID</th><th>Process</th></tr></thead><tbody>$listeningPortRows</tbody></table></div><h3>Established Connections</h3>$(New-BravoTableToolbarHtml -TableId 'table-established' -Placeholder 'Пошук по з''єднаннях...')<div class="table-scroll"><table id="table-established" class="data-table"><thead><tr><th>Local Address</th><th>Local Port</th><th>Remote Address</th><th>Remote Port</th><th>PID</th><th>Process</th></tr></thead><tbody>$establishedConnectionRows</tbody></table></div><h3>SMB Shares</h3>$(New-BravoTableToolbarHtml -TableId 'table-smbshares' -Placeholder 'Пошук по shares...')<div class="table-scroll"><table id="table-smbshares" class="data-table"><thead><tr><th>Name</th><th>Path</th><th>Type</th><th>Administrative</th></tr></thead><tbody>$smbShareRows</tbody></table></div></section>
@@ -5953,7 +6040,7 @@ function Export-BravoHtmlReport {
     <section id="tab-services" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">⚙️</span>Services</h2><div class="grid"><div class="card"><h3>Service summary</h3>$(New-BravoInfoRowHtml 'Processes' $script:Report.Processes.Total)$(New-BravoInfoRowHtml 'Services running' "$($script:Report.Services.Running)/$($script:Report.Services.Total)")$(New-BravoInfoRowHtml 'Automatic stopped' $script:Report.Services.AutomaticStopped.Count)$(New-BravoInfoRowHtml "System errors ($EventLogDays дн.)" $script:Report.EventLogs.SystemErrors)$(New-BravoInfoRowHtml "System warnings ($EventLogDays дн.)" $script:Report.EventLogs.SystemWarnings)</div></div><h3>Automatic stopped services</h3>$(New-BravoTableToolbarHtml -TableId 'table-services-stopped' -Placeholder 'Пошук по службах...')<div class="table-scroll"><table id="table-services-stopped" class="data-table"><thead><tr><th>Name</th><th>DisplayName</th><th>StartType</th><th>Status</th></tr></thead><tbody>$serviceRows</tbody></table></div><h3>Топ джерел помилок System log ($EventLogDays дн.)</h3>$(New-BravoTableToolbarHtml -TableId 'table-events-top-sources' -Placeholder 'Пошук по джерелах помилок...')<div class="table-scroll"><table id="table-events-top-sources" class="data-table"><thead><tr><th>Source</th><th>Count</th><th>Останнє повідомлення</th></tr></thead><tbody>$eventTopErrorRows</tbody></table></div><h3>Event Logs: System / Application / Setup / Security ($EventLogDays дн.)</h3>$(New-BravoTableToolbarHtml -TableId 'table-events-logsummary' -Placeholder 'Пошук по журналах...')<div class="table-scroll"><table id="table-events-logsummary" class="data-table"><thead><tr><th>Log</th><th>Status</th><th>Critical</th><th>Error</th><th>Warning</th></tr></thead><tbody>$eventLogSummaryRows</tbody></table></div><h3>Provider Summary (Critical/Error/Warning)</h3>$(New-BravoTableToolbarHtml -TableId 'table-events-providers' -Placeholder 'Пошук по провайдерах...')<div class="table-scroll"><table id="table-events-providers" class="data-table"><thead><tr><th>Log</th><th>Provider</th><th>Count</th><th>Останнє повідомлення</th></tr></thead><tbody>$eventLogProviderRows</tbody></table></div><h3>Hardware Diagnostics (Disk/Ntfs/StorPort/StorNVMe/WHEA/Kernel-Power/BugCheck)</h3>$(New-BravoTableToolbarHtml -TableId 'table-events-hwdiag' -Placeholder 'Пошук по провайдерах...')<div class="table-scroll"><table id="table-events-hwdiag" class="data-table"><thead><tr><th>Provider</th><th>Status</th><th>Count</th><th>Останнє повідомлення</th></tr></thead><tbody>$hardwareDiagnosticRows</tbody></table></div></section>
     <section id="tab-software" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">📦</span>Software</h2><div class="grid"><div class="card"><h3>Software summary</h3>$(New-BravoInfoRowHtml 'Installed software' $script:Report.Software.Installed.Count)$(New-BravoInfoRowHtml 'Profile' $Profile)</div></div><h3>Installed software</h3>$(New-BravoTableToolbarHtml -TableId 'table-software-installed' -Placeholder 'Пошук по назві, версії або видавцю...')<div class="table-scroll"><table id="table-software-installed" class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install date</th></tr></thead><tbody>$softwareRows</tbody></table></div></section>
     <section id="tab-updates" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔄</span>Updates</h2><div class="grid"><div class="card"><h3>Життєвий цикл ОС</h3>$(New-BravoInfoRowHtml 'Продукт' $script:Report.Updates.OS.Product)$(New-BravoInfoRowHtml 'Версія' $script:Report.Updates.OS.DisplayVersion)$(New-BravoInfoRowHtml 'Версія з реєстру' $script:Report.Updates.OS.RegistryDisplayVersion)$(New-BravoInfoRowHtml 'Full build' $script:Report.Updates.OS.FullBuild)$(New-BravoInfoRowHtml 'Канал' $script:Report.Updates.OS.Channel)$(New-BravoInfoRowHtml 'EditionID' $script:Report.Updates.OS.EditionId)$(New-BravoInfoRowHtml 'Кінець підтримки' $script:Report.Updates.OS.SupportEndDate)$(New-BravoInfoRowHtml 'Днів до кінця підтримки' $script:Report.Updates.OS.DaysToEndOfSupport)<div class="info-row"><span class="info-label">Статус підтримки</span><span class="info-value"><span class="status-pill $updatesSupportStatusClass">$(ConvertTo-BravoHtmlText $updatesSupportStatusText)</span></span></div>$(New-BravoInfoRowHtml 'Дані lifecycle від' $script:Report.Updates.OS.LifecycleDataUpdatedAt)</div><div class="card"><h3>Windows Update</h3>$(New-BravoInfoRowHtml 'Служба wuauserv' $script:Report.Updates.WindowsUpdate.ServiceStatus)$(New-BravoInfoRowHtml 'Тип запуску' $script:Report.Updates.WindowsUpdate.ServiceStartType)$(New-BravoInfoRowHtml 'Політика оновлень' $script:Report.Updates.WindowsUpdate.AutoUpdateOption)$(New-BravoInfoRowHtml 'WSUS' $(if($script:Report.Updates.WindowsUpdate.ManagedByWSUS){$script:Report.Updates.WindowsUpdate.WSUSServer}else{'Ні'}))$(New-BravoInfoRowHtml 'Останній пошук' $script:Report.Updates.WindowsUpdate.LastDetectSuccess)$(New-BravoInfoRowHtml 'Остання установка' $script:Report.Updates.WindowsUpdate.LastInstallSuccess)$(New-BravoInfoRowHtml 'Потрібне перезавантаження' $pendingRebootText)$(New-BravoInfoRowHtml 'Статус пошуку' $updatesSearchStatusText)$(New-BravoInfoRowHtml 'Тривалість пошуку, сек' $script:Report.Updates.Search.DurationSeconds)</div></div><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Потрібно встановити</div><div class="storage-summary-value">$($script:Report.Updates.Pending.Total)$(if($script:Report.Updates.Pending.IsTruncated){" <span class=`"risk risk-warning`">детально: $($script:Report.Updates.Pending.Detailed)</span>"})</div></div><div class="storage-summary-item"><div class="storage-summary-label">Security</div><div class="storage-summary-value"><span class="risk risk-critical">$($script:Report.Updates.Pending.Security)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Драйвери</div><div class="storage-summary-value"><span class="risk risk-warning">$($script:Report.Updates.Pending.Driver)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Завантажено</div><div class="storage-summary-value"><span class="risk risk-ok">$($script:Report.Updates.Pending.Downloaded)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Обсяг, MB</div><div class="storage-summary-value">$($script:Report.Updates.Pending.TotalSizeMB)</div></div><div class="storage-summary-item"><div class="storage-summary-label">Встановлено оновлень</div><div class="storage-summary-value">$($script:Report.Updates.Installed.Total)</div></div></div><h3>Оновлення, які потрібно встановити</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-pending' -Placeholder 'Пошук по назві, KB, категорії...')<div class="table-scroll"><table id="table-updates-pending" class="data-table"><thead><tr><th>Title</th><th>KB</th><th>Categories</th><th>Severity</th><th>Size MB</th><th>Downloaded</th><th>Released</th></tr></thead><tbody>$pendingUpdatesRows</tbody></table></div><h3>Останні встановлені оновлення</h3>$(New-BravoTableToolbarHtml -TableId 'table-updates-installed' -Placeholder 'Пошук по KB, опису, користувачу...')<div class="table-scroll"><table id="table-updates-installed" class="data-table"><thead><tr><th>HotFixID</th><th>Description</th><th>Installed by</th><th>Installed on</th></tr></thead><tbody>$installedUpdatesRows</tbody></table></div></section>
-    <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical</div><div class="storage-summary-value"><span class="risk risk-critical">$($findingsGrouped.CriticalCount)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning</div><div class="storage-summary-value"><span class="risk risk-warning">$($findingsGrouped.WarningCount)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Info</div><div class="storage-summary-value"><span class="risk risk-unknown">$($findingsGrouped.InfoCount)</span></div></div></div>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div></section>
+    <section id="tab-findings" class="tab-panel"><h2 class="tab-panel-title"><span class="section-icon">🔎</span>Findings</h2><div class="storage-summary-grid"><div class="storage-summary-item"><div class="storage-summary-label">Critical</div><div class="storage-summary-value"><span class="risk risk-critical">$($findingsGrouped.CriticalCount)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Warning</div><div class="storage-summary-value"><span class="risk risk-warning">$($findingsGrouped.WarningCount)</span></div></div><div class="storage-summary-item"><div class="storage-summary-label">Info</div><div class="storage-summary-value"><span class="risk risk-unknown">$($findingsGrouped.InfoCount)</span></div></div></div>$(New-BravoTableToolbarHtml -TableId 'table-findings' -Placeholder 'Пошук по severity, category, message...')<div class="table-scroll"><table id="table-findings" class="data-table"><thead><tr><th>Severity</th><th>Category</th><th>Message</th><th>Recommendation</th></tr></thead><tbody>$findingsRows</tbody></table></div><h2 class="tab-panel-title"><span class="section-icon">🛠️</span>Помилки збору даних</h2>$(New-BravoTableToolbarHtml -TableId 'table-collection-errors' -Placeholder 'Пошук по помилках збору...')<div class="table-scroll"><table id="table-collection-errors" class="data-table"><thead><tr><th>Time</th><th>Section</th><th>Message</th></tr></thead><tbody>$errorsRows</tbody></table></div>$skippedHtml</section>
   </main>
   <footer class="footer"><p>BRAVO SYSTEM REPORT v$ScriptVersion | $(ConvertTo-BravoHtmlText $script:Report.OutputPath)</p></footer>
 </div>
@@ -6219,6 +6306,7 @@ function Export-BravoCsvReport {
                 [PSCustomObject]@{Parameter='Local_Admins'; Value=$script:Report.Users.LocalAdmins.Count}
                 [PSCustomObject]@{Parameter='Findings'; Value=$script:Report.Health.Findings.Count}
                 [PSCustomObject]@{Parameter='CollectionErrors'; Value=$script:Report.CollectionErrors.Count}
+                [PSCustomObject]@{Parameter='SkippedChecks'; Value=@($script:Report.SkippedChecks).Count}
             )
 
             $csvData | Export-Csv $csvPath -NoTypeInformation -Encoding utf8
@@ -6517,6 +6605,15 @@ function Export-BravoTxtReport {
             $lines.Add('')
         }
 
+        $skippedCount = @($script:Report.SkippedChecks).Count
+        if ($skippedCount -gt 0) {
+            $lines.Add("--- Пропущено без прав адміністратора ($skippedCount) ---")
+            foreach ($skipped in @($script:Report.SkippedChecks)) {
+                $lines.Add("$($skipped.Section) | $($skipped.Reason) | $($skipped.Message)")
+            }
+            $lines.Add('')
+        }
+
         $lines.Add("Generated by BRAVO SYSTEM REPORT v$($script:Report.ScriptVersion) (SchemaVersion $($script:Report.SchemaVersion))")
 
         Set-Content -LiteralPath $txtPath -Value $lines -Encoding utf8
@@ -6614,6 +6711,19 @@ function Export-BravoMdReport {
             foreach ($collectionError in @($script:Report.CollectionErrors)) {
                 $escapedMessage = $collectionError.Message -replace '\|', '\|'
                 $lines.Add("| $($collectionError.Section) | $escapedMessage |")
+            }
+            $lines.Add('')
+        }
+
+        $skippedCount = @($script:Report.SkippedChecks).Count
+        if ($skippedCount -gt 0) {
+            $lines.Add("## Пропущено без прав адміністратора ($skippedCount)")
+            $lines.Add('')
+            $lines.Add('| Section | Reason | Message |')
+            $lines.Add('|---|---|---|')
+            foreach ($skipped in @($script:Report.SkippedChecks)) {
+                $escapedMessage = $skipped.Message -replace '\|', '\|'
+                $lines.Add("| $($skipped.Section) | $($skipped.Reason) | $escapedMessage |")
             }
             $lines.Add('')
         }
@@ -6719,10 +6829,65 @@ function Add-AuditError {
 
     if (-not $script:Report) { return }
 
+    # Запуск без прав адміністратора (робоча станція з обмеженими привілеями): відмова
+    # доступу або admin-only розділ - пропущена перевірка, а не помилка збору
+    # (Test-BravoElevationSkip, src/10-Core.ps1). З правами адміністратора - як раніше.
+    if (Test-BravoElevationSkip -Elevated ([bool]$script:Report.Elevated) -Section $Section -Message $Message) {
+        Add-AuditSkipped -Section $Section -Message $Message
+        return
+    }
+
     $script:Report.CollectionErrors += [PSCustomObject]@{
         Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         Section = $Section
         Message = $Message
+    }
+}
+
+function Add-AuditSkipped {
+    # Перевірка, недоступна без прав адміністратора. Не впливає на Health Score і exit
+    # code, але явно видна в усіх форматах звіту. Один запис на розділ.
+    param(
+        [string]$Section,
+        [string]$Message
+    )
+
+    if (-not $script:Report) { return }
+    if (@($script:Report.SkippedChecks | Where-Object { $_.Section -eq $Section }).Count -gt 0) { return }
+
+    $script:Report.SkippedChecks += [PSCustomObject]@{
+        Time    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Section = $Section
+        Reason  = 'RequiresElevation'
+        Message = $Message
+    }
+}
+
+function Register-BravoElevationSkippedStatus {
+    # Розділи, що вже позначають брак прав статусом Unavailable (Secure Boot, TPM,
+    # Audit policy тощо), реєструються в SkippedChecks, щоб пропуски були видні
+    # в одному місці. Статуси розділів не змінюються.
+    if (-not $script:Report -or [bool]$script:Report.Elevated) { return }
+
+    $candidates = @(
+        @{ Section = 'Security.SecureBoot'; Node = $script:Report.Security.SecureBoot },
+        @{ Section = 'Security.TPM'; Node = $script:Report.Security.TPM },
+        @{ Section = 'Security.AuditPolicy'; Node = $script:Report.Security.AuditPolicy },
+        @{ Section = 'Security.Defender'; Node = $script:Report.Security.Defender },
+        @{ Section = 'Security.PasswordPolicy'; Node = $script:Report.Security.PasswordPolicy }
+    )
+    foreach ($candidate in $candidates) {
+        $node = $candidate.Node
+        if (-not $node -or [string]$node.Status -ne 'Unavailable') { continue }
+        # Розділ уже має помилку збору (збій не через права) - не дублюємо його як пропуск.
+        if (@($script:Report.CollectionErrors | Where-Object { $_.Section -eq $candidate.Section }).Count -gt 0) { continue }
+        $errorText = if ($node.Contains('Error')) { [string]$node.Error } else { '' }
+        # AuditPolicy (auditpol) без прав адміністратора не повертає деталей помилки -
+        # для неї Unavailable без тексту теж означає брак прав.
+        if ((Test-BravoAccessDeniedMessage -Message $errorText) -or ($candidate.Section -eq 'Security.AuditPolicy' -and -not $errorText)) {
+            $message = if ($errorText) { $errorText } else { 'Недоступно без прав адміністратора.' }
+            Add-AuditSkipped -Section $candidate.Section -Message $message
+        }
     }
 }
 
@@ -7049,6 +7214,7 @@ Get-BravoUpdatesAudit
 # + Findings), export-етапи більше не можуть його змінити заднім числом,
 # тож повторний перерахунок і пов'язаний з ним ризик (self-zip race з
 # попередніх версій) став непотрібним.
+Register-BravoElevationSkippedStatus
 Update-BravoHealthScore
 
 # ============================================================
@@ -7280,6 +7446,9 @@ if ($Zip -and (Test-Path -LiteralPath $zipPath)) {
 }
 Write-Host "Оцінка стану: $($script:Report.Health.Score)/100 ($($script:Report.Health.Status))" -ForegroundColor Cyan
 Write-Host "Знахідки: $($script:Report.Health.Findings.Count); помилки збору: $($script:Report.CollectionErrors.Count); помилки експорту: $($script:Report.ExportErrors.Count)" -ForegroundColor Cyan
+if (@($script:Report.SkippedChecks).Count -gt 0) {
+    Write-Host "Обмежені права: пропущено перевірок без прав адміністратора: $(@($script:Report.SkippedChecks).Count) ($((@($script:Report.SkippedChecks) | ForEach-Object { $_.Section }) -join ', '))" -ForegroundColor Yellow
+}
 Write-Host "Час виконання: $elapsedSeconds сек" -ForegroundColor Cyan
 Write-Host ''
 
@@ -7287,6 +7456,8 @@ Write-Host ''
 # 0 = аудит успішно завершено, без помилок збору/експорту (і, у -Strict
 #     режимі, без CRITICAL Health.Status);
 # 1 = аудит завершено, але були CollectionErrors і/або ExportErrors;
+#     SkippedChecks (перевірки, недоступні без прав адміністратора) на exit code
+#     не впливають - вони видні у звіті, але не є збоєм збору;
 # 2 = фатальна неопрацьована помилка виконання (top-level trap, вище в файлі);
 # 3 = обов'язковий вихідний файл (JSON) не згенеровано;
 # 4 = лише у -Strict режимі: аудит завершено без CollectionErrors/ExportErrors,

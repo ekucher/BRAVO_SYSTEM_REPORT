@@ -362,3 +362,62 @@ function Get-BravoPublicIPv4ProviderInfo {
         }
     }
 }
+
+# --- Запуск з обмеженими привілеями (робоча станція без прав адміністратора) ---
+# Розділи, які Windows звичайному користувачу не надає, і характерні для цього
+# повідомлення (окрім загальної відмови в доступі): WSMan-провайдер без прав не
+# монтує localhost\Listener, Win32_ShadowCopy/Win32_EncryptableVolume дають
+# WBEM "Initialization failure". Інші помилки цих розділів лишаються помилками збору.
+function Get-BravoElevationOnlySections {
+    [CmdletBinding()]
+    param()
+
+    $wbemInitFailure = 'initialization\s+failure|сбой\s+инициализации|помилка\s+ініціалізації|0x80041014'
+    return [ordered]@{
+        'Security.WinRM'           = "cannot\s+find\s+path\s+'localhost\\(listener|service)|wsman"
+        'StorageDeep.ShadowCopies' = $wbemInitFailure
+        'StorageDeep.BitLocker'    = "$wbemInitFailure|invalid\s+namespace|недопустимое\s+пространство\s+имен|0x8004100e"
+    }
+}
+
+# Чиста функція: чи схоже повідомлення про помилку на відмову в доступі
+# (англійська, українська, російська локалізації Windows; E_ACCESSDENIED і
+# WBEM_E_ACCESS_DENIED). Тексти - реальні Exception.Message .NET/WMI/реєстру.
+function Test-BravoAccessDeniedMessage {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Message
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $false }
+    $patterns = @(
+        'access\s+(is\s+|was\s+)?denied',                  # Access is denied. / Access was denied.
+        'access\s+to\s+the\s+(path|registry\s+key)\b.*\bis\s+denied',  # UnauthorizedAccessException (файл/реєстр)
+        'registry\s+access\s+is\s+not\s+allowed',          # SecurityException при читанні реєстру
+        'requires\s+elevation',
+        '0x80070005', '0x80041003',                        # E_ACCESSDENIED, WBEM_E_ACCESS_DENIED
+        'відмовлено\s+в\s+доступі', 'доступ\s+заборонено',
+        'отказано\s+в\s+доступе', 'доступ\s+запрещен', 'требуется\s+повышение'
+    )
+    return $Message -match ('(?i)' + ($patterns -join '|'))
+}
+
+# Чиста функція: помилку розділу слід записати як пропущену перевірку (SkippedChecks),
+# а не як помилку збору (CollectionErrors). Лише для запуску без прав адміністратора
+# і лише для відмови в доступі або відомої сигнатури admin-only розділу: інший збій
+# (напр. вимкнена служба VSS) лишається помилкою збору. З правами адміністратора -
+# завжди помилка збору, як раніше.
+function Test-BravoElevationSkip {
+    [CmdletBinding()]
+    param(
+        [bool]$Elevated,
+        [string]$Section,
+        [AllowNull()][AllowEmptyString()][string]$Message
+    )
+
+    if ($Elevated) { return $false }
+    if (Test-BravoAccessDeniedMessage -Message $Message) { return $true }
+    $sections = Get-BravoElevationOnlySections
+    if (-not $sections.Contains($Section) -or [string]::IsNullOrWhiteSpace($Message)) { return $false }
+    return $Message -match ('(?i)' + $sections[$Section])
+}

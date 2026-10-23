@@ -59,6 +59,7 @@ function Export-BravoCsvReport {
                 [PSCustomObject]@{Parameter='Local_Admins'; Value=$script:Report.Users.LocalAdmins.Count}
                 [PSCustomObject]@{Parameter='Findings'; Value=$script:Report.Health.Findings.Count}
                 [PSCustomObject]@{Parameter='CollectionErrors'; Value=$script:Report.CollectionErrors.Count}
+                [PSCustomObject]@{Parameter='SkippedChecks'; Value=@($script:Report.SkippedChecks).Count}
             )
 
             $csvData | Export-Csv $csvPath -NoTypeInformation -Encoding utf8

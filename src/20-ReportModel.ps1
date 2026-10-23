@@ -6,7 +6,7 @@ function New-BravoReportModel {
     param()
 
 return [ordered]@{
-    SchemaVersion = '0.6.20'
+    SchemaVersion = '0.6.21'
     ScriptVersion = $ScriptVersion
     Profile = $Profile
     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -270,5 +270,9 @@ return [ordered]@{
     # самого інструмента, НЕ впливає на Health Score, але впливає на exit code.
     CollectionErrors = @()
     ExportErrors = @()
+    # SkippedChecks — перевірки, пропущені через запуск без прав адміністратора
+    # (Elevated=$false): Section/Reason='RequiresElevation'/Message. НЕ впливають на
+    # Health Score і exit code; з правами адміністратора масив завжди порожній.
+    SkippedChecks = @()
 }
 }
