@@ -615,10 +615,11 @@ function Get-BravoSecurityAudit {
                             Add-AuditFinding -Severity 'WARNING' -Category 'Security.WinRM' -Message 'WinRM CredSSP authentication увімкнено.' -Recommendation 'CredSSP дозволяє делегування креденшелів (ризик relay/pass-the-hash) — вимкніть, якщо не потрібен саме подвійний hop.'
                         }
                     } catch {
-                        # Без прав адміністратора WSMan-провайдер недоступний (Add-AuditError
-                        # запише це як SkippedChecks, не як помилку збору) - статус Unavailable.
+                        # Без прав адміністратора WSMan-провайдер недоступний: Add-AuditError запише
+                        # це як SkippedChecks (не помилку збору), і тоді статус - Unavailable.
+                        # Інший збій лишається помилкою збору зі статусом як раніше.
                         Add-AuditError -Section 'Security.WinRM' -Message $_.Exception.Message
-                        if (-not [bool]$script:Report.Elevated) { $script:Report.Security.WinRM.Status = 'Unavailable' }
+                        if (@($script:Report.SkippedChecks | Where-Object { $_.Section -eq 'Security.WinRM' }).Count -gt 0) { $script:Report.Security.WinRM.Status = 'Unavailable' }
                     }
                 } else {
                     $script:Report.Security.WinRM.Status = 'ServiceNotRunning'

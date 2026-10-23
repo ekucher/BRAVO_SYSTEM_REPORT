@@ -881,6 +881,9 @@ Describe 'Обмежені привілеї — admin-only перевірки й
 
     It 'кожен запис SkippedChecks має Section, Reason=RequiresElevation, і розділ не дублюється' {
         $skipped = @($script:LimitedReport.SkippedChecks)
+        # Deep без прав адміністратора завжди має хоча б одну admin-only перевірку
+        # (Win32_ShadowCopy недоступний звичайному користувачу) - інакше тест нічого не доводить.
+        $skipped.Count | Should -BeGreaterThan 0
         foreach ($entry in $skipped) {
             $entry.Section | Should -Not -BeNullOrEmpty
             $entry.Reason | Should -Be 'RequiresElevation'
@@ -897,7 +900,8 @@ Describe 'Обмежені привілеї — admin-only перевірки й
     }
 
     It 'пропущені перевірки видно в HTML, TXT, Markdown і CSV' {
-        if (@($script:LimitedReport.SkippedChecks).Count -gt 0) {
+        @($script:LimitedReport.SkippedChecks).Count | Should -BeGreaterThan 0
+        & {
             $html = Get-Content -LiteralPath (Get-ChildItem -LiteralPath $script:LimitedDir -Filter '*.html' -Recurse | Select-Object -First 1).FullName -Raw -Encoding UTF8
             $html | Should -Match 'table-skipped-checks'
             $txt = Get-Content -LiteralPath (Get-ChildItem -LiteralPath $script:LimitedDir -Filter '*.txt' -Recurse | Select-Object -First 1).FullName -Raw -Encoding UTF8

@@ -131,6 +131,8 @@ function Register-BravoElevationSkippedStatus {
     foreach ($candidate in $candidates) {
         $node = $candidate.Node
         if (-not $node -or [string]$node.Status -ne 'Unavailable') { continue }
+        # Розділ уже має помилку збору (збій не через права) - не дублюємо його як пропуск.
+        if (@($script:Report.CollectionErrors | Where-Object { $_.Section -eq $candidate.Section }).Count -gt 0) { continue }
         $errorText = if ($node.Contains('Error')) { [string]$node.Error } else { '' }
         # AuditPolicy (auditpol) без прав адміністратора не повертає деталей помилки -
         # для неї Unavailable без тексту теж означає брак прав.

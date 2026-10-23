@@ -456,7 +456,7 @@ function Invoke-BravoReportSanitization {
     }
     # SkippedChecks.Message - той самий $_.Exception.Message (відмова доступу може
     # містити шлях/обліковий запис), той самий підхід. Section/Reason не маскуються.
-    if ($Report.Contains('SkippedChecks') -and $Report.SkippedChecks) {
+    if ($Report.SkippedChecks) {
         foreach ($skipEntry in @($Report.SkippedChecks)) {
             if ($skipEntry.Message) { $skipEntry.Message = 'REDACTED-ERROR-MESSAGE' }
         }

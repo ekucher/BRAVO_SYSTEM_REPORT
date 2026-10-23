@@ -27,7 +27,7 @@ SchemaVersion = '0.6.21'
 | `ComputerName` | string | ім'я аудитованої машини (маскується `-Sanitize`) |
 | `Elevated` | bool | чи запущено з правами адміністратора |
 | `Status` | string | підсумковий статус: `OK`/`WARNING`/`CRITICAL` (з `Health.Status`, після `Update-BravoHealthScore`) |
-| `StatusReason` | string | короткий текст-обґрунтування статусу (`critical=N; warning=N; collectionErrors=N`) |
+| `StatusReason` | string | короткий текст-обґрунтування статусу (`critical=N; warning=N; collectionErrors=N`); `SkippedChecks` у ньому не враховуються, формат не змінився |
 | `OutputPath` | string | директорія збереження звітів |
 | `GeneratedFiles` | array\<string\> | шляхи всіх фактично створених файлів (JSON/HTML/CSV/ZIP/PDF) — джерело для ZIP-пакування |
 | `CollectionErrors` | array | помилки **збору** даних (WMI/CIM/реєстр недоступні) — властивість аудитованої машини, впливає на Health Score |

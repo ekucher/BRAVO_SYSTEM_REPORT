@@ -7,14 +7,23 @@
   (`StorageDeep.ShadowCopies`) і `Win32_EncryptableVolume` (`StorageDeep.BitLocker`) звичайному
   користувачу недоступні, і їхні відмови потрапляли в `CollectionErrors` (exit 1, мінус до Health
   Score) — хоча це властивість контексту запуску, а не збій збору чи стан машини. Тепер при
-  `Elevated=false` ці розділи й будь-яка відмова в доступі (`Test-BravoElevationSkip`,
-  `src/10-Core.ps1`) записуються в нове поле `SkippedChecks` (`Reason=RequiresElevation`), так само
+  `Elevated=false` відмова в доступі (Access denied, `Access to the path/registry key ... is denied`,
+  `Requested registry access is not allowed`, E_ACCESSDENIED/WBEM_E_ACCESS_DENIED; en/uk/ru) і
+  характерні повідомлення цих трьох розділів (`Test-BravoElevationSkip`, `src/10-Core.ps1`)
+  записуються в нове поле `SkippedChecks` (`Reason=RequiresElevation`); інші збої тих самих розділів
+  лишаються помилками збору. Так само
   як уже наявні `Unavailable`-статуси Secure Boot/TPM/Audit policy. Пропущені перевірки не впливають
   на Health Score і exit code, але явно видні в HTML (вкладка Findings), TXT, Markdown, CSV і в
   консольному підсумку; `-Sanitize` маскує їхні повідомлення. З правами адміністратора поведінка
   не змінилась. Для запуску без UAC-запиту — `-NoElevate` (README, «Робоча станція з обмеженими
-  привілеями»). Регресійне покриття: `tests/Core.Tests.ps1` (класифікація помилок),
+  привілеями»). Регресійне покриття: `tests/Core.Tests.ps1` (класифікація помилок на реальних
+  текстах), `tests/LimitedPrivileges.Tests.ps1` (маршрутизація `Add-AuditError` при
+  `Elevated=false/true`, дедуплікація, `Register-BravoElevationSkippedStatus`, Health Score,
+  TXT/Markdown), `tests/Sanitize.Tests.ps1` (маскування `SkippedChecks`),
   `tests/ExecutionContract.Tests.ps1` (Deep без прав адміністратора; TPM/WinRM-статуси).
+- **P3: тест `Network.Adapters` падав на машині з одним мережевим адаптером**
+  (`tests/ExecutionContract.Tests.ps1`) — у Windows PowerShell 5.1 один PSCustomObject не має
+  `.Count`; відфільтровані колекції тепер обгорнуто в `@()`.
 
 - **P1: Local Windows Validation після #124 падав на тесті фіналізації ZIP** (run 39861170855) —
   CI ставить найновіший Pester (`Install-Module -MinimumVersion 5.0.0`, тепер 6.2.0), а Pester 6 не
