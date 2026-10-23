@@ -95,12 +95,22 @@ function Export-BravoZipReport {
             Write-Host "  $IconError Помилка створення ZIP: $($_.Exception.Message)" -ForegroundColor Red
             return New-BravoExportResult -Type 'Zip' -Success $false -ErrorMessage $_.Exception.Message -DurationSeconds $stopwatch.Elapsed.TotalSeconds
         } finally {
-            if ($null -ne $zipArchive) { $zipArchive.Dispose() }
-            if ($null -ne $zipStream) { $zipStream.Dispose() }
+            # Кожен крок звільнення ізольовано: виняток одного кроку (напр. Dispose архіву, що дописує central
+            # directory після помилки додавання запису) не повинен пропускати наступні кроки і не повинен
+            # підміняти результат Success=$false, повернений з catch, неперехопленим винятком.
+            if ($null -ne $zipArchive) {
+                try { $zipArchive.Dispose() }
+                catch { Add-ExportError -Section 'Export.Zip' -Message "Закриття архіву: $($_.Exception.Message)" }
+            }
+            if ($null -ne $zipStream) {
+                try { $zipStream.Dispose() }
+                catch { Add-ExportError -Section 'Export.Zip' -Message "Закриття потоку ZIP: $($_.Exception.Message)" }
+            }
             # Недописаний архів без central directory не лишаємо на диску: інакше фінальний підсумок Main
             # (Test-Path $zipPath) показав би пошкоджений ZIP як створений.
             if (-not $zipFinalized -and $zipPath -and (Test-Path -LiteralPath $zipPath)) {
-                Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+                try { Remove-Item -LiteralPath $zipPath -Force -ErrorAction Stop }
+                catch { Add-ExportError -Section 'Export.Zip' -Message "Не вдалося видалити недописаний ZIP ${zipPath}: $($_.Exception.Message)" }
             }
         }
     }

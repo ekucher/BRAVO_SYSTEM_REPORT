@@ -208,19 +208,120 @@ Describe 'Export-BravoZipReport result contract' {
         # тест перевіряє саме фіналізацію (Dispose), а не додавання записів.
         $script:Report.GeneratedFiles = @()
         $script:errSections = @()
+        $script:capturedStream = $null
         Mock Add-ExportError { $script:errSections += $Section }
+        # Pester 6 не передає оригіналу виклики, що не підпали під ParameterFilter, тому потрібен default-mock.
+        # Він створює реальний об'єкт напряму через .NET (виклик New-Object, навіть module-qualified, знову потрапив би в mock)
+        # і запам'ятовує справжній FileStream,
+        # щоб перевірити закриття дескриптора після винятку в ZipArchive.Dispose().
+        Mock New-Object {
+            $obj = [System.Activator]::CreateInstance([type]$TypeName, [object[]]@($ArgumentList | ForEach-Object { $_.PSObject.BaseObject }))
+            if ($obj -is [System.IO.FileStream]) { $script:capturedStream = $obj }
+            $obj
+        }
         Mock New-Object {
             $fake = [pscustomobject]@{}
             $fake | Add-Member -MemberType ScriptMethod -Name Dispose -Value { throw 'finalize boom' }
             $fake
         } -ParameterFilter { $TypeName -eq 'System.IO.Compression.ZipArchive' }
 
+        $zipPath = Join-Path $script:outDir 'report.zip'
         $result = Export-BravoZipReport -OutputDir $script:outDir -BaseFileName 'report' -Zip $true
         $result.Success | Should -BeFalse
         $result.Error | Should -Match 'finalize boom'
         $script:errSections | Should -Contain 'Export.Zip'
-        $script:Report.GeneratedFiles | Should -Not -Contain (Join-Path $script:outDir 'report.zip')
-        Test-Path -LiteralPath (Join-Path $script:outDir 'report.zip') | Should -BeFalse
+        $script:Report.GeneratedFiles | Should -Not -Contain $zipPath
+        Test-Path -LiteralPath $zipPath | Should -BeFalse
+        # Реальний FileStream створено і закрито у finally, попри виняток у Dispose архіву (немає витоку дескриптора).
+        $script:capturedStream | Should -Not -BeNullOrEmpty
+        # Закритий FileStream повертає CanRead/CanWrite = $false (SafeFileHandle після Dispose недоступний).
+        $script:capturedStream.CanRead | Should -BeFalse
+        $script:capturedStream.CanWrite | Should -BeFalse
+        Should -Invoke New-Object -ParameterFilter { $TypeName -eq 'System.IO.Compression.ZipArchive' } -Times 1 -Exactly
+    }
+
+    It 'Після винятку фіналізації наступний експорт у той самий шлях успішний (файл не заблоковано)' {
+        $script:Report.GeneratedFiles = @()
+        Mock New-Object {
+            [System.Activator]::CreateInstance([type]$TypeName, [object[]]@($ArgumentList | ForEach-Object { $_.PSObject.BaseObject }))
+        }
+        Mock New-Object {
+            $fake = [pscustomobject]@{}
+            $fake | Add-Member -MemberType ScriptMethod -Name Dispose -Value { throw 'finalize boom' }
+            $fake
+        } -ParameterFilter { $TypeName -eq 'System.IO.Compression.ZipArchive' }
+        (Export-BravoZipReport -OutputDir $script:outDir -BaseFileName 'report' -Zip $true).Success | Should -BeFalse
+
+        # Повторний експорт з реальним ZipArchive: якби потік лишився відкритим, FileMode.Create на тому ж шляху впав би.
+        Mock New-Object { [System.Activator]::CreateInstance([type]$TypeName, [object[]]@($ArgumentList | ForEach-Object { $_.PSObject.BaseObject })) } -ParameterFilter { $TypeName -eq 'System.IO.Compression.ZipArchive' }
+        $src = Join-Path $script:outDir 'b.txt'
+        Set-Content -LiteralPath $src -Value 'retry'
+        $script:Report.GeneratedFiles = @($src)
+        $retry = Export-BravoZipReport -OutputDir $script:outDir -BaseFileName 'report' -Zip $true
+        $retry.Success | Should -BeTrue
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($retry.Path)
+        try { @($zip.Entries | ForEach-Object { $_.Name }) | Should -Contain 'b.txt' } finally { $zip.Dispose() }
+    }
+
+    It 'Реальна помилка додавання запису (вихідний файл заблоковано) -> Success=$false, потік закрито, недописаний ZIP видалено' {
+        # Справжні FileStream і ZipArchive; CreateEntryFromFile падає, бо вихідний файл відкрито з FileShare.None.
+        # Контрактна перевірка реального шляху помилки (не регресійна: Dispose порожнього архіву у finally не падає,
+        # тож цей тест проходив і до виправлення finally). Регресію finally ловить наступний тест.
+        $script:errSections = @()
+        $script:capturedStream = $null
+        Mock Add-ExportError { $script:errSections += $Section }
+        Mock New-Object {
+            $obj = [System.Activator]::CreateInstance([type]$TypeName, [object[]]@($ArgumentList | ForEach-Object { $_.PSObject.BaseObject }))
+            if ($obj -is [System.IO.FileStream]) { $script:capturedStream = $obj }
+            $obj
+        }
+        $src = Join-Path $script:outDir 'locked.txt'
+        Set-Content -LiteralPath $src -Value 'locked'
+        $script:Report.GeneratedFiles = @($src)
+        $zipPath = Join-Path $script:outDir 'report.zip'
+        $lock = [System.IO.File]::Open($src, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        try {
+            $result = Export-BravoZipReport -OutputDir $script:outDir -BaseFileName 'report' -Zip $true
+        } finally { $lock.Dispose() }
+
+        $result.Success | Should -BeFalse
+        $result.Type | Should -Be 'Zip'
+        $script:errSections | Should -Contain 'Export.Zip'
+        $script:Report.GeneratedFiles | Should -Not -Contain $zipPath
+        Test-Path -LiteralPath $zipPath | Should -BeFalse
+        $script:capturedStream | Should -Not -BeNullOrEmpty
+        $script:capturedStream.CanWrite | Should -BeFalse
+    }
+
+    It 'Помилка додавання запису, а потім виняток у Dispose архіву у finally -> функція не кидає, повертає Success=$false, потік закрито, ZIP видалено' {
+        # Fake ZipArchive: CreateEntryFromFile на ньому падає (не ZipArchive), а Dispose у finally теж кидає.
+        # До виправлення виняток із finally підміняв результат catch і пропускав закриття потоку та видалення файлу.
+        $script:errSections = @()
+        $script:capturedStream = $null
+        Mock Add-ExportError { $script:errSections += $Section }
+        Mock New-Object {
+            $obj = [System.Activator]::CreateInstance([type]$TypeName, [object[]]@($ArgumentList | ForEach-Object { $_.PSObject.BaseObject }))
+            if ($obj -is [System.IO.FileStream]) { $script:capturedStream = $obj }
+            $obj
+        }
+        Mock New-Object {
+            $fake = [pscustomobject]@{}
+            $fake | Add-Member -MemberType ScriptMethod -Name Dispose -Value { throw 'dispose in finally boom' }
+            $fake
+        } -ParameterFilter { $TypeName -eq 'System.IO.Compression.ZipArchive' }
+        $src = Join-Path $script:outDir 'c.txt'
+        Set-Content -LiteralPath $src -Value 'c'
+        $script:Report.GeneratedFiles = @($src)
+        $zipPath = Join-Path $script:outDir 'report.zip'
+
+        { $script:res = Export-BravoZipReport -OutputDir $script:outDir -BaseFileName 'report' -Zip $true } | Should -Not -Throw
+        $script:res.Success | Should -BeFalse
+        $script:res.Type | Should -Be 'Zip'
+        @($script:errSections | Where-Object { $_ -eq 'Export.Zip' }).Count | Should -BeGreaterOrEqual 2
+        $script:Report.GeneratedFiles | Should -Not -Contain $zipPath
+        Test-Path -LiteralPath $zipPath | Should -BeFalse
+        $script:capturedStream | Should -Not -BeNullOrEmpty
+        $script:capturedStream.CanWrite | Should -BeFalse
     }
 }
 

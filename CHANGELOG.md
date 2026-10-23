@@ -2,6 +2,20 @@
 
 `ScriptVersion`/`SchemaVersion` без змін (структура не персистується в report model).
 
+- **P1: Local Windows Validation після #124 падав на тесті фіналізації ZIP** (run 39861170855) —
+  CI ставить найновіший Pester (`Install-Module -MinimumVersion 5.0.0`, тепер 6.2.0), а Pester 6 не
+  передає оригіналу виклики, що не підпали під `ParameterFilter` mock-а. `New-Object
+  System.IO.FileStream` у тесті падав з "No mock for command 'New-Object' matched". Тест отримав
+  default-mock, що створює реальні об'єкти, і тепер перевіряє закриття справжнього `FileStream`.
+  Тести проходять на Pester 5.7.1 і 6.2.0.
+- **P2: `Export-BravoZipReport` втрачав результат, якщо `Dispose` падав у `finally`**
+  (`src/53-Export-Zip.ps1`) — після помилки додавання запису `ZipArchive.Dispose()` у `finally`
+  міг кинути виняток, що підміняв `Success=$false` з `catch` і пропускав закриття потоку та
+  видалення недописаного ZIP. Кожен крок звільнення тепер ізольовано і записує `ExportError`
+  `Export.Zip`. Регресійне покриття: `tests/ExportResult.Tests.ps1` (виняток `Dispose` у `finally`
+  після помилки додавання запису); додатково контрактний тест реального шляху помилки
+  (заблокований вихідний файл з реальним архівом).
+
 - **P2: ZIP-експорт повертав Success до фіналізації архіву** (`src/53-Export-Zip.ps1`) —
   `Export-BravoZipReport` повертав результат із `try`, а `ZipArchive.Dispose()`, що дописує
   central directory, виконувався пізніше у `finally`. Помилка фіналізації (напр. I/O або нестача
